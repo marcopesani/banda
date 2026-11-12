@@ -57,6 +57,15 @@ returned to and merged, at desktop and phone width.
 - [ ] GitHub's hosted server names no discussion comment's author (its answer is an id, a body and `isAnswer`), so
   there the account's own comments still wake, as by an author not known, until github-mcp-server's
   `get_discussion_comments` selects `author { login }` and GitHub deploys it (#38)
+- [ ] GitHub's hosted server at the shipped URL (`/mcp/`) lists its default toolsets alone, 49 tools without
+  `get_discussion`, `get_discussion_comments`, `actions_get`, `actions_list` or `get_notification_details`: a
+  discussion, a workflow run, a check run's job and a notification cannot be followed through the shipped connection,
+  and the refusal says "GitHub is not connected for Mara" though it is. `/mcp/x/all` lists all 118 (a Connections
+  change) (#38)
+- [ ] A read's answer is cut at 50,000 characters (`MAX_RESULT_CHARS`), so a discussion's page of a hundred comments
+  with their bodies (150 KB on a busy one) does not parse and the optional read is left unanswered without a word: the
+  watch never sees a comment there. Fields, a smaller page or a larger bound for reads, and a health line for a read
+  that keeps failing (#38)
 - [ ] The Google kinds' changes against real accounts: whether a rename or a share moves Drive's `modifiedTime`,
   whether a deleted (not cancelled) event ends its watch, label names for user labels, a calendar's upcoming events
   (needs a sync token, not a moving window); a contact followed (the pass's account had no saved contacts); a
