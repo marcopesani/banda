@@ -57,10 +57,6 @@ returned to and merged, at desktop and phone width.
 - [ ] GitHub's hosted server names no discussion comment's author (its answer is an id, a body and `isAnswer`), so
   there the account's own comments still wake, as by an author not known, until github-mcp-server's
   `get_discussion_comments` selects `author { login }` and GitHub deploys it (#38)
-- [ ] A repository's push says "the default branch", not its name: none of its four reads answers it, and the listed
-  reads that do (`get_repository_tree` with no `tree_sha`, its `tree_sha`; `search_repositories` for
-  `repo:{owner}/{repo}`, its `default_branch`, on the search quota) would be a fifth, past the four a kind may declare;
-  a fifth read carried a day by `unless`, or the name kept from the first look, is the owner's call (#38)
 - [ ] The Google kinds' changes against real accounts: whether a rename or a share moves Drive's `modifiedTime`,
   whether a deleted (not cancelled) event ends its watch, label names for user labels, a calendar's upcoming events
   (needs a sync token, not a moving window); a contact followed (the pass's account had no saved contacts); a
