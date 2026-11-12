@@ -39,7 +39,8 @@ for (const width of [390, 1440]) {
 			// every file once in the list; the hero's shortcuts repeat some, and are checked like the rest below
 			expect(
 				await page.run(`new Set([...document.querySelectorAll('a[data-file]')].map((a) => a.dataset.file)).size`),
-			).toBe(13);
+			).toBe(11);
+			expect(await page.run(`document.querySelectorAll('a[data-file*="/mac/x64/"]').length`)).toBe(0);
 			expect(
 				await page.run(
 					`[...document.querySelectorAll('a[data-file]')].every(a => a.href.includes('/releases/download/') && a.getBoundingClientRect().height > 0)`,
