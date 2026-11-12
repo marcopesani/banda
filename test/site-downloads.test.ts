@@ -54,11 +54,13 @@ describe("landing downloads", () => {
 				names.filter((name) => !name.includes("android")),
 			),
 			release("phone2", "2026-11-03", ["banda-2-android-arm64.apk"]),
+			release("old-intel", "2026-10-01", ["banda-1-mac-x64.dmg", "banda-cli-1-mac-x64.tar.gz"]),
 		];
 		const result = updateDownloads(html, releases);
 		const links = [...result.matchAll(/data-file="([^"]+)" href="([^"]+)"/g)];
 		// every file once in the list, and each shortcut to one (the hero's) follows the release too
-		expect(new Set(links.map(([, key]) => key)).size).toBe(13);
+		expect(new Set(links.map(([, key]) => key)).size).toBe(11);
+		expect(result).not.toContain("mac-x64");
 		for (const [, key, url] of links)
 			expect(url).toContain(`/releases/download/${key.startsWith("phone") ? "phone2" : "v2"}/`);
 		expect(result).toContain("/v2/SHA256SUMS");
