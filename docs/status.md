@@ -9,6 +9,12 @@ on a local Ollama (qwen3:4b) answered through the app; Ollama's default 4,096-to
 silently, so a model's context is now what the server runs it with, at least 16,384. Hosted providers, OAuth sign-ins,
 LM Studio, llama.cpp and vLLM are not yet run live; owner acceptance remains.
 
+Permissions now belong to the approved agent across its chats, including hour and always grants. The shared computer
+remains. Ordinary checks and adversarial review pass. Staged-app use on the macOS ARM64 native VM passes at desktop
+and phone widths, including same-agent reuse and pending approvals across direct and group chats, with another agent
+still asking. Hour/always fixtures use the owner API because the approval card offers task scope only. Owner acceptance
+remains open.
+
 The bundled computer is in `prototype/microvm-box`. The macOS ARM64 candidate has packaged desktop/phone-width
 walkthrough evidence, including lazy browser preparation, guarded sends and restart persistence. Linux x64 and
 ARM64 packaging and adapter work is under local verification; a native KVM run remains before either is accepted.
