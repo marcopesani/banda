@@ -70,7 +70,7 @@ async function setUp() {
 	const boxed = () => readFile(join(box.workspace, watchPath("banda-142")), "utf8");
 	const close = async () => {
 		await harness.close(context);
-		box.close();
+		await box.close();
 	};
 	/** The agent's `watch` call, from a chat of the lead's. */
 	const watch = async (args: JsonObject) => {
