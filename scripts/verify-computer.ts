@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
+import { BrowserPreparation } from "../src/box/browser-preparation.ts";
 import { nativeComputerReply } from "../test/fixtures/native-computer-model.ts";
 import { BROWSERS, hold } from "../test/slots.ts";
 import { hasChrome, withPage } from "../test/smoke/chrome.ts";
@@ -56,6 +57,7 @@ const runtimeManifestSha256 = createHash("sha256")
 	.update(await readFile(join(app, "computer/manifest.json")))
 	.digest("hex");
 const publicBrowserDelivery = process.env.BANDA_VERIFY_PUBLIC_BROWSER === "1";
+const publicFirstBrowserWaitMs = 15 * 60_000 + 120_000;
 const archive = join(root, "..", new URL(assets.browser.url).pathname.split("/").at(-1) ?? "missing-browser.tar");
 const nativeFetch = globalThis.fetch;
 let downloads = 0;
@@ -175,9 +177,53 @@ try {
 			why: Type.Optional(Type.String()),
 			box: Type.String(),
 			network: Type.String(),
-			browser: Type.Object({ state: Type.String() }),
+			browser: BrowserPreparation,
 		}),
 	});
+	const computers = async function* (signal: AbortSignal) {
+		const response = await fetch(`${origin}/api/events`, { headers, signal });
+		assert.ok(response.ok, `/events: ${response.status}: ${response.ok ? "" : await response.text()}`);
+		assert.ok(response.body !== null, "Native computer readiness requires the shell event stream.");
+		let buffer = "";
+		for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+			buffer += chunk;
+			for (let end = buffer.indexOf("\n\n"); end !== -1; end = buffer.indexOf("\n\n")) {
+				const frame = buffer.slice(0, end);
+				buffer = buffer.slice(end + 2);
+				if (!frame.startsWith("data: ")) continue;
+				const event: unknown = JSON.parse(frame.slice("data: ".length));
+				if (!Value.Check(Event, event) || event.type !== "computer") continue;
+				assert.ok(Value.Check(Computer, event), `Invalid native computer event: ${JSON.stringify(event)}`);
+				yield event.computer;
+			}
+		}
+	};
+	const browserProgress: { at: string; computer: Static<typeof Computer>["computer"] }[] = [];
+	let received = 0;
+	const observeBrowser = async (signal: AbortSignal): Promise<never> => {
+		let previousPhase = "";
+		let previousAt = 0;
+		for await (const computer of computers(signal)) {
+			const browser = computer.browser;
+			const downloading = browser.state === "preparing" && browser.phase === "downloading";
+			if (downloading) {
+				assert.equal(browser.total, assets.browser.bytes, "Browser progress must describe the pinned archive.");
+				assert.ok(browser.received >= received && browser.received <= browser.total);
+				received = browser.received;
+			}
+			const phase = JSON.stringify([computer.state, browser.state, browser.state === "preparing" && browser.phase]);
+			const now = Date.now();
+			if (phase !== previousPhase || now - previousAt >= 10_000 || (downloading && received === browser.total)) {
+				browserProgress.push({ at: new Date(now).toISOString(), computer });
+				if (browserProgress.length > 128) browserProgress.shift();
+				await writeFile(join(output, "browser-progress.json"), JSON.stringify(browserProgress, null, 2));
+				previousPhase = phase;
+				previousAt = now;
+			}
+			assert.notEqual(browser.state, "failed", `Native browser preparation failed: ${JSON.stringify(browser)}`);
+		}
+		throw new Error("Native computer event stream ended during the public browser wait.");
+	};
 	const startup = new AbortController();
 	let computer: Static<typeof Computer>["computer"] | undefined;
 	const deadline = setTimeout(
@@ -188,32 +234,19 @@ try {
 		120_000,
 	);
 	try {
-		const response = await fetch(`${origin}/api/events`, { headers, signal: startup.signal });
-		assert.ok(response.ok, `/events: ${response.status}: ${response.ok ? "" : await response.text()}`);
-		assert.ok(response.body !== null, "Native computer readiness requires the shell event stream.");
-		let buffer = "";
-		ready: for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
-			buffer += chunk;
-			for (let end = buffer.indexOf("\n\n"); end !== -1; end = buffer.indexOf("\n\n")) {
-				const frame = buffer.slice(0, end);
-				buffer = buffer.slice(end + 2);
-				if (!frame.startsWith("data: ")) continue;
-				const event: unknown = JSON.parse(frame.slice("data: ".length));
-				if (!Value.Check(Event, event) || event.type !== "computer") continue;
-				assert.ok(Value.Check(Computer, event), `Invalid native computer event: ${JSON.stringify(event)}`);
-				computer = event.computer;
-				log.push(`qualification: computer ${JSON.stringify(computer)}`);
-				assert.notEqual(
-					computer.state,
-					"offline",
-					`Native computer is offline: ${computer.why ?? JSON.stringify(computer)}`,
-				);
-				assert.equal(computer.box, "microvm");
-				assert.equal(computer.network, "guarded");
-				if (computer.state === "up") {
-					assert.equal(computer.browser.state, "idle");
-					break ready;
-				}
+		for await (const current of computers(startup.signal)) {
+			computer = current;
+			log.push(`qualification: computer ${JSON.stringify(computer)}`);
+			assert.notEqual(
+				computer.state,
+				"offline",
+				`Native computer is offline: ${computer.why ?? JSON.stringify(computer)}`,
+			);
+			assert.equal(computer.box, "microvm");
+			assert.equal(computer.network, "guarded");
+			if (computer.state === "up") {
+				assert.equal(computer.browser.state, "idle");
+				break;
 			}
 		}
 		assert.equal(
@@ -295,10 +328,23 @@ try {
 				await page.run("document.querySelector('button[aria-label=Send]').click()");
 				await page.until(`${newestOwner} > ${before}`);
 				const after = await page.run<number>(newestOwner);
-				await page.until(
-					`[...document.querySelectorAll('[data-message-bubble]:not([data-mine])')].some(el=>Number(el.closest('[data-entry]')?.getAttribute('data-entry')??0)>${after} && el.innerText.includes(${JSON.stringify(answer)}))`,
-					120_000,
-				);
+				const publicFirstBrowser = publicBrowserDelivery && width === 1440 && answer === "Example Domain";
+				const watching = new AbortController();
+				const observed = publicFirstBrowser ? observeBrowser(watching.signal) : undefined;
+				try {
+					await Promise.race([
+						page.until(
+							`[...document.querySelectorAll('[data-message-bubble]:not([data-mine])')].some(el=>Number(el.closest('[data-entry]')?.getAttribute('data-entry')??0)>${after} && el.innerText.includes(${JSON.stringify(answer)}))`,
+							publicFirstBrowser ? publicFirstBrowserWaitMs : 120_000,
+						),
+						...(observed === undefined ? [] : [observed]),
+					]);
+					if (publicFirstBrowser)
+						assert.ok(received > 0, "Public browser preparation requires observed byte progress.");
+				} finally {
+					watching.abort();
+					await observed?.catch(() => undefined);
+				}
 				if (answer === "native-computer-verified") {
 					await page.until(
 						`[...document.querySelectorAll('[data-message-bubble]:not([data-mine])')].some(el=>Number(el.closest('[data-entry]')?.getAttribute('data-entry')??0)>${after} && el.innerText.includes('Held, not sent: POST'))`,
