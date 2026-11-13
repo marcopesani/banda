@@ -15,6 +15,11 @@ and phone widths, including same-agent reuse and pending approvals across direct
 still asking. Hour/always fixtures use the owner API because the approval card offers task scope only. Owner acceptance
 remains open.
 
+General shows shared browser preparation, verified-download progress, safe failures and an explicit retry, separately
+from running pages. Opening Settings leaves browser preparation lazy. Ordinary backend checks and desktop/phone
+walkthroughs against throwaway daemons pass; independent review found no reproduced blocker. Exact packaged native
+qualification, public asset delivery and owner review remain open.
+
 Replacement-sign-in authority is implemented for connection drafts and reusable permissions. Ordinary tests and
 desktop/phone browser walkthroughs against a throwaway daemon pass; independent review findings are fixed. CI-only
 replacement publication and replay fault scenarios are authored but unrun. Owner acceptance remains open.
