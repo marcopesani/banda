@@ -15,6 +15,11 @@ and phone widths, including same-agent reuse and pending approvals across direct
 still asking. Hour/always fixtures use the owner API because the approval card offers task scope only. Owner acceptance
 remains open.
 
+Retained proxy requests now recover without another command, into a once-only owner approval or an explicit not-sent
+resolution. Ordinary checks, typecheck, build and independent review pass after rebasing onto main. Native macOS ARM64
+restart walkthroughs pass at desktop and phone widths. Owner acceptance remains open. CI-only receipt fault scenarios
+are authored but unrun.
+
 The bundled computer is in `prototype/microvm-box`. The macOS ARM64 candidate has packaged desktop/phone-width
 walkthrough evidence, including lazy browser preparation, guarded sends and restart persistence. Linux x64 and
 ARM64 packaging and adapter work is under local verification; a native KVM run remains before either is accepted.
