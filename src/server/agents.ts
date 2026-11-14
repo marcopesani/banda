@@ -26,6 +26,7 @@ import {
 	type AgentPublicationPoint,
 	AgentPublications,
 	agentPublicationView,
+	agentWorkingBase,
 	finishAgentPublication,
 	queueAgentPublication,
 	recoverAgentPublications,
@@ -254,8 +255,7 @@ export async function decline(
 ): Promise<AgentView[]> {
 	if (!AGENT_NAME.test(name)) throw new BadRequest(`"${name}" is not an agent name`);
 	const file = (await harness.snapshot(Accepted, ctx))?.files[agentPath(name)];
-	const box = (await boxFiles(workspace, ctx)).files.get(name);
-	const workingBase = box === undefined ? null : "text" in box ? shaOf(box.text) : "unreadable";
+	const workingBase = await agentWorkingBase(workspace, name, ctx);
 	// a file with no readable text has no hash to show, so the owner who reviewed it sent none
 	const reviewed =
 		reviewedSha === null ? workingBase === null || workingBase === "unreadable" : reviewedSha === workingBase;
@@ -310,8 +310,7 @@ export async function save(
 	const parsed = check(workspace, name, text);
 	if ("errors" in parsed) throw new BadRequest(parsed.errors.join("\n"));
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files[agentPath(name)];
-	const box = (await boxFiles(workspace, ctx)).files.get(name);
-	const boxSha = box === undefined ? null : "text" in box ? shaOf(box.text) : "unreadable";
+	const boxSha = await agentWorkingBase(workspace, name, ctx);
 	if (base === null) {
 		if (accepted !== undefined) throw new BadRequest(`there is already an agent named ${name}`, 409);
 		// no accepted file: the box may hold an unaccepted proposal, which the owner's reviewed version supersedes
