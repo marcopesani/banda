@@ -2,6 +2,7 @@
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createRegistry } from "@earendil-works/pi-durable";
+import { type ExecutionEnv, FileError } from "@earendil-works/pi-durable/env";
 import { describe, expect, it } from "vitest";
 import { openBox } from "../src/box/box.ts";
 import { Accepted, agentPath, LEAD_TEXT } from "../src/core/agents.ts";
@@ -125,6 +126,49 @@ describe("seeding a new box with the accepted agents", () => {
 			await seed(harness, flaky);
 			expect(await read(workspace, agentPath("sancho"))).toBe(LEAD_TEXT);
 			expect(await read(workspace, agentPath("mira"))).toContain("Be practical.");
+		} finally {
+			await close();
+		}
+	});
+
+	it("is not done while the box refuses the writes, so nothing unwritten is offered as removed", async () => {
+		const { harness, workspace, close } = await fresh();
+		try {
+			await save(
+				harness,
+				workspace,
+				"mira",
+				"---\ndescription: Plans trips\n---\nBe practical.\n",
+				null,
+				async () => {},
+			);
+			await seed(harness, workspace);
+			await rm(join(workspace.root, "agents"), { recursive: true });
+			let refusing = true;
+			const env = workspace.env();
+			const refused = new Proxy(env, {
+				get(target, key) {
+					if (key === "createDir") {
+						const createDir: ExecutionEnv["createDir"] = async (path, options, ctx) =>
+							refusing && path.includes("/.banda-publications")
+								? { ok: false, error: new FileError("unknown", "the disk dropped", path) }
+								: target.createDir(path, options, ctx);
+						return createDir;
+					}
+					const value: unknown = Reflect.get(target, key, target);
+					return typeof value === "function" ? value.bind(target) : value;
+				},
+			});
+			const dropping: Workspace = { ...workspace, env: () => refused };
+			await expect(seed(harness, dropping)).rejects.toThrow(/not written to the box yet/);
+			expect((await harness.snapshot(Accepted, context))?.seeded).toBeUndefined();
+			expect((await agents(harness, workspace)).every((row) => row.change === undefined)).toBe(true);
+			await expect(accept(harness, workspace, "mira", null, async () => {})).rejects.toThrow(/not in the box yet/);
+			refusing = false;
+			await seed(harness, dropping);
+			expect(await read(workspace, agentPath("sancho"))).toBe(LEAD_TEXT);
+			expect(await read(workspace, agentPath("mira"))).toContain("Be practical.");
+			expect((await harness.snapshot(Accepted, context))?.seeded).toBe(true);
 		} finally {
 			await close();
 		}
