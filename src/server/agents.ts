@@ -24,6 +24,7 @@ import { sizeOf } from "../core/blobs.ts";
 import { context } from "../core/store.ts";
 import {
 	type AgentPublicationPoint,
+	AgentPublications,
 	agentPublicationView,
 	finishAgentPublication,
 	queueAgentPublication,
@@ -353,15 +354,26 @@ export async function seed(harness: Harness, workspace: Workspace, ctx: Context 
 			delete (await tx.doc(Accepted)).seeded;
 		}, ctx);
 	const { files: boxed } = await boxFiles(workspace, ctx);
+	const pending = async (name: string) => {
+		const publications = await harness.snapshot(AgentPublications, ctx);
+		const operation = publications?.operations[String(publications.current[name])];
+		return operation?.state.kind === "pending" ? operation : undefined;
+	};
+	const unwritten: string[] = [];
 	for (const [path, file] of Object.entries(doc?.files ?? {})) {
 		const name = /^agents\/(.+)\.md$/.exec(path)?.[1];
-		if (name !== undefined && !boxed.has(name)) {
+		if (name === undefined || boxed.has(name)) continue;
+		// a write the box refused is still this one, tried again above: never one more operation for each attempt
+		if ((await pending(name))?.file?.sha !== file.sha) {
 			await harness.commit(async (tx) => {
 				await queueAgentPublication(tx, { name, file, base: file.sha, workingBase: null });
 			}, ctx);
 			await finishAgentPublication(harness, workspace, name, ctx);
 		}
+		if ((await pending(name)) !== undefined) unwritten.push(agentPath(name));
 	}
+	// a publication keeps a write the box refused for later and says nothing: the box is not seeded until none is left
+	if (unwritten.length > 0) throw new Error(`${unwritten.join(", ")} not written to the box yet`);
 	await harness.commit(async (tx) => {
 		(await tx.doc(Accepted)).seeded = true;
 	}, ctx);
