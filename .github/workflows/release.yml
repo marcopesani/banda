@@ -263,7 +263,7 @@ jobs:
       - name: Install the startup syscall tracer
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends strace
+          sudo apt-get install --yes --no-install-recommends strace acl
       - name: Verify Linux syscall trace transport
         run: |
           node --input-type=module <<'NODE'
@@ -320,8 +320,117 @@ jobs:
             sudo setfacl -m "u:$(id -u):rw" /dev/kvm
           fi
           test -r /dev/kvm && test -w /dev/kvm
-      - name: Capture startup evidence while preserving the original failure
-        run: node scripts/diagnose-linux-start.ts --out "$RUNNER_TEMP/native-start-diagnostic" --run
+      - name: Compare temporary ACL and activated KVM group access
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync, spawnSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+          import { homedir } from 'node:os';
+          import { join } from 'node:path';
+          import { Type } from '@earendil-works/pi-ai';
+          import { Value } from 'typebox/value';
+          import { assertDiagnosticIdentity, assertKvmGroup, diagnosticFile, kvmDiagnostics, parseDiagnosticIdentity, parseDiagnosticResult } from './scripts/native-diagnostics.ts';
+          const DiagnosticCompletion = Type.Object({
+            status: Type.Union([Type.Integer(), Type.Null()]),
+            signal: Type.Union([Type.String(), Type.Null()]),
+            launchError: Type.Union([Type.String(), Type.Null()]),
+          });
+          const source = process.cwd();
+          const release = join(source, 'release/banda');
+          const node = join(release, 'node/node');
+          const output = join(process.env.RUNNER_TEMP, 'native-start-diagnostic');
+          mkdirSync(output, { mode: 0o700 });
+          const save = (name, value) => writeFileSync(join(output, name), JSON.stringify(value, null, 2));
+          const manifestHash = () => createHash('sha256').update(readFileSync(join(release, 'app/computer/manifest.json'))).digest('hex');
+          const aggregate = {
+            qualification: false, sourceCommit: process.env.GITHUB_SHA, runtimeManifestSha256: manifestHash(),
+            classification: 'inconclusive', evidenceComplete: false, arms: [],
+            inferenceLimit: 'The group arm also crosses sudo policy. Retained process status may reveal policy differences. This comparison cannot identify an ACL writer or qualify Linux.',
+          };
+          const environment = ['PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', `HOME=${homedir()}`, 'LANG=C.UTF-8',
+            'CI=true', `BANDA_RELEASE_ROOT=${release}`, `GITHUB_SHA=${aggregate.sourceCommit}`];
+          const wrapper = `
+            import assert from 'node:assert/strict';
+            import { spawnSync } from 'node:child_process';
+            import { readFileSync, writeFileSync } from 'node:fs';
+            import { join } from 'node:path';
+            import { pathToFileURL } from 'node:url';
+            const [source, output, arm, group] = process.argv.slice(1);
+            const { assertDiagnosticIdentity, diagnosticFile, parseDiagnosticIdentity } = await import(pathToFileURL(join(source, 'scripts/native-diagnostics.ts')).href);
+            const status = await diagnosticFile('/proc/self/status');
+            writeFileSync(join(output, arm + '-identity.json'), JSON.stringify({ status }, null, 2));
+            assert.equal(status.state, 'read');
+            const identity = parseDiagnosticIdentity(status.text);
+            writeFileSync(join(output, arm + '-identity.json'), JSON.stringify({ status, identity }, null, 2));
+            const expected = JSON.parse(readFileSync(join(output, 'runner-identity.json'), 'utf8'));
+            assertDiagnosticIdentity(identity, expected.identity, group === '' ? undefined : Number(group));
+            const child = spawnSync(process.execPath, [join(source, 'scripts/diagnose-linux-start.ts'), '--out', join(output, arm), '--run'], { stdio: 'inherit' });
+            writeFileSync(join(output, arm + '-diagnostic-completion.json'), JSON.stringify({
+              status: child.status, signal: child.signal, launchError: child.error?.message ?? null,
+            }, null, 2));
+            if (child.error) console.error(child.error);
+            process.exit(child.status ?? 1);
+          `;
+          let armAExit = 1;
+          try {
+            assert.equal(execFileSync('/usr/bin/git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), aggregate.sourceCommit);
+            const status = await diagnosticFile('/proc/self/status');
+            assert.equal(status.state, 'read');
+            const identity = parseDiagnosticIdentity(status.text);
+            assertDiagnosticIdentity(identity, identity);
+            save('runner-identity.json', { status, identity });
+            const runner = execFileSync('/usr/bin/id', ['-un'], { encoding: 'utf8' }).trim();
+            assert.equal(Number(execFileSync('/usr/bin/id', ['-u', runner], { encoding: 'utf8' }).trim()), identity.uid);
+            assert.equal(Number(execFileSync('/usr/bin/id', ['-g', runner], { encoding: 'utf8' }).trim()), identity.gid);
+            const run = (arm, group) => {
+              assert.equal(manifestHash(), aggregate.runtimeManifestSha256);
+              const args = [...environment, node, '--input-type=module', '-e', wrapper, source, output, arm, group === undefined ? '' : String(group)];
+              const stdout = openSync(join(output, arm + '-stdout.log'), 'wx', 0o600);
+              const stderr = openSync(join(output, arm + '-stderr.log'), 'wx', 0o600);
+              let child;
+              try {
+                child = group === undefined
+                  ? spawnSync('/usr/bin/env', ['-i', ...args], { stdio: ['ignore', stdout, stderr] })
+                  : spawnSync('/usr/bin/sudo', ['-n', '-u', runner, '--', '/usr/bin/env', '-i', ...args], { stdio: ['ignore', stdout, stderr] });
+              } finally { closeSync(stdout); closeSync(stderr); }
+              const wrapperCompletion = { status: child.status, signal: child.signal, launchError: child.error?.message ?? null };
+              const entry = { arm, diagnosticCompletion: { state: 'unavailable' }, wrapperCompletion, originalFailure: { state: 'unavailable' }, startup: 'unknown', evidenceComplete: false };
+              aggregate.arms.push(entry);
+              save(arm + '-exit.json', { diagnosticCompletion: entry.diagnosticCompletion, wrapperCompletion });
+              const completion = JSON.parse(readFileSync(join(output, arm + '-diagnostic-completion.json'), 'utf8'));
+              assert.ok(Value.Check(DiagnosticCompletion, completion), 'Invalid diagnostic completion record.');
+              entry.diagnosticCompletion = completion;
+              if (arm === 'arm-a') armAExit = completion.status ?? 1;
+              save(arm + '-exit.json', { diagnosticCompletion: completion, wrapperCompletion });
+              const parsed = parseDiagnosticResult(JSON.parse(readFileSync(join(output, arm, 'result.json'), 'utf8')), aggregate);
+              Object.assign(entry, { originalFailure: parsed.result.originalFailure, startup: parsed.startup, evidenceComplete: parsed.evidenceComplete, cleanup: parsed.result.cleanup });
+              assert.ok(Number.isInteger(child.status) && child.signal === null && !child.error, 'Diagnostic wrapper or sudo did not complete normally.');
+              assert.ok(Number.isInteger(completion.status) && completion.signal === null && completion.launchError === null, 'Diagnostic process did not complete normally.');
+              assert.ok(parsed.evidenceComplete, 'Diagnostic evidence is partial; no further arm is admitted.');
+              return parsed.result;
+            };
+            const a = run('arm-a');
+            assert.ok(a.originalFailure !== null, 'Arm A did not reproduce a startup failure.');
+            const device = await kvmDiagnostics();
+            save('before-group-grant.json', device);
+            const gid = assertKvmGroup(device, execFileSync('/usr/bin/getent', ['group', 'kvm'], { encoding: 'utf8', timeout: 5000, maxBuffer: 64 << 10, killSignal: 'SIGKILL' }));
+            execFileSync('/usr/bin/sudo', ['-n', '/usr/sbin/usermod', '-aG', 'kvm', runner], { stdio: 'inherit', timeout: 5000, killSignal: 'SIGKILL' });
+            const b = run('arm-b', gid);
+            assert.notEqual(a.home, b.home);
+            assert.notEqual(a.cache, b.cache);
+            for (const key of ['binary', 'imageRef', 'configDigest']) assert.equal(a.owner[key], b.owner[key]);
+            aggregate.classification = b.originalFailure === null ? 'arm-a-failed-arm-b-started' : 'both-arms-failed';
+            aggregate.evidenceComplete = true;
+          } catch (error) {
+            aggregate.inconclusiveReason = String(error);
+            console.error(error);
+          } finally {
+            save('comparison.json', aggregate);
+            process.exitCode = armAExit || 1;
+          }
+          NODE
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
