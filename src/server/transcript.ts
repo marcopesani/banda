@@ -11,6 +11,7 @@ import {
 	getCurrentTools,
 	type Message,
 	type Models,
+	type ToolResultMessage,
 	type Usage,
 } from "@earendil-works/pi-ai";
 import {
@@ -137,15 +138,17 @@ const blockOf = (block: AssistantMessage["content"][number]): Block =>
 			: { type: "tool", text: "", call: { id: block.id, name: block.name, args: block.arguments } };
 
 /**
- * A result's text without the block pi-durable appends to tell the model its diagnostics, which show as notes of their
- * own: that block exactly, rebuilt from the entry's diagnostics, at the end. A `<harness>` tag anywhere else is the
- * tool's own output, which the owner sees as the model does.
+ * pi-durable appends diagnostics as a separate final text block. They show as notes here, while every byte of the
+ * tool's own blocks stays intact, including trailing newlines and diagnostic-looking text.
  */
-function withoutRemarks(text: string, diagnostics: readonly { severity?: unknown; message?: unknown }[]): string {
-	if (diagnostics.length === 0) return text;
+function withoutRemarks(
+	content: Readonly<ToolResultMessage["content"]>,
+	diagnostics: readonly { severity?: unknown; message?: unknown }[],
+): string {
+	if (diagnostics.length === 0) return textOf(content);
 	const block = `<harness>\n${diagnostics.map((d) => `[${String(d.severity)}] ${String(d.message)}`).join("\n")}\n</harness>`;
-	if (!text.endsWith(block)) return text;
-	return text.slice(0, -block.length).replace(/\n$/, "");
+	const last = content.at(-1);
+	return textOf(last?.type === "text" && last.text === block ? content.slice(0, -1) : content);
 }
 
 /** The daemon's tools that name their subject in a receipt (`Receipt`), by the kind each names. */
@@ -443,7 +446,7 @@ export function itemOf(entry: EntryRecord): Item | undefined {
 			role: "tool",
 			call: message.toolCallId,
 			name: message.toolName,
-			text: withoutRemarks(textOf(message.content), Array.isArray(diagnostics) ? diagnostics : []),
+			text: withoutRemarks(message.content, Array.isArray(diagnostics) ? diagnostics : []),
 			error: message.isError,
 			at: message.timestamp,
 			...(typeof message.durationMs === "number" ? { durationMs: message.durationMs } : {}),
