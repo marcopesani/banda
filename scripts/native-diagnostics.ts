@@ -114,10 +114,27 @@ export function assertDiagnosticIdentity(actual: unknown, expected: unknown, sup
 	);
 	for (const key of ["uid", "euid", "savedUid", "fsuid", "gid", "egid", "savedGid", "fsgid"] as const)
 		assert.equal(actual[key], expected[key], `Runner ${key} changed.`);
-	for (const key of ["inherited", "permitted", "effective", "ambient"] as const)
+	for (const key of ["inherited", "permitted", "effective", "ambient"] as const) {
+		assert.match(expected.capabilities[key], /^0+$/, `Original runner ${key} capabilities must be empty.`);
 		assert.match(actual.capabilities[key], /^0+$/, `Runner ${key} capabilities must be empty.`);
+	}
+	assert.equal(
+		BigInt(`0x${actual.capabilities.bounding}`),
+		BigInt(`0x${expected.capabilities.bounding}`),
+		"Runner bounding capabilities changed.",
+	);
 	if (supplementaryGid !== undefined)
-		assert.ok(supplementaryGid > 0 && actual.groups.includes(supplementaryGid), "KVM supplementary group is inactive.");
+		assert.ok(
+			Number.isSafeInteger(supplementaryGid) && supplementaryGid > 0 && supplementaryGid <= 4294967295,
+			"Invalid KVM supplementary group.",
+		);
+	const groups = new Set(expected.groups);
+	if (supplementaryGid !== undefined) groups.add(supplementaryGid);
+	assert.deepEqual(
+		[...new Set(actual.groups)].sort((a, b) => a - b),
+		[...groups].sort((a, b) => a - b),
+		"Runner supplementary groups must equal the original set plus canonical KVM.",
+	);
 }
 
 export function diagnosticAcl(path: string): Static<typeof BoundedObservation> {
