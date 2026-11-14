@@ -389,6 +389,25 @@ it("admits only the root-owned canonical KVM character device with effective gro
 		expect(() => assertKvmGroup(kvm, group)).toThrow();
 });
 
+it("permits only the original supplementary group set plus canonical KVM and an unchanged bounding set", () => {
+	const activated = { ...identity, groups: [108, 1001, 118] };
+	expect(() => assertDiagnosticIdentity(activated, identity, 108)).not.toThrow();
+	expect(() => assertDiagnosticIdentity(identity, identity, 118)).not.toThrow();
+	for (const changed of [
+		{ ...activated, groups: [108, 118] },
+		{ ...activated, groups: [108, 1001, 118, 999] },
+		{ ...activated, capabilities: { ...identity.capabilities, bounding: "0000000000000000" } },
+		{ ...activated, capabilities: { ...identity.capabilities, bounding: "ffffffffffffffff" } },
+	])
+		expect(() => assertDiagnosticIdentity(changed, identity, 108)).toThrow();
+	expect(() => assertDiagnosticIdentity({ ...identity, groups: [...identity.groups, 999] }, identity)).toThrow();
+	const privilegedBaseline = {
+		...identity,
+		capabilities: { ...identity.capabilities, permitted: "0000000000000001" },
+	};
+	expect(() => assertDiagnosticIdentity(activated, privilegedBaseline, 108)).toThrow();
+});
+
 it("records inaccessible device and status observations without opening the host device", async () => {
 	const root = await home();
 	const result = await kvmDiagnostics({ proc: join(root, "proc"), dev: join(root, "dev") });
