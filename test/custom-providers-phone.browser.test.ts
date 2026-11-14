@@ -66,19 +66,6 @@ const fits = `(() => {
 })()`;
 const row = (id: string) => `document.querySelector('[data-custom-provider="${id}"]')`;
 
-async function click(page: Page, expression: string) {
-	await page.until(expression);
-	await page.run(`(${expression}).scrollIntoView({block:'center'})`);
-	await page.until(
-		`(() => {const el=${expression}; const moving=el.closest('[role="dialog"],[role="alertdialog"]'); return !moving || moving.getAnimations({subtree:true}).every(a => a.playState !== 'running');})()`,
-	);
-	const point = await page.run<{ x: number; y: number }>(
-		`(() => {const el=${expression}; const r=el.getBoundingClientRect(); const x=r.x+r.width/2,y=r.y+r.height/2; if(!el.contains(document.elementFromPoint(x,y))) throw new Error('Control is not hit-testable: '+el.outerHTML.slice(0,160)); return {x,y};})()`,
-	);
-	await page.input("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
-	await page.input("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
-}
-
 async function fill(page: Page, expression: string, value: string) {
 	await page.until(expression);
 	await page.run(
@@ -152,6 +139,10 @@ it.skipIf(!hasChrome())(
 			if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
 			return response.json() as Promise<T>;
 		};
+		let releaseProviders = () => {};
+		const providersReady = new Promise<void>((resolve) => {
+			releaseProviders = resolve;
+		});
 		let bridge: http.Server | undefined;
 		let server: Awaited<ReturnType<typeof webServer>> | undefined;
 		try {
@@ -206,7 +197,8 @@ it.skipIf(!hasChrome())(
 					out.on("response", (answer) => {
 						const body: Buffer[] = [];
 						answer.on("data", (chunk: Buffer) => body.push(chunk));
-						answer.on("end", () => {
+						answer.on("end", async () => {
+							if (options.path === "/api/providers") await providersReady;
 							res.writeHead(200, { ...cors, "content-type": "application/json" });
 							res.end(
 								JSON.stringify({
@@ -265,46 +257,51 @@ it.skipIf(!hasChrome())(
 					`(location.hash.startsWith('#/settings') || (location.hash='#/settings', false)) && ${tab("Model")}`,
 					30_000,
 				);
-				await click(page, tab("Model"));
+				await page.click(tab("Model"));
 				await page.until(named("Add a provider"));
+				const account = shows("faux\nIn use · from your environment, outside banda");
+				// The arriving account row moves Add a provider after the button first appears.
+				expect(await page.run(account)).toBe(false);
+				releaseProviders();
+				await page.until(account);
 				// it runs as the device: every request it made went over Iroh, and it holds no token
 				expect(carried.some((path) => path === "GET /api/tiers")).toBe(true);
 				expect(await page.run<string>("location.hash")).not.toContain("token=");
 
-				await click(page, named("Add a provider"));
+				await page.click(named("Add a provider"));
 				// on a phone, a person taps the search field
-				await click(page, named("Search providers and servers"));
+				await page.click(named("Search providers and servers"));
 				await page.until(`document.activeElement === ${named("Search providers and servers")}`);
 				// a sign-in comes back to the computer banda runs on, not this phone
 				await page.input("Input.insertText", { text: "Anthropic" });
-				await click(page, option("Anthropic"));
+				await page.click(option("Anthropic"));
 				await page.until(shows("Signing in to Anthropic comes back to the computer banda runs on: do it there."));
 				await shot("1-sign-in-elsewhere");
-				await click(page, named("Back to every provider"));
+				await page.click(named("Back to every provider"));
 				// on a phone, a person taps the search field
-				await click(page, named("Search providers and servers"));
+				await page.click(named("Search providers and servers"));
 				await page.until(`document.activeElement === ${named("Search providers and servers")}`);
 				await page.input("Input.insertText", { text: "OpenAI-compatible" });
-				await click(page, option("OpenAI-compatible server"));
+				await page.click(option("OpenAI-compatible server"));
 				await fill(page, field("Name", dialog), "Desk server");
 				await fill(page, field("Address", dialog), `http://localhost:${local.port}/v1`);
 				await page.until(shows(`Sends to localhost:${local.port}: the computer banda runs on, not this phone.`));
-				await click(page, labelled("Requires an API key", dialog));
+				await page.click(named("Requires an API key"));
 				await page.until(`!${field("Its key", dialog)}`);
-				await click(page, button("Find models", dialog));
+				await page.click(button("Find models", dialog));
 				await page.until(shows("It listed 1 model."));
 				// the daemon asked, on its computer; the phone only asked the daemon
 				expect(local.requests.map((request) => `${request.method} ${request.path}`)).toEqual(["GET /v1/models"]);
 				expect(carried).toContain("POST /api/custom-providers/list");
-				await click(page, named("Start with scripted-small"));
+				await page.click(named("Start with scripted-small"));
 				await fill(page, field("Context it runs with, tokens", modelRow("scripted-small")), "32768");
-				await click(page, labelled("No per-token charges", dialog));
+				await page.click(`(${labelled("No per-token charges", dialog)}).querySelector('input[type="radio"]')`);
 				await page.run(`(${field("Address", dialog)}).scrollIntoView({block:'center'})`);
 				await shot("2-form");
 				await darkToo("2-form");
-				await click(page, button("Save", dialog));
+				await page.click(button("Save", dialog));
 				await page.until(shows("Desk server saved"));
-				await click(page, button("Not now", dialog));
+				await page.click(button("Not now", dialog));
 				await page.until(row("custom-desk-server"));
 				const text = await page.run<string>(`${row("custom-desk-server")}.innerText`);
 				expect(text).toContain("On the computer banda runs on, not this phone");
@@ -313,20 +310,21 @@ it.skipIf(!hasChrome())(
 				await shot("3-listed");
 				await darkToo("3-listed");
 
-				await click(page, named("Check Desk server"));
+				await page.click(named("Check Desk server"));
 				await page.until(alert);
 				expect(await page.run<string>(`${alert}.innerText`)).toContain(
 					`one short message to localhost:${local.port} (on the computer banda runs on, not this phone)`,
 				);
 				await shot("4-check-ask");
 				await darkToo("4-check-ask");
-				await click(page, button("Send the check", alert));
+				await page.click(button("Send the check", alert));
 				await page.until(shows("Answered in"));
 				expect(local.requests.filter((request) => request.path.endsWith("/chat/completions"))).toHaveLength(1);
 				expect(carried).toContain("POST /api/custom-providers/custom-desk-server/check");
 				expect(page.errors()).toEqual([]);
 			});
 		} finally {
+			releaseProviders();
 			await server?.close();
 			await new Promise<void>((resolve) => (bridge === undefined ? resolve() : bridge.close(() => resolve())));
 			bridge?.closeAllConnections();
