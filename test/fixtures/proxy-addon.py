@@ -1,6 +1,6 @@
 """
 The proxy's addon (proxy/addon.py) run on the host, without mitmproxy: a stand-in for the few mitmproxy names it uses,
-and requests made by hand, each admitted as the proxy would. Reads cases (JSON) on stdin and prints, per case, what
+and requests made by hand, each admitted as the proxy would. Reads one JSON line on stdin and prints, per case, what
 happened: the status it was refused with and its body, or that it went on, with the headers it went on with; and what
 the proxy's state holds after (held tickets, writes sent).
 
@@ -92,7 +92,7 @@ class Request:
 
 egress = addon.Egress()
 out = []
-for n, case in enumerate(json.load(sys.stdin)):
+for n, case in enumerate(json.loads(sys.stdin.readline())):
     user = case["login"]
     password = policy.mark(config["key"], user)
     auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
