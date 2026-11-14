@@ -9,6 +9,7 @@ import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dockerAvailable, sweepBoxes } from "../src/box/container.ts";
+import { sweepMicrovmBoxes } from "../src/box/microvm.ts";
 
 /** Short: a folder in it carries Unix socket paths, which the kernel limits to about a hundred bytes. */
 const RUN = /^b-(\d+)-/;
@@ -43,6 +44,7 @@ export default async function setup() {
 	process.env.TMPDIR = run;
 	return async () => {
 		await rm(run, { recursive: true, force: true, maxRetries: 5 }).catch(() => undefined);
+		await sweepMicrovmBoxes().catch(() => undefined);
 		if (await dockerAvailable()) await sweepBoxes();
 	};
 }
