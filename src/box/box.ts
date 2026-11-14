@@ -13,7 +13,7 @@ import type { PreparedBrowser } from "./browser-preparation.ts";
 import { containerBox, dockerReady, sweepBoxes } from "./container.ts";
 import type { Pushed } from "./egress-config.ts";
 import { hostBox } from "./host.ts";
-import { microvmBox } from "./microvm.ts";
+import { microvmBox, sweepMicrovmBoxes } from "./microvm.ts";
 
 /** What the daemon tells the egress proxy: whose logins it trusts, credentials, and what goes straight through. */
 export type EgressConfig = {
@@ -297,7 +297,16 @@ export async function chooseBox(
 	kind: BoxKind = "container",
 ): Promise<BoxSetup> {
 	if (kind === "host") return hostBox(home);
-	if (kind === "microvm") return microvmBox(home);
+	// what computers of homes since deleted left running goes, in the background, as the container boxes below
+	if (kind === "microvm") {
+		void sweepMicrovmBoxes().then(
+			(swept) => {
+				if (swept > 0) log(`box: removed ${swept} left behind by homes that are gone`);
+			},
+			() => {},
+		);
+		return microvmBox(home);
+	}
 	const trouble = await dockerReady().then(
 		() => undefined,
 		(error: unknown) => (error instanceof Error ? error.message : String(error)),

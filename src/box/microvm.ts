@@ -736,11 +736,12 @@ export async function launchMicrovm(argv: readonly string[]): Promise<void> {
 	}
 }
 
-/** Only abandoned caches of this OS user, bound to their exact absent home, are swept. */
-export async function sweepMicrovmBoxes(): Promise<void> {
-	if (microvmTarget(process) === undefined) return;
+/** Only abandoned caches of this OS user, bound to their exact absent home, are swept. How many homes' it removed. */
+export async function sweepMicrovmBoxes(): Promise<number> {
+	if (microvmTarget(process) === undefined) return 0;
 	const entries = await readdir(cacheRoot, { withFileTypes: true });
 	let assets: MicrovmAssets | undefined;
+	let swept = 0;
 	for (const entry of entries) {
 		if (!entry.isDirectory() || !entry.name.startsWith(cachePrefix)) continue;
 		const cache = join(cacheRoot, entry.name);
@@ -772,8 +773,10 @@ export async function sweepMicrovmBoxes(): Promise<void> {
 				await current.remove(item.name);
 			}
 			await rm(cache, { recursive: true, force: true });
+			swept += 1;
 		} catch {
 			// A missing bundle or unreadable/foreign cache authorizes no process or byte deletion.
 		}
 	}
+	return swept;
 }
