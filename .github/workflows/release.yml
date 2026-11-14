@@ -260,6 +260,31 @@ jobs:
         with:
           node-version: 26
           cache: npm
+      - name: Install the startup syscall tracer
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends strace
+      - name: Verify Linux syscall trace transport
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { spawnSync } from 'node:child_process';
+          const marker = 'banda-trace-preflight\n';
+          const probe = spawnSync('/usr/bin/strace', [
+            '--kill-on-exit', '-f', '-ttt', '-s', '4096',
+            '-e', 'trace=write,writev,tgkill,tkill,kill', '/usr/bin/printf', marker,
+          ], {
+            encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 64 << 10,
+            env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          });
+          assert.equal(probe.error, undefined);
+          assert.equal(probe.status, 0);
+          assert.equal(probe.signal, null);
+          assert.equal(probe.stdout, marker);
+          assert.match(probe.stderr, /write(?:v)?\(1, .*banda-trace-preflight/);
+          console.log('Linux strace stderr transport passed.');
+          NODE
       - name: Verify the retained image run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -272,6 +297,7 @@ jobs:
           run-id: 43462401258
           github-token: ${{ github.token }}
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: native-runtime-cache
         with:
           path: release/cache/computer/runtime
           key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
@@ -281,6 +307,12 @@ jobs:
         run: node scripts/stage.ts
         env:
           BANDA_COMPUTER_IMAGES: ${{ runner.temp }}/computer-images
+      - name: Retain the verified native build before the expected failure
+        if: steps.native-runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: release/cache/computer/runtime
+          key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
       - name: Require native KVM access
         run: |
           test -c /dev/kvm
