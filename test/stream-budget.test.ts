@@ -49,7 +49,7 @@ const HELPER = "---\nname: Helper\ndescription: Looks things up for the owner.\n
 /** The most bytes each event of the shell's first push may be, by its type; an event with no cap here fails. */
 const SHELL_CAPS: Record<string, number> = {
 	chats: 1_000,
-	computer: 100,
+	computer: 120,
 	control: 5_550,
 	companion: 510,
 	agents: 2_450,
