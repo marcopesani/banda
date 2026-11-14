@@ -499,9 +499,7 @@ it.skipIf(!hasChrome())(
 				await page.until(`${attached}.includes('group-notes.txt')`);
 				// the draft is kept once its words are in localStorage and its file in IndexedDB: reloaded sooner, it is not
 				await page.until(`Object.values(localStorage).includes('GROUP_STEER_NOTE') && ${keptFile("group-notes.txt")}`);
-				// marked, so what is read next is the page the reload made, not the one it replaced
-				await page.run(`window.beforeReload = true; location.reload()`);
-				await page.until(`!window.beforeReload && document.readyState === 'complete'`);
+				await page.reload();
 				await page.until(`${field}?.value === 'GROUP_STEER_NOTE'`);
 				await page.until(`${attached}.includes('group-notes.txt')`);
 				// sent while the member works: in the room at once, the composer empty

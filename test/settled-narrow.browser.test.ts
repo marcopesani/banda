@@ -99,7 +99,8 @@ for (const theme of ["light", "dark"] as const)
 						`${base}/#/specimen?section=${id}&only=1`,
 						{ width, height: process.env.BANDA_SETTLED_SHOTS === undefined ? 1000 : 3200 },
 						async (page) => {
-							await page.run(`localStorage.setItem('banda.theme', ${JSON.stringify(theme)}); location.reload()`);
+							await page.run(`localStorage.setItem('banda.theme', ${JSON.stringify(theme)})`);
+							await page.reload();
 							const section = `document.getElementById(${JSON.stringify(id)})`;
 							await page.until(`${section}?.innerText.includes(${JSON.stringify(words[0])})`);
 							expect(await page.run(`document.documentElement.classList.contains('dark')`)).toBe(theme === "dark");

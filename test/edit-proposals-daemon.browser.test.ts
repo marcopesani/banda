@@ -480,7 +480,7 @@ for (const [width, height] of [
 						`[...document.querySelectorAll('.rounded-tile')].find(t => t.innerText.includes('Set up · Edited by you'))`,
 					);
 					// opened again, each answered card is a row that reads what is in effect: the owner's words, said to be theirs
-					await page.run("location.reload()");
+					await page.reload();
 					await page.until(`document.body.textContent.includes('Sancho')`);
 					await page.run(`location.hash = '#/a/sancho'`);
 					await page.until(`/Created\\s+Writer/.test(document.body.innerText)`);

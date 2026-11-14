@@ -196,7 +196,7 @@ for (const width of [1440, 390])
 					// the reply's own run in the feed's list: the part of the feed that holds it and not the owner's words before it
 					const replyFaces = `(()=>{const of=(t)=>[...document.querySelectorAll('[data-message-bubble]')].find(b=>b.innerText.includes(t));const asked=of('${marker}');let n=of('Reply from sancho: ${marker}');while(!n.parentElement.contains(asked))n=n.parentElement;return n.querySelectorAll('[role="img"]').length})()`;
 					expect(await page.run(replyFaces)).toBe(0);
-					await page.run(`location.reload()`);
+					await page.reload();
 					await page.until(`document.body.innerText.includes('Reply from sancho: ${marker}')`);
 					expect(await page.run(replyFaces)).toBe(0);
 					expect(await page.run(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
@@ -283,7 +283,7 @@ it.skipIf(!hasChrome())(
 				await page.input("Emulation.setEmulatedMedia", {
 					features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 				});
-				await page.run(`location.reload()`);
+				await page.reload();
 				await page.until(line);
 				await page.until(`${line}.querySelector('[role="img"] canvas, [role="img"] svg')`);
 				// past the swap from the still drawing to the live scene, nothing changes

@@ -416,7 +416,7 @@ for (const width of [390, 1440])
 						const port = daemon?.port ?? 0;
 						await daemon?.close();
 						daemon = (await daemonOn(home, port)).daemon;
-						await page.run("location.reload()");
+						await page.reload();
 						await page.until(`document.readyState === 'complete' && ${tab("Model")}`);
 						await settings();
 						await page.until(`${row("custom-ollama")}?.innerText.includes('In use')`);
