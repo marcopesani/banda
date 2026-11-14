@@ -74,18 +74,9 @@ const fits = `(() => {
 
 /** A click as a person makes one: on the control's centre, which must be the control and not something over it. */
 async function click(page: Page, expression: string) {
-	await page.until(expression).catch(async (error: Error) => {
+	await page.click(expression).catch(async (error: Error) => {
 		throw new Error(`${error.message}\n${await page.run<string>(`document.body.innerText.slice(0, 2000)`)}`);
 	});
-	await page.run(`(${expression}).scrollIntoView({block:'center'})`);
-	await page.until(
-		`(() => {const el=${expression}; const moving=el.closest('[role="dialog"],[role="alertdialog"]'); return !moving || moving.getAnimations({subtree:true}).every(a => a.playState !== 'running');})()`,
-	);
-	const point = await page.run<{ x: number; y: number }>(
-		`(() => {const el=${expression}; const r=el.getBoundingClientRect(); const x=r.x+r.width/2,y=r.y+r.height/2; if(!el.contains(document.elementFromPoint(x,y))) throw new Error('Control is not hit-testable: '+el.outerHTML.slice(0,160)); return {x,y};})()`,
-	);
-	await page.input("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
-	await page.input("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
 }
 
 /** A key pressed and let go, as the keyboard sends it. */
@@ -400,6 +391,7 @@ for (const width of [390, 1440])
 
 						// a check that fails says why, in words; its details on asking
 						await settings();
+						await page.until(named("Use Cloudflare AI Gateway"));
 						local.set({ fail: { status: 500, message: "the model crashed while loading" } });
 						await click(page, named("Check Ollama"));
 						await page.until(alert);
