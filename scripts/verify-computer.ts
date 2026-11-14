@@ -17,6 +17,11 @@ import { BROWSERS, hold } from "../test/slots.ts";
 import { hasChrome, withPage } from "../test/smoke/chrome.ts";
 import { hostDiagnostics } from "./native-diagnostics.ts";
 
+const sourceCommit = process.env.BANDA_VERIFY_SOURCE_COMMIT ?? null;
+assert.ok(
+	sourceCommit === null || /^[a-f0-9]{40}$/.test(sourceCommit),
+	"BANDA_VERIFY_SOURCE_COMMIT must be a full lowercase commit SHA.",
+);
 const root = process.env.BANDA_RELEASE_ROOT ?? join(import.meta.dirname, "../release/banda");
 assert.ok(isAbsolute(root), "BANDA_RELEASE_ROOT must be an absolute path to a staged banda package.");
 const node = join(root, "node/node");
@@ -97,11 +102,28 @@ const Listing = Type.Array(Type.Object({ name: VMName }));
 const Owned = Type.Object({
 	name: VMName,
 	config: Type.Object({
-		labels: Type.Object({ "banda.home": Type.Literal(home), "banda.runtime": Type.Literal("microvm") }),
+		labels: Type.Object({
+			"banda.home": Type.Literal(home),
+			"banda.runtime": Type.Literal("microvm"),
+			"banda.generation": Type.String({ pattern: "^[a-f0-9]{12}$" }),
+		}),
 	}),
 });
+const inventory = () => {
+	const listed: unknown = JSON.parse(runtime(["list", "--format", "json"]));
+	assert.ok(Value.Check(Listing, listed), "Invalid owned VM inventory.");
+	assert.ok(listed.length <= 3, "The native proof owns at most one command, proxy and browser VM.");
+	return listed.map((vm) => {
+		const inspected: unknown = JSON.parse(runtime(["inspect", vm.name, "--format", "json"]));
+		assert.ok(Value.Check(Owned, inspected), "Refusing an unowned VM.");
+		assert.equal(inspected.name, vm.name);
+		assert.ok(vm.name.includes(`-${inspected.config.labels["banda.generation"]}`));
+		return inspected;
+	});
+};
 let proxyRestarts = 0;
 let declinedPosts = 0;
+let daemonRestarts = 0;
 const stopProxy = () => {
 	const listed: unknown = JSON.parse(runtime(["list", "--format", "json"]));
 	assert.ok(Value.Check(Listing, listed));
@@ -113,15 +135,19 @@ const stopProxy = () => {
 	runtime(["stop", proxy.name]);
 	proxyRestarts++;
 };
+const proof = createHash("sha256").update(home).digest("hex").slice(0, 16);
 const command = `set -eu
 test "$PWD" = /workspace
 test "$HOME" = /work
 test "$(id -u)" = 1000
 test ! -w /usr/bin
 mkdir -p /tools/bin
-printf '#!/bin/sh\\nprintf native-installed\\n' > /tools/bin/native-proof
+printf '%s\\n' native-workspace-${proof} > /workspace/native-proof
+printf '%s\\n' native-work-${proof} > /work/native-proof
+printf '%s\\n' native-tools-${proof} > /tools/native-proof
+printf '%s\\n' '#!/bin/sh' 'printf native-tool-${proof}' > /tools/bin/native-proof
 chmod 755 /tools/bin/native-proof
-test "$(native-proof)" = native-installed
+test "$(native-proof)" = native-tool-${proof}
 curl --fail --silent --show-error --max-time 30 https://example.com/ | grep -q 'Example Domain'
 if curl --noproxy '*' --silent --max-time 3 -k https://1.1.1.1 >/dev/null; then exit 1; fi
 status=$(curl --silent --show-error --max-time 30 --output /tmp/native-held-response --write-out '%{http_code}' --data-binary banda-native-proof https://httpbingo.org/anything)
@@ -129,33 +155,74 @@ test "$status" = 403
 test "$(cat /proc/sys/net/ipv6/conf/lo/disable_ipv6)" = 0
 /bin/sh /banda/proxy-bridge.sh --check
 printf native-computer-verified`;
+const readOnlyCommand = `set -eu
+test "$PWD" = /workspace
+test "$HOME" = /work
+test "$(cat /workspace/native-proof)" = native-workspace-${proof}
+test "$(cat /work/native-proof)" = native-work-${proof}
+test "$(cat /tools/native-proof)" = native-tools-${proof}
+test -x /tools/bin/native-proof
+test "$(native-proof)" = native-tool-${proof}
+cat /workspace/native-proof /work/native-proof /tools/native-proof
+native-proof
+printf '\\nnative-persistence-verified\\n'`;
+const persistenceOutput = [
+	`native-workspace-${proof}`,
+	`native-work-${proof}`,
+	`native-tools-${proof}`,
+	`native-tool-${proof}`,
+	"native-persistence-verified",
+].join("\n");
 const models = createModels();
 const faux = fauxProvider({ tokensPerSecond: 10_000 });
 models.setProvider(faux.provider);
-faux.setResponses(Array.from({ length: 80 }, () => (request) => nativeComputerReply(request.messages, command)));
+faux.setResponses(
+	Array.from(
+		{ length: 120 },
+		() => (request) =>
+			nativeComputerReply(request.messages, {
+				check: command,
+				persistence: { command: readOnlyCommand, output: persistenceOutput },
+			}),
+	),
+);
 await writeFile(
 	join(home, "config.json"),
 	JSON.stringify({ model: { provider: "faux", modelId: "faux-1" }, remote: { reach: "off" } }),
 );
 let daemon: Awaited<ReturnType<typeof startDaemon>> | undefined;
 const log: string[] = [];
-let completed = false;
+let verification: { state: "running" } | { state: "passed" } | { state: "failed"; error: unknown } = {
+	state: "running",
+};
+const cleanupFailures: unknown[] = [];
 let diagnostics: (() => Promise<unknown>) | undefined;
 const releaseBrowser = await hold(BROWSERS);
 try {
-	daemon = await startDaemon({
-		home,
-		port: 0,
-		models,
-		boxKind: "microvm",
-		web: join(app, "web/dist"),
-		log: (line) => log.push(line),
+	const start = () =>
+		startDaemon({
+			home,
+			port: 0,
+			models,
+			boxKind: "microvm",
+			web: join(app, "web/dist"),
+			log: (line) => log.push(line),
+		});
+	const Published = Type.Object({
+		pid: Type.Literal(process.pid),
+		port: Type.Integer({ minimum: 1 }),
+		token: Type.String(),
 	});
-	const published: unknown = JSON.parse(await readFile(join(home, "daemon.json"), "utf8"));
-	const Published = Type.Object({ token: Type.String() });
-	assert.ok(Value.Check(Published, published));
-	const origin = `http://127.0.0.1:${daemon.port}`;
-	const headers = { authorization: `Bearer ${published.token}` };
+	const publication = async (running: Awaited<ReturnType<typeof startDaemon>>) => {
+		const published: unknown = JSON.parse(await readFile(join(home, "daemon.json"), "utf8"));
+		assert.ok(Value.Check(Published, published));
+		assert.equal(published.port, running.port);
+		return published;
+	};
+	daemon = await start();
+	let published = await publication(daemon);
+	let origin = `http://127.0.0.1:${daemon.port}`;
+	let headers = { authorization: `Bearer ${published.token}` };
 	diagnostics = async () => {
 		const reads = [];
 		for (const path of ["/status", "/chats"]) {
@@ -224,40 +291,43 @@ try {
 		}
 		throw new Error("Native computer event stream ended during the public browser wait.");
 	};
-	const startup = new AbortController();
-	let computer: Static<typeof Computer>["computer"] | undefined;
-	const deadline = setTimeout(
-		() =>
-			startup.abort(
-				new Error(`Native computer did not become ready within 120 seconds; last state: ${JSON.stringify(computer)}`),
-			),
-		120_000,
-	);
-	try {
-		for await (const current of computers(startup.signal)) {
-			computer = current;
-			log.push(`qualification: computer ${JSON.stringify(computer)}`);
-			assert.notEqual(
-				computer.state,
-				"offline",
-				`Native computer is offline: ${computer.why ?? JSON.stringify(computer)}`,
-			);
-			assert.equal(computer.box, "microvm");
-			assert.equal(computer.network, "guarded");
-			if (computer.state === "up") {
-				assert.equal(computer.browser.state, "idle");
-				break;
-			}
-		}
-		assert.equal(
-			computer?.state,
-			"up",
-			`Native computer event stream ended before readiness: ${JSON.stringify(computer)}`,
+	const ready = async () => {
+		const startup = new AbortController();
+		let computer: Static<typeof Computer>["computer"] | undefined;
+		const deadline = setTimeout(
+			() =>
+				startup.abort(
+					new Error(`Native computer did not become ready within 120 seconds; last state: ${JSON.stringify(computer)}`),
+				),
+			120_000,
 		);
-	} finally {
-		clearTimeout(deadline);
-		startup.abort();
-	}
+		try {
+			for await (const current of computers(startup.signal)) {
+				computer = current;
+				log.push(`qualification: computer ${JSON.stringify(computer)}`);
+				assert.notEqual(
+					computer.state,
+					"offline",
+					`Native computer is offline: ${computer.why ?? JSON.stringify(computer)}`,
+				);
+				assert.equal(computer.box, "microvm");
+				assert.equal(computer.network, "guarded");
+				if (computer.state === "up") {
+					assert.equal(computer.browser.state, "idle");
+					break;
+				}
+			}
+			assert.equal(
+				computer?.state,
+				"up",
+				`Native computer event stream ended before readiness: ${JSON.stringify(computer)}`,
+			);
+		} finally {
+			clearTimeout(deadline);
+			startup.abort();
+		}
+	};
+	await ready();
 	const api = async (path: string, body: object, method = "POST") => {
 		const response = await fetch(`${origin}/api${path}`, {
 			method,
@@ -291,6 +361,23 @@ try {
 		assert.ok(Value.Check(Pending, value), "Only the deliberately held native test POST may await approval.");
 		return value;
 	};
+	const idle = async () => {
+		const settled = AbortSignal.timeout(30_000);
+		for (;;) {
+			settled.throwIfAborted();
+			const now = await status();
+			if (now.waits.length === 0 && now.chats.every((chat) => chat.state === "idle")) return;
+			await delay(20, undefined, { signal: settled });
+		}
+	};
+	const History = Type.Array(
+		Type.Object({ entry: Type.Integer({ minimum: 1 }), mine: Type.Boolean(), text: Type.String() }),
+	);
+	const history = `[...document.querySelectorAll('[data-message-bubble]')].map(el => ({
+		entry: Number(el.closest('[data-entry]')?.getAttribute('data-entry') ?? 0),
+		mine: el.hasAttribute('data-mine'), text: el.textContent
+	}))`;
+	let historyBeforeRestart: Static<typeof History> = [];
 	await api("/skills/shipped", { add: [] });
 	await api("/companion", { name: "Sancho", personality: "Brief." }, "PUT");
 	for (const width of [1440, 390]) {
@@ -362,15 +449,20 @@ try {
 					await page.shoot(join(output, `computer-held-${width}.png`));
 					await page.click(button);
 					await page.until("!document.querySelector('[data-open-ask]')");
-					const settled = AbortSignal.timeout(30_000);
-					for (;;) {
-						settled.throwIfAborted();
-						const now = await status();
-						if (now.waits.length === 0 && now.chats.every((chat) => chat.state === "idle")) break;
-						await delay(20, undefined, { signal: settled });
-					}
+					await idle();
 					declinedPosts++;
 				}
+			}
+			await idle();
+			if (width === 390) {
+				const retained = await page.run<unknown>(history);
+				assert.ok(Value.Check(History, retained));
+				for (const text of ["Check the computer.", "Browse the example page."])
+					assert.equal(retained.filter((message) => message.mine && message.text === text).length, 2);
+				for (const text of ["native-computer-verified", "Example Domain"])
+					assert.equal(retained.filter((message) => !message.mine && message.text.includes(text)).length, 2);
+				historyBeforeRestart = retained;
+				await writeFile(join(output, "history-before-restart.json"), JSON.stringify(retained, null, 2));
 			}
 			await page.shoot(join(output, `computer-${width}.png`));
 			await page.run("location.hash='#/settings'");
@@ -387,8 +479,97 @@ try {
 	assert.equal(downloads, 1);
 	assert.equal(proxyRestarts, 2);
 	assert.equal(declinedPosts, 2);
-	completed = true;
+	const beforeRestart = inventory();
+	assert.equal(beforeRestart.length, 3, "The completed scenario must own command, proxy and browser VMs.");
+	const generationsBefore = new Set(beforeRestart.map((vm) => vm.config.labels["banda.generation"]));
+	assert.equal(generationsBefore.size, 1);
+	await writeFile(join(output, "vms-before-restart.json"), JSON.stringify(beforeRestart, null, 2));
+	const firstPort = daemon.port;
+	await daemon.close();
+	assert.deepEqual(await daemon.stopped, { failed: false });
+	assert.deepEqual(
+		log.filter((line) => line.startsWith("close:")),
+		[],
+		"The first daemon must stop without close failures.",
+	);
+	assert.deepEqual(inventory(), [], "Stopping the owned daemon must remove its VMs before restarting.");
+	await assert.rejects(readFile(join(home, "daemon.json")), { code: "ENOENT" });
+	await assert.rejects(fetch(`${origin}/api/status`, { headers, signal: AbortSignal.timeout(5_000) }));
+	await writeFile(
+		join(output, "daemon-stopped.json"),
+		JSON.stringify({ port: firstPort, stopped: true, vms: [] }, null, 2),
+	);
+	daemon = undefined;
+	daemon = await start();
+	published = await publication(daemon);
+	origin = `http://127.0.0.1:${daemon.port}`;
+	headers = { authorization: `Bearer ${published.token}` };
+	await ready();
+	const afterRestart = inventory();
+	assert.equal(afterRestart.length, 2, "A restarted daemon prepares its browser only when the app uses it.");
+	const generationsAfter = new Set(afterRestart.map((vm) => vm.config.labels["banda.generation"]));
+	assert.equal(generationsAfter.size, 1);
+	for (const generation of generationsAfter)
+		assert.ok(!generationsBefore.has(generation), "The restarted daemon must own a new VM generation.");
+	await writeFile(join(output, "vms-after-restart.json"), JSON.stringify(afterRestart, null, 2));
+	daemonRestarts++;
+	assert.equal(downloads, 1, "Restarting the daemon must keep the prepared browser archive.");
+	assert.ok(historyBeforeRestart.length > 0);
+	const retainedHistory = `${JSON.stringify(historyBeforeRestart)}.every(before => (${history}).some(after =>
+		after.entry === before.entry && after.mine === before.mine && after.text === before.text))`;
+	for (const width of [1440, 390]) {
+		await withPage(`${origin}/#token=${published.token}`, { width, height: 900 }, async (page) => {
+			try {
+				await page.until("!location.hash.includes('token=') && document.body.innerText.length > 0");
+				await page.run("location.hash='#/a/sancho'");
+				await page.until(retainedHistory);
+				await page.shoot(join(output, `computer-restart-history-${width}.png`));
+				for (const [text, answer] of [
+					["Read the files after restart.", "native-persistence-verified"],
+					["Browse the example page.", "Example Domain"],
+				]) {
+					const newestOwner =
+						"Math.max(0,...[...document.querySelectorAll('[data-message-bubble][data-mine]')].map(el=>Number(el.closest('[data-entry]')?.getAttribute('data-entry')??0)))";
+					const before = await page.run<number>(newestOwner);
+					await page.until("document.querySelector('textarea[name=message]')");
+					await page.run("document.querySelector('textarea[name=message]').focus()");
+					await page.input("Input.insertText", { text });
+					await page.until("document.querySelector('button[aria-label=Send]:not([disabled])')");
+					await page.click("document.querySelector('button[aria-label=Send]')");
+					await page.until(`${newestOwner} > ${before}`);
+					const after = await page.run<number>(newestOwner);
+					await page.until(
+						`[...document.querySelectorAll('[data-message-bubble]:not([data-mine])')].some(el=>Number(el.closest('[data-entry]')?.getAttribute('data-entry')??0)>${after} && el.innerText.includes(${JSON.stringify(answer)}))`,
+						120_000,
+					);
+					await idle();
+				}
+				await page.until(retainedHistory);
+				await page.shoot(join(output, `computer-restart-${width}.png`));
+				await writeFile(
+					join(output, `history-after-restart-${width}.json`),
+					JSON.stringify(await page.run(history), null, 2),
+				);
+				await page.run("location.hash='#/settings'");
+				await page.until(
+					"document.body.innerText.includes('Available when needed.') && document.body.innerText.includes('1 browser page running.')",
+				);
+				assert.equal(downloads, 1, "Using the prepared browser after restart must not deliver the archive again.");
+				await page.run(
+					"[...document.querySelectorAll('h2')].find(el=>el.textContent==='The computer').scrollIntoView({block:'center'})",
+				);
+				await page.shoot(join(output, `computer-restart-general-ready-${width}.png`));
+				assert.deepEqual(page.errors(), []);
+			} catch (error) {
+				await page.shoot(join(output, `computer-restart-failed-${width}.png`)).catch(() => undefined);
+				throw error;
+			}
+		});
+	}
+	assert.equal(daemonRestarts, 1);
+	verification = { state: "passed" };
 } catch (error) {
+	verification = { state: "failed", error };
 	const runtimeDiagnostics: unknown[] = [];
 	try {
 		const listed: unknown = JSON.parse(runtime(["list", "--format", "json"], 5_000));
@@ -423,6 +604,7 @@ try {
 		JSON.stringify(
 			{
 				passed: false,
+				sourceCommit,
 				releaseRoot: root,
 				runtimeManifestSha256,
 				publicBrowserDelivery,
@@ -430,44 +612,76 @@ try {
 				home,
 				cache,
 				hostBefore,
-				hostAfter: process.platform === "linux" ? await hostDiagnostics() : undefined,
+				hostAfter:
+					process.platform === "linux"
+						? await hostDiagnostics().catch((failure: unknown) => String(failure))
+						: undefined,
 				runtimeDiagnostics,
 				diagnostics: await diagnostics?.().catch((failure: unknown) => String(failure)),
 			},
 			null,
 			2,
 		),
-	);
-	throw error;
+	).catch((failure: unknown) => log.push(`qualification: could not save failure diagnostics: ${String(failure)}`));
 } finally {
-	await releaseBrowser();
+	const cleanup = async (operation: () => unknown) => {
+		try {
+			await operation();
+		} catch (error) {
+			cleanupFailures.push(error);
+		}
+	};
 	globalThis.fetch = nativeFetch;
-	await daemon?.close();
-	await writeFile(join(output, "daemon.log"), log.join("\n"));
-	const listed: unknown = JSON.parse(
-		execFileSync(assets.msb, ["list", "--format", "json"], {
-			encoding: "utf8",
-			env: {
-				PATH: "/usr/bin:/bin",
-				HOME: home,
-				MSB_HOME: cache,
-				MSB_PATH: assets.msb,
-				MSB_LIBKRUNFW_PATH: assets.firmware,
-			},
-			timeout: 20_000,
-		}),
-	);
-	assert.deepEqual(listed, []);
-	if (completed) {
-		await rm(cache, { recursive: true, force: true });
-		await rm(home, { recursive: true, force: true });
+	await cleanup(async () => {
+		await daemon?.close();
+		if (daemon !== undefined) assert.deepEqual(await daemon.stopped, { failed: false });
+		assert.deepEqual(
+			log.filter((line) => line.startsWith("close:")),
+			[],
+			"The owned daemons must close without failures.",
+		);
+	});
+	await cleanup(async () => {
+		const remaining = inventory();
+		if (remaining.length > 0) {
+			cleanupFailures.push(new Error("The owned daemon left VMs after closing."));
+			for (const vm of remaining) await cleanup(() => runtime(["remove", "--force", vm.name]));
+		}
+		assert.deepEqual(inventory(), [], "Final owned VM inventory must be empty.");
+	});
+	await cleanup(releaseBrowser);
+	await cleanup(() => writeFile(join(output, "daemon.log"), log.join("\n")));
+	if (verification.state === "passed" && cleanupFailures.length === 0) {
+		await cleanup(() => rm(cache, { recursive: true, force: true }));
+		await cleanup(() => rm(home, { recursive: true, force: true }));
 	}
+	await cleanup(() =>
+		writeFile(
+			join(output, "cleanup.json"),
+			JSON.stringify(
+				{
+					cleaned: cleanupFailures.length === 0,
+					errors: cleanupFailures.map((error) => (error instanceof Error ? error.stack : String(error))),
+				},
+				null,
+				2,
+			),
+		),
+	);
 }
+if (cleanupFailures.length > 0)
+	throw new AggregateError(
+		verification.state === "failed" ? [verification.error, ...cleanupFailures] : cleanupFailures,
+		"Native verification cleanup failed.",
+	);
+if (verification.state === "failed") throw verification.error;
+assert.equal(verification.state, "passed");
 await writeFile(
 	join(output, "result.json"),
 	JSON.stringify(
 		{
 			target: assets.target,
+			sourceCommit,
 			releaseRoot: root,
 			runtimeManifestSha256,
 			widths: [1440, 390],
@@ -478,6 +692,15 @@ await writeFile(
 			publicBrowserDelivery,
 			browserUrl: assets.browser.url,
 			command,
+			readOnlyCommand,
+			persistence: {
+				state: "passed",
+				daemonRestarts,
+				folders: ["/workspace", "/work", "/tools"],
+				readOnlyCheck: true,
+				historyRetained: true,
+				browserDownloadsAfterRestart: downloads,
+			},
 			cleaned: true,
 			passed: true,
 		},
