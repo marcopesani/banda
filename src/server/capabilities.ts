@@ -2097,16 +2097,17 @@ export function openCapabilities(options: CapabilityOptions) {
 					at: now(),
 					what: `You ${was ? "signed in again" : "signed in"} to ${connection.service} as ${accountLabel({ id, ...(label === undefined ? {} : { label }) })}`,
 				});
-				// a permission is bound to the sign-in it was given for and matches no other: one bound to the sign-in
-				// this replaces is taken back here, never left listed as granted
+				// a permission is the owner's word about an account, bound to its sign-in so nothing prepared under an
+				// earlier one borrows it: signing the same account in again carries each over to this sign-in, in the
+				// commit that records it, so none is left granted yet matching nothing
 				if (was) {
 					const permissions = await tx.doc(Permissions);
-					for (const [permissionId, permission] of Object.entries(permissions.permissions)) {
+					for (const permission of Object.values(permissions.permissions)) {
 						if (!permission.tool.startsWith(`${name}__`)) continue;
-						const bound = readPreparedAccount(permission.match.as_account ?? permission.match.account);
+						const arg = permission.match.as_account === undefined ? "account" : "as_account";
+						const bound = readPreparedAccount(permission.match[arg]);
 						if (bound === undefined || bound.key !== account || bound.generation === generation) continue;
-						delete permissions.permissions[permissionId];
-						await log(tx, { at: now(), what: `You took back: ${permission.what} (you signed in again)` });
+						permission.match[arg] = { key: account, generation };
 					}
 				}
 				// on for the agent it was for, in this commit when its file names the connection already
