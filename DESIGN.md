@@ -891,8 +891,9 @@ long as it runs.
   and answered 403. A git fetch is a read, but only to a forge the daemon names: git's own request to upload-pack,
   which only sends objects back. The proxy keeps tickets until the daemon stores their bytes and, in the same commit,
   opens their approval or records an explicit not-sent resolution. Command results list their tickets, and recovery
-  takes retained tickets without another command. A recovered request has no recorded original task, so it needs a
-  once-only owner approval, without reusing or offering a permission. A WebSocket (a stream, which only an allowed
+  takes retained tickets without another command, leaving a chat's to the command still running there. A recovered
+  request has no recorded original task, so it needs a once-only owner approval, without reusing or offering a
+  permission. A WebSocket (a stream, which only an allowed
   host lets through), a request past the limit of open asks, or one whose chat or agent is no longer active is resolved
   as not sent in activity. Approved, the proxy sends exactly the stored request,
   once, and the agent is woken with how it ended, the response fenced as foreign data; how a send ended is stored in

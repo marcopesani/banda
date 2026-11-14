@@ -49,6 +49,7 @@ import {
 	type Taken,
 	TICKET_KEPT_MS,
 	Tickets,
+	withIntake,
 } from "../src/core/egress.ts";
 import { OWNER, type Received } from "../src/core/gateway.ts";
 import { Groups } from "../src/core/groups.ts";
@@ -872,6 +873,46 @@ describe("a host the owner allowed", () => {
 			}
 		},
 	);
+
+	it("recovery leaves a chat's held requests to the command still running there", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const chat = await s.say(harness);
+			await until(() => done(harness, chat.turn));
+			const request = held(chat.chat);
+			await harness.commit(async (tx) => {
+				(await tx.doc(Permissions)).permissions.standing = {
+					tool: "propose_send",
+					match: { _route: routeOf(request) },
+					what: "send matching requests",
+					scope: "always",
+					agent: LEAD,
+					at: Date.now(),
+					wait: 0,
+				};
+			}, context);
+			const explanation = await withIntake(s.holding, chat.chat, async () => {
+				// the command wrote, and the sweep's timer fired before the command ended
+				s.proxy.pending.set(chat.chat, [request]);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				expect(s.proxy.acked).toEqual([]);
+				expect((await harness.snapshot(Tickets, context))?.tickets[request.ticket]).toBeUndefined();
+				return intake(s.holding, intakeApi(harness, chat.chat), context);
+			});
+			expect(explanation).toContain(`Held, not sent: ${request.method}`);
+			// the owner's standing permission covers it, as for any request a command's own intake takes
+			await until(() => s.proxy.sent.length === 1);
+			expect(await openWaits(harness)).toEqual([]);
+			// once the command ended, a later request with no command is recovery's again
+			const later = held(chat.chat, { at: request.at + 1 });
+			s.proxy.pending.set(chat.chat, [later]);
+			await sweepReceipts(s.holding, harness, Date.now, "recover");
+			expect((await openWaits(harness)).map((wait) => wait.ask)).toMatchObject([{ args: { _ticket: later.ticket } }]);
+		} finally {
+			await close();
+		}
+	});
 
 	it.each(["missing", "unknown", "archived"] as const)(
 		"recovery resolves a %s target before ACK without reviving it",
