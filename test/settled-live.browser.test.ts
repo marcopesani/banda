@@ -123,7 +123,7 @@ async function onChat<T>(width: number, theme: "light" | "dark", use: (page: Pag
 	return withPage(`${base}/#token=${token}`, { width, height: width < 768 ? 844 : 900 }, async (page) => {
 		await page.run(`localStorage.setItem('banda.theme', ${JSON.stringify(theme)})`);
 		await page.goto(`${base}/#/a/sancho`);
-		await page.run("location.reload()");
+		await page.reload();
 		await page.until(`!!${field}`);
 		for (let i = 0; i < 5; i++) {
 			const more = await page.run<boolean>(

@@ -22,6 +22,8 @@ export type Page = {
 	readonly until: (expression: string, ms?: number) => Promise<void>;
 	readonly shoot: (file: string) => Promise<void>;
 	readonly goto: (url: string) => Promise<void>;
+	/** Reload and wait for the replacement main document to finish loading. */
+	readonly reload: () => Promise<void>;
 	/** Native CDP input, for pointer, keyboard and touch acceptance checks. */
 	readonly input: (method: string, params: object) => Promise<unknown>;
 	/** Scroll to the current element, wait for stable geometry, then click once with native input. Never retry a failure. */
@@ -87,6 +89,8 @@ export async function withPage<T>(
 		const { targetId } = await send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
 		const { sessionId } = await send<{ sessionId: string }>("Target.attachToTarget", { targetId, flatten: true });
 		await send("Runtime.enable", {}, sessionId);
+		await send("Page.enable", {}, sessionId);
+		await send("Page.setLifecycleEventsEnabled", { enabled: true }, sessionId);
 		const mobile = width < 768;
 		await send(
 			"Emulation.setDeviceMetricsOverride",
@@ -124,6 +128,36 @@ export async function withPage<T>(
 				}
 			},
 			input: (method, params) => send(method, params, sessionId),
+			reload: async () => {
+				const { frameTree } = await send<{ frameTree: { frame: { id: string; loaderId: string } } }>(
+					"Page.getFrameTree",
+					{},
+					sessionId,
+				);
+				const { id, loaderId } = frameTree.frame;
+				let stop = () => {};
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				const loaded = new Promise<void>((resolve, reject) => {
+					stop = chrome.cdp.on((event) => {
+						if (
+							event.sessionId === sessionId &&
+							event.method === "Page.lifecycleEvent" &&
+							event.params.frameId === id &&
+							typeof event.params.loaderId === "string" &&
+							event.params.loaderId !== loaderId &&
+							event.params.name === "load"
+						)
+							resolve();
+					});
+					timer = setTimeout(() => reject(new Error("reload did not finish loading")), COMMAND_MS);
+				});
+				try {
+					await Promise.all([loaded, send("Page.reload", { loaderId }, sessionId)]);
+				} finally {
+					stop();
+					clearTimeout(timer);
+				}
+			},
 			click: async (expression) => {
 				const key = JSON.stringify(`banda-click-${randomUUID()}`);
 				try {

@@ -205,7 +205,7 @@ for (const { width, action } of [390, 1440].flatMap((width) =>
 							expect(await page.run(`${allow}.length`)).toBe(0);
 							expect(await page.run(`document.body.innerText.includes(${JSON.stringify(REPORT)})`)).toBe(false);
 							if (shots !== undefined) await page.shoot(join(shots, `${width}-archived.png`));
-							await page.run("location.reload()");
+							await page.reload();
 							await page.until("document.body.innerText.includes('Sancho is archived.')");
 							expect(sent).toEqual([]);
 							expect(page.errors()).toEqual([]);
@@ -219,7 +219,7 @@ for (const { width, action } of [390, 1440].flatMap((width) =>
 						expect(await page.run("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
 						expect(page.errors()).toEqual([]);
 						if (shots !== undefined) await page.shoot(join(shots, `${width}-reported.png`));
-						await page.run("location.reload()");
+						await page.reload();
 						await page.until(`document.body.innerText.includes(${JSON.stringify(REPORT)})`);
 						expect(await page.run(`${allow}.length`)).toBe(0);
 						expect(sent).toEqual([request]);
