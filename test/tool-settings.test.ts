@@ -12,7 +12,7 @@ import fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 import { Connected, connectionTools, ToolSettings, toolName } from "../src/core/connections.ts";
 import { OWNER } from "../src/core/gateway.ts";
-import { offeredScopes } from "../src/core/permissions.ts";
+import { offeredScopes, Permissions } from "../src/core/permissions.ts";
 import { openWaits } from "../src/core/status.ts";
 import { context } from "../src/core/store.ts";
 import {
@@ -609,31 +609,42 @@ describe("a draft waiting across a change", () => {
 	/** `create_event` drafted and waiting for approval: the wait. */
 	const drafted = async (s: Awaited<ReturnType<typeof open>>) => {
 		s.model.plan([{ tool: "cal__create_event", args: { title: "x", day: "mon" } }]);
-		await s.say("draft it");
-		return until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+		const { turn } = await s.say("draft it");
+		const wait = await until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+		return { ...wait, turn };
 	};
 	const writes = (fake: FakeMcp) => fake.calls.map((call) => call.tool).filter((tool) => tool === "create_event");
 
-	it("survives a restart onto a build that changed its definition, even a copy edit, and runs when approved", async () => {
+	it("a copy edit ends an old draft across restart; only a fresh approval runs the current tool", async () => {
 		const fake = await startFakeMcp(SIGNED);
 		fakes.push(fake);
 		let s = await added(fake);
-		await drafted(s);
+		const old = await drafted(s);
 		s = await restart(
 			s,
 			await shipping(fake, (d) => {
 				d.about = "A newer build";
 			}),
 		);
-		// a wait kept open is not enough: it must still be answerable and the write must run
-		await new Promise((resolve) => setTimeout(resolve, 300));
-		const after = await openWaits(s.harness);
-		expect(after.map((w) => (w.ask as { tool?: string }).tool)).toEqual(["cal__create_event"]);
-		expect(await answer(s.harness, after[0]?.key as string, "approve", web, "bearer")).toMatchObject({
-			answered: expect.anything(),
-		});
-		await until(async () => writes(fake).length === 1);
-		expect(writes(fake)).toHaveLength(1);
+		await until(async () => (await s.harness.snapshot(Connected, context))?.connections.cal?.due === undefined);
+		expect((await openWaits(s.harness)).map((wait) => wait.key)).toEqual([old.key]);
+		for (const permission of [undefined, { scope: "always" }] as const)
+			expect(await answer(s.harness, old.key, "approve", web, "bearer", { approving: { permission } })).toEqual({
+				refused: "the connection tool changed since this approval was prepared",
+			});
+		expect((await s.harness.snapshot(Permissions, context))?.permissions ?? {}).toEqual({});
+		expect(writes(fake)).toEqual([]);
+		expect(await answer(s.harness, old.key, "deny", web, "bearer")).toMatchObject({ answered: expect.anything() });
+		await s.done(old.turn);
+		expect(writes(fake)).toEqual([]);
+		const fresh = await drafted(s);
+		expect(fresh.key).not.toBe(old.key);
+		expect(writes(fake)).toEqual([]);
+		expect(await answer(s.harness, fresh.key, "approve", web, "bearer")).toMatchObject({ answered: expect.anything() });
+		await s.done(fresh.turn);
+		expect(fake.calls.filter((call) => call.tool === "create_event")).toEqual([
+			{ tool: "create_event", args: { title: "x", day: "mon" } },
+		]);
 	});
 
 	it("a tool the new definition makes a floor asks as the floor from the first moment, with nothing listed yet", async () => {
@@ -703,11 +714,11 @@ describe("a draft waiting across a change", () => {
 		expect(writes(fake)).toHaveLength(1);
 	});
 
-	it("a draft waiting for approval stays that draft when the new build says its tool only reads: nothing runs unapproved", async () => {
+	it("a new read definition cannot run or grant an old draft, and a fresh Ask needs its own approval", async () => {
 		const fake = await startFakeMcp(SIGNED);
 		fakes.push(fake);
 		let s = await added(fake);
-		await drafted(s);
+		const old = await drafted(s);
 		s = await restart(
 			s,
 			await shipping(fake, (d) => {
@@ -715,14 +726,27 @@ describe("a draft waiting across a change", () => {
 				d.needs = {};
 			}),
 		);
-		await new Promise((resolve) => setTimeout(resolve, 800));
+		await until(async () => (await s.harness.snapshot(Connected, context))?.connections.cal?.due === undefined);
 		expect(writes(fake)).toEqual([]);
-		const [waiting] = await openWaits(s.harness);
-		expect(await answer(s.harness, waiting?.key as string, "approve", web, "bearer")).toMatchObject({
-			answered: expect.anything(),
-		});
-		await until(async () => writes(fake).length === 1);
-		expect(writes(fake)).toHaveLength(1);
+		expect((await openWaits(s.harness)).map((wait) => wait.key)).toEqual([old.key]);
+		expect(
+			await answer(s.harness, old.key, "approve", web, "bearer", {
+				approving: { permission: { scope: "always" } },
+			}),
+		).toEqual({ refused: "the connection tool changed since this approval was prepared" });
+		expect((await s.harness.snapshot(Permissions, context))?.permissions ?? {}).toEqual({});
+		expect(await answer(s.harness, old.key, "deny", web, "bearer")).toMatchObject({ answered: expect.anything() });
+		await s.done(old.turn);
+		expect(writes(fake)).toEqual([]);
+		await s.set({ create_event: "ask" });
+		const fresh = await drafted(s);
+		expect(fresh.key).not.toBe(old.key);
+		expect(writes(fake)).toEqual([]);
+		expect(await answer(s.harness, fresh.key, "approve", web, "bearer")).toMatchObject({ answered: expect.anything() });
+		await s.done(fresh.turn);
+		expect(fake.calls.filter((call) => call.tool === "create_event")).toEqual([
+			{ tool: "create_event", args: { title: "x", day: "mon" } },
+		]);
 	});
 
 	it("a held write is still refused when the definition itself changed under it", async () => {
@@ -738,8 +762,14 @@ describe("a draft waiting across a change", () => {
 				d.about = "Another build";
 			}),
 		);
-		expect(await answer(s.harness, wait.key, "approve", web, "bearer")).toMatchObject({ answered: expect.anything() });
-		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(
+			await answer(s.harness, wait.key, "approve", web, "bearer", {
+				approving: { permission: { scope: "always" } },
+			}),
+		).toEqual({ refused: "the connection tool changed since this approval was prepared" });
+		expect((await s.harness.snapshot(Permissions, context))?.permissions ?? {}).toEqual({});
+		expect(await answer(s.harness, wait.key, "deny", web, "bearer")).toMatchObject({ answered: expect.anything() });
+		await s.done(wait.turn);
 		expect(writes(fake)).toEqual([]);
 	});
 });

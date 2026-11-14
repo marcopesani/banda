@@ -34,17 +34,33 @@ describe("a fault worker's setup, run with no fault", () => {
 					: { auth: "oauth" },
 			);
 			fakes.push(fake);
-			const { last } = await runWorker("test/fault/connection-worker.ts", [await tempHome(), fake.url, mode], []);
+			const home = await tempHome();
+			const { last } = await runWorker("test/fault/connection-worker.ts", [home, fake.url, mode], []);
+			if (mode === "carry") {
+				const replayed = await runWorker("test/fault/connection-worker.ts", [home, fake.url, mode], []);
+				expect(replayed.last).toMatchObject({
+					outcome: { status: "completed" },
+					oldOutcome: { status: "completed" },
+					answers: ["refused", "deny", "approve"],
+					permissions: [],
+					open: 0,
+					parked: [],
+				});
+			}
 			const denied = mode === "carry-deny";
 			expect(last).toMatchObject({
 				outcome: { status: "completed" },
-				answers: [denied ? "deny" : "approve"],
+				answers: mode === "carry" ? ["refused", "deny", "approve"] : denied ? ["refused", "deny"] : ["approve"],
 				open: 0,
 				parked: [],
 			});
 			expect(fake.calls.filter((call) => call.tool === "create_event")).toHaveLength(denied ? 0 : 1);
-			// "carry": it went through the new build's read path and on as the write it was, and it did not stay due
+			// The old draft cannot borrow the new read definition; only the fresh, approved request can send.
 			if (mode.startsWith("carry")) {
+				expect(last).toMatchObject({ oldOutcome: { status: "completed" }, permissions: [] });
+				expect(fake.calls.filter((call) => call.tool === "create_event")).toEqual(
+					denied ? [] : [{ tool: "create_event", args: { title: "Fresh tea", day: "mon" } }],
+				);
 				const { due, points } = last as { due: boolean; points: Record<string, number> };
 				expect(due).toBe(false);
 				expect(points["connection:stays-write"]).toBeGreaterThan(0);

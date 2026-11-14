@@ -48,6 +48,7 @@ import {
 	type Account,
 	acceptedConnection,
 	acceptedNames,
+	accountArg,
 	accountKey,
 	accountLabel,
 	accountNamed,
@@ -87,7 +88,9 @@ import {
 	signsIn,
 	ToolSettings,
 	takePending,
+	toolAuthority,
 	toolName,
+	validToolAuthority,
 	withCredentials,
 } from "../core/connections.ts";
 import { readDefinitions, setDefinitions } from "../core/definitions.ts";
@@ -123,7 +126,7 @@ import {
 	readOn,
 	refKey,
 } from "../core/objects.ts";
-import { agentOfChat, canonical, Permissions } from "../core/permissions.ts";
+import { agentOfChat, canonical, Permissions, retireInvalidPermissions } from "../core/permissions.ts";
 import { REST_APIS, type RestApi } from "../core/rest.ts";
 import { retryOf } from "../core/retry-after.ts";
 import { slackFile } from "../core/slack-rest.ts";
@@ -193,10 +196,6 @@ type Finished = {
 	readonly expected?: string;
 	readonly at: number;
 };
-
-/** The argument a connection's tool takes its account in: `account`, unless the server's own tool has one so named. */
-const accountArg = (schema: JsonObject) =>
-	(schema.properties as { [key: string]: unknown } | undefined)?.account === undefined ? "account" : "as_account";
 
 const PreparedAccount = Type.Object(
 	{ key: Type.String({ minLength: 1 }), generation: Type.String({ minLength: 1 }) },
@@ -306,7 +305,7 @@ const summaryOf = (connection: Connection): ConnectionSummary => ({
 });
 
 /** A server's tools as listed, keyed by their names. */
-const listedOf = (tools: readonly McpTool[]): { [tool: string]: Listed } =>
+const listedOf = (tools: readonly McpTool[]): { [tool: string]: Omit<Listed, "generation"> } =>
 	Object.fromEntries(
 		tools.map((tool) => [
 			tool.name,
@@ -884,6 +883,7 @@ export function openCapabilities(options: CapabilityOptions) {
 		];
 		return options.effect({
 			name: tool.name,
+			authority: toolAuthority(tool),
 			description:
 				`${tool.listed.description}\n\n(${tool.connection.service}, a connection the owner allowed. This does something ` +
 				"for the owner, so it asks them first: they see exactly what you give, may edit it, and it runs once, as " +
@@ -1241,14 +1241,21 @@ export function openCapabilities(options: CapabilityOptions) {
 					: !named.has(tool) && (was === undefined || !Object.hasOwn(was.tools, tool)),
 			);
 			// A server's relisting may remove a tool, but never rewrite the prompt authority of an existing one.
-			const tools = own
-				? proposed
-				: Object.fromEntries(
-						Object.entries(proposed).map(([tool, shape]) => [
-							tool,
-							(same && Object.hasOwn(was.tools, tool) ? was.tools[tool] : undefined) ?? shape,
-						]),
-					);
+			const tools = Object.fromEntries(
+				Object.entries(proposed).map(([tool, shape]) => {
+					const previous = was?.tools[tool];
+					if (!own && same && previous !== undefined) return [tool, previous];
+					const { generation, ...payload } = previous ?? {};
+					return [
+						tool,
+						{
+							...shape,
+							generation:
+								generation !== undefined && canonical(payload) === canonical(shape) ? generation : ++doc.versions,
+						},
+					];
+				}),
+			);
 			// notes too are kept as first listed for this file, on the tool chosen then to carry them: a relisting never
 			// rewrites what the model was told, and switching other tools never moves them from one description to another
 			const kept = same ? was.notes : notes;
@@ -1259,6 +1266,7 @@ export function openCapabilities(options: CapabilityOptions) {
 				...(kept === undefined || on === undefined ? {} : { notes: kept, notesOn: on }),
 				at: now(),
 			};
+			await retireInvalidPermissions(tx, now());
 			// a tool a server adds after it was connected waits for the owner to switch it on
 			for (const tool of fresh) {
 				const model = toolName(name, tool);
@@ -1346,8 +1354,8 @@ export function openCapabilities(options: CapabilityOptions) {
 
 	/**
 	 * At start, before the first install and before anything resumes: a listing an earlier build took for a definition this
-	 * build ships differently moves to the version in effect, due to be listed again, so a draft waiting on one of its
-	 * tools can still finish. In one commit. Only the listing is carried: what each tool may do is read from the
+	 * build ships differently moves to the version in effect, due to be listed again. Old tool authority ends with its
+	 * definition. Only the listing is carried: what each tool may do is read from the
 	 * definition in effect, so a tool that is a write or on the floor now asks as one from the first moment. A server
 	 * record is left alone: its version moves only by the owner, and a listing for an older record is no release's.
 	 */
@@ -1363,6 +1371,7 @@ export function openCapabilities(options: CapabilityOptions) {
 				listing.version = connection.version;
 				listing.due = true;
 			}
+			await retireInvalidPermissions(tx, now());
 		}, ctx);
 		fault("connection:carried");
 	}
@@ -1744,6 +1753,7 @@ export function openCapabilities(options: CapabilityOptions) {
 					Object.keys(doc.accounts?.[name] ?? {}),
 					`you removed ${accepted?.service ?? name}`,
 				);
+				await retireInvalidPermissions(tx, now());
 				await log(tx, { at: now(), what: `You removed ${accepted?.service ?? name}` });
 			}, ctx);
 			if (definitions.has(name)) fault("shipped:removed");
@@ -1774,6 +1784,7 @@ export function openCapabilities(options: CapabilityOptions) {
 				const connection = await acceptedConnection(tx, name);
 				const service = connection?.service ?? name;
 				await endAccounts(tx, name, Object.keys(doc.accounts?.[name] ?? {}), `you disconnected ${service}`);
+				await retireInvalidPermissions(tx, now());
 				await log(tx, { at: now(), what: `You disconnected ${service}` });
 			}, ctx);
 			await locked.forget();
@@ -1803,6 +1814,7 @@ export function openCapabilities(options: CapabilityOptions) {
 				await endAccounts(tx, name, [account], `you signed out of ${words}`);
 				// with no account left, what was listed goes too: the next sign-in lists it again
 				if (doc.accounts?.[name] === undefined) delete doc.connections[name];
+				await retireInvalidPermissions(tx, now());
 				await log(tx, { at: now(), what: `You signed out of ${words}` });
 				return words;
 			}, ctx);
@@ -2103,8 +2115,10 @@ export function openCapabilities(options: CapabilityOptions) {
 				if (was) {
 					const permissions = await tx.doc(Permissions);
 					for (const permission of Object.values(permissions.permissions)) {
-						if (!permission.tool.startsWith(`${name}__`)) continue;
-						const arg = permission.match.as_account === undefined ? "account" : "as_account";
+						const authority = permission.authority;
+						const arg = authority?.accountArg;
+						if (authority?.connection !== name || arg === undefined) continue;
+						if (!(await validToolAuthority(tx, permission.tool, authority))) continue;
 						const bound = readPreparedAccount(permission.match[arg]);
 						if (bound === undefined || bound.key !== account || bound.generation === generation) continue;
 						permission.match[arg] = { key: account, generation };
@@ -2324,6 +2338,7 @@ export function openCapabilities(options: CapabilityOptions) {
 			};
 			delete doc.connections[name];
 			doc.public[name] ??= [];
+			await retireInvalidPermissions(tx, now());
 			await log(tx, { at: now(), what: `${server.service} needs no sign-in` });
 			return true;
 		}, ctx);

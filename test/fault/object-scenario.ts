@@ -55,7 +55,11 @@ export async function objectScenario(home: string, scenario: ObjectScenario, fau
 				version: shaOf(text),
 				at: 1,
 				tools: {
-					get: { description: "read", schema: { type: "object", properties: { number: { type: "integer" } } } },
+					get: {
+						generation: ++connected.versions,
+						description: "read",
+						schema: { type: "object", properties: { number: { type: "integer" } } },
+					},
 				},
 			};
 			connected.accounts.example = { alice: { id: "alice", at: 1 }, bob: { id: "bob", at: 2 } };

@@ -57,13 +57,14 @@ it("fetches only an attachment named by the same authorized Gmail message and ho
 			version: shaOf(definition),
 			at: 1,
 			tools: {
-				get_profile: { description: "profile", schema: { type: "object" } },
-				search_messages: { description: "search", schema: { type: "object" } },
+				get_profile: { generation: ++store.versions, description: "profile", schema: { type: "object" } },
+				search_messages: { generation: ++store.versions, description: "search", schema: { type: "object" } },
 				get_message: {
+					generation: ++store.versions,
 					description: "message",
 					schema: { type: "object", properties: { message_id: { type: "string" } }, required: ["message_id"] },
 				},
-				get_thread: { description: "thread", schema: { type: "object" } },
+				get_thread: { generation: ++store.versions, description: "thread", schema: { type: "object" } },
 			},
 		};
 		store.accounts.gmail = { alice: { id: "alice@example.test", at: 1 }, bob: { id: "bob@example.test", at: 1 } };
@@ -142,7 +143,10 @@ it("fetches a file only when a Slack thread's card shows it, at most 10 MB, and 
 			version: shaOf(definition),
 			at: 1,
 			tools: Object.fromEntries(
-				parsed.connection.reads.map((tool) => [tool, { description: tool, schema: schema(["channel", "ts"]) }]),
+				parsed.connection.reads.map((tool) => [
+					tool,
+					{ generation: ++store.versions, description: tool, schema: schema(["channel", "ts"]) },
+				]),
 			),
 		};
 		store.accounts.slack = { ana: { id: "@ana at Acme", at: 1 } };

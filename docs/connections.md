@@ -55,8 +55,10 @@ followed card says who follows it and until what; the event line says the change
 never the model's, with the object's card beneath. The watch itself (its file, task, health and the panel's Watching
 list) is the watches slice; this section owns the object side.
 
-Bind remote descriptions and schemas to the accepted definition so a relisting cannot change prompt authority; verify
-effect authority at every call start and retry, idempotent replay after revocation included; verify OAuth refresh,
+Bind remote descriptions and schemas to the accepted definition so a relisting cannot change prompt authority. A
+permission and its draft belong to that accepted tool; removal or definition replacement ends their authority.
+Continuous relisting, tool switches and owner read overlays keep it. Verify effect authority at every call start and
+retry, idempotent replay after revocation included; verify OAuth refresh,
 interrupted sign-in, disconnect, tool switches and tools a server adds later.
 
 **Harnesses.** Any ACP agent, shipped as a file or added by its command line, connected in a folder per agent; one

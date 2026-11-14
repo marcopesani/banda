@@ -350,7 +350,7 @@ export async function watchScenario(
 				tools: Object.fromEntries(
 					connection.tools.map((tool) => [
 						tool.name,
-						{ description: tool.description, schema: tool.inputSchema as JsonObject },
+						{ generation: ++connected.versions, description: tool.description, schema: tool.inputSchema as JsonObject },
 					]),
 				),
 			};

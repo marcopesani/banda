@@ -1979,6 +1979,288 @@ describe("accounts", () => {
 		expect(sent).toEqual([true]);
 	});
 
+	it.each([
+		{ field: "as_account", shape: "string", state: "on" },
+		{ field: "as_account", shape: "object", state: "on" },
+		{ field: "account", shape: "object", state: "on" },
+		{ field: "as_account", shape: "string", state: "off" },
+	])(
+		"replacement carries the credential binding past a provider's $field $shape when $state",
+		async ({ field, shape, state }) => {
+			const fake = await startFakeMcp({ auth: "oauth" });
+			fakes.push(fake);
+			fake.tools = fake.tools.map((tool) =>
+				tool.name !== "create_event"
+					? tool
+					: {
+							...tool,
+							inputSchema: {
+								...tool.inputSchema,
+								properties: { title: { type: "string" }, day: { type: "string" }, [field]: { type: shape } },
+							},
+						},
+			);
+			const s = await open(fake);
+			await define(s, "cal", fileOf(fake));
+			fake.user = "ana";
+			await signInAsOwner(s.capabilities, "cal");
+			const originalTokens = new Set(fake.tokens);
+			const original = (await s.harness.snapshot(Connected, context))?.accounts.cal?.ana?.generation;
+			if (original === undefined) throw new Error("the account has no sign-in generation");
+			const arg = field === "account" ? "as_account" : "account";
+			const provider = shape === "string" ? "billing" : { key: "ana", generation: original };
+			const args = { title: "Tea", day: "mon", [field]: provider };
+			s.model.plan([{ tool: "cal__create_event", args }]);
+			const first = await s.say("tea on monday");
+			const waiting = await until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+			await answer(s.harness, waiting.key, "approve", web, "bearer", {
+				approving: { permission: { scope: "always" } },
+			});
+			await s.done(first.turn);
+			expect(fake.calls).toEqual([{ tool: "create_event", args }]);
+			const before = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+			expect(before).toHaveLength(1);
+			expect(before[0]?.[1].match).toMatchObject({ [field]: provider, [arg]: { key: "ana", generation: original } });
+
+			s.model.plan([{ tool: "cal__create_event", args: { ...args, day: "tue" } }]);
+			const old = await s.say("tea on tuesday");
+			const draft = await until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+			if (state === "off") await switchTool(s, "cal__create_event", false);
+			await signInAsOwner(s.capabilities, "cal", { choice: { account: "ana" } });
+			const generation = (await s.harness.snapshot(Connected, context))?.accounts.cal?.ana?.generation;
+			expect(generation).not.toBe(original);
+			const after = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+			expect(after).toEqual(
+				before.map(([id, permission]) => [
+					id,
+					{ ...permission, match: { ...permission.match, [arg]: { key: "ana", generation } } },
+				]),
+			);
+			if (state === "off") await switchTool(s, "cal__create_event", true);
+			await answer(s.harness, draft.key, "approve", web, "bearer");
+			await s.done(old.turn);
+			expect(fake.calls).toEqual([{ tool: "create_event", args }]);
+			expect((await s.results(old.chat)).at(-1)?.error).toBe(true);
+
+			const sent: { readonly args: unknown; readonly replacementSignIn: boolean }[] = [];
+			fake.onCall = async (_tool, given, authorization) => {
+				sent.push({ args: given, replacementSignIn: !originalTokens.has(authorization.slice(7)) });
+				return { text: "created" };
+			};
+			s.model.plan([{ tool: "cal__create_event", args }]);
+			const fresh = await s.say("tea on monday");
+			await s.done(fresh.turn);
+			expect(await openWaits(s.harness)).toEqual([]);
+			expect(sent).toEqual([{ args, replacementSignIn: true }]);
+		},
+	);
+
+	it.each([
+		{ turnover: "removed and re-added", granting: "before turnover" },
+		{ turnover: "replaced by a new definition", granting: "before turnover" },
+		{ turnover: "removed and re-added", granting: "from an older approval" },
+		{ turnover: "replaced by a new definition", granting: "from an older approval" },
+		{ turnover: "removed and re-added unchanged", granting: "before turnover" },
+		{ turnover: "removed and re-added unchanged", granting: "from an older approval" },
+	])("a grant $granting cannot cross a tool listing that was $turnover", async ({ turnover, granting }) => {
+		const fake = await startFakeMcp({ auth: "oauth" });
+		fakes.push(fake);
+		const originalTools = fake.tools.map((tool) =>
+			tool.name !== "create_event"
+				? tool
+				: {
+						...tool,
+						inputSchema: {
+							...tool.inputSchema,
+							properties: { title: { type: "string" }, day: { type: "string" }, account: { type: "object" } },
+						},
+					},
+		);
+		fake.tools = originalTools;
+		const s = await open(fake);
+		await define(s, "cal", fileOf(fake));
+		fake.user = "ana";
+		await signInAsOwner(s.capabilities, "cal");
+		const originalTokens = new Set(fake.tokens);
+		const generation = (await s.harness.snapshot(Connected, context))?.accounts.cal?.ana?.generation;
+		if (generation === undefined) throw new Error("the account has no sign-in generation");
+		const provider = { key: "ana", generation };
+		const args = { title: "Tea", day: "mon", account: provider };
+		s.model.plan([{ tool: "cal__create_event", args }]);
+		const first = await s.say("tea on monday");
+		const waiting = await until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+		if (granting === "before turnover") {
+			await answer(s.harness, waiting.key, "approve", web, "bearer", {
+				approving: { permission: { scope: "always" } },
+			});
+			await s.done(first.turn);
+			const before = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+			expect(before).toHaveLength(1);
+			expect(before[0]?.[1].match).toMatchObject({ account: provider, as_account: { key: "ana", generation } });
+		}
+
+		if (turnover.startsWith("removed")) {
+			fake.tools = originalTools.filter((tool) => tool.name !== "create_event");
+			await s.capabilities.connect("cal");
+		}
+		fake.tools =
+			turnover === "removed and re-added unchanged"
+				? originalTools
+				: originalTools.map((tool) =>
+						tool.name !== "create_event"
+							? tool
+							: {
+									...tool,
+									inputSchema: {
+										...tool.inputSchema,
+										properties: { title: { type: "string" }, day: { type: "string" }, as_account: { type: "object" } },
+									},
+								},
+					);
+		if (turnover.startsWith("removed")) {
+			await s.capabilities.connect("cal");
+			await switchTool(s, "cal__create_event", true);
+		} else {
+			await define(s, "cal", `${fileOf(fake)}\n`);
+		}
+		if (granting === "from an older approval") {
+			const answered = await answer(s.harness, waiting.key, "approve", web, "bearer", {
+				approving: { permission: { scope: "always" } },
+			});
+			expect.soft(answered).toMatchObject({ refused: expect.any(String) });
+			expect(Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual([]);
+			return;
+		}
+		expect.soft(Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual([]);
+		await signInAsOwner(s.capabilities, "cal", { choice: { account: "ana" } });
+		expect.soft(Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual([]);
+		const sent: { readonly args: unknown; readonly replacementSignIn: boolean }[] = [];
+		fake.onCall = async (_tool, given, authorization) => {
+			sent.push({ args: given, replacementSignIn: !originalTokens.has(authorization.slice(7)) });
+			return { text: "created" };
+		};
+		const freshArgs =
+			turnover === "removed and re-added unchanged" ? args : { title: "Tea", day: "mon", as_account: provider };
+		s.model.plan([{ tool: "cal__create_event", args: freshArgs }]);
+		const fresh = await s.say("tea after the tool changed");
+		const approval = await until(async () => {
+			const waiting = (await openWaits(s.harness)).find((w) => w.ask.type === "approval");
+			return waiting ?? (sent.length > 0 ? "borrowed old permission" : undefined);
+		});
+		expect(sent).toEqual([]);
+		if (typeof approval === "string") throw new Error(approval);
+		await answer(s.harness, approval.key, "approve", web, "bearer");
+		await s.done(fresh.turn);
+		expect(sent).toEqual([{ args: freshArgs, replacementSignIn: true }]);
+	});
+
+	it("continuous tool authority keeps each agent's grant through relisting, switches, read overlays and sign-in", async () => {
+		const fake = await startFakeMcp({ auth: "oauth" });
+		fakes.push(fake);
+		const read = fake.tools.find((tool) => tool.name === "list_events");
+		if (read === undefined) throw new Error("the fake has no read tool");
+		fake.tools = [...fake.tools, { ...read, name: "extra_read" }];
+		const s = await withMara(fake);
+		fake.user = "ana";
+		await signInAsOwner(s.capabilities, "cal");
+		await s.capabilities.switchAccount("mara", "cal", "ana", true);
+		const args = { title: "Tea", day: "mon" };
+		for (const agent of ["sancho", "mara"]) {
+			s.model.plan([{ tool: "cal__create_event", args }]);
+			const ran = await s.sayTo(agent, "tea on monday");
+			const wait = await until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+			await answer(s.harness, wait.key, "approve", web, "bearer", {
+				approving: {
+					permission: agent === "sancho" ? { scope: "always" } : { scope: "until", until: Date.now() + 60 * 60_000 },
+				},
+			});
+			await s.done(ran.turn);
+		}
+		const before = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+		expect(before).toHaveLength(2);
+		const listed = (await s.harness.snapshot(Connected, context))?.connections.cal.tools.create_event;
+		await s.capabilities.connect("cal");
+		await switchTool(s, "cal__create_event", false);
+		await allowReads(s, "cal", ["extra_read"]);
+		fake.tools = fake.tools.filter((tool) => tool.name !== "list_events");
+		await s.capabilities.connect("cal");
+		expect((await s.harness.snapshot(Connected, context))?.connections.cal.tools.create_event).toEqual(listed);
+		expect(Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual(before);
+		await signInAsOwner(s.capabilities, "cal", { choice: { account: "ana" } });
+		const generation = (await s.harness.snapshot(Connected, context))?.accounts.cal.ana.generation;
+		expect(Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual(
+			before.map(([id, permission]) => [
+				id,
+				{ ...permission, match: { ...permission.match, account: { key: "ana", generation } } },
+			]),
+		);
+		await switchTool(s, "cal__create_event", true);
+		for (const agent of ["sancho", "mara"]) {
+			s.model.plan([{ tool: "cal__create_event", args }]);
+			const ran = await s.sayTo(agent, "tea with the same permission");
+			await s.done(ran.turn);
+		}
+		expect(await openWaits(s.harness)).toEqual([]);
+		expect(fake.calls).toEqual(Array.from({ length: 4 }, () => ({ tool: "create_event", args })));
+	});
+
+	it("a current-definition grant survives an identical listing that was due after the definition changed", async () => {
+		const fake = await startFakeMcp({ auth: "oauth" });
+		fakes.push(fake);
+		let holding = false;
+		let entered = false;
+		let release: (() => void) | undefined;
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const gated: typeof fetch = async (input, init) => {
+			if (holding && String(input).startsWith(fake.url) && String(init?.body ?? "").includes("tools/list")) {
+				entered = true;
+				await held;
+			}
+			return fetch(input, init);
+		};
+		const s = await open(fake, undefined, false, gated);
+		await define(s, "cal", fileOf(fake));
+		fake.user = "ana";
+		await signInAsOwner(s.capabilities, "cal");
+		const before = (await s.harness.snapshot(Connected, context))?.connections.cal;
+		holding = true;
+		const updating = define(s, "cal", `${fileOf(fake)}\n`);
+		try {
+			await until(() => entered);
+			await s.capabilities.carryListings();
+			await s.capabilities.install();
+			const carried = (await s.harness.snapshot(Connected, context))?.connections.cal;
+			expect(carried?.version).not.toBe(before?.version);
+			expect(carried?.due).toBe(true);
+			expect(carried?.tools.create_event.generation).toBe(before?.tools.create_event.generation);
+			const args = { title: "Tea", day: "mon" };
+			s.model.plan([{ tool: "cal__create_event", args }]);
+			const first = await s.say("tea while the listing is due");
+			const wait = await until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval"));
+			await answer(s.harness, wait.key, "approve", web, "bearer", { approving: { permission: { scope: "always" } } });
+			await s.done(first.turn);
+			const permission = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+			expect(permission).toHaveLength(1);
+			expect(permission[0]?.[1].authority?.version).toBe(carried?.version);
+			holding = false;
+			release?.();
+			await updating;
+			expect(Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual(permission);
+			expect((await s.harness.snapshot(Connected, context))?.connections.cal.due).toBeUndefined();
+			s.model.plan([{ tool: "cal__create_event", args }]);
+			const fresh = await s.say("tea after the identical listing");
+			await s.done(fresh.turn);
+			expect(await openWaits(s.harness)).toEqual([]);
+			expect(fake.calls).toEqual(Array.from({ length: 2 }, () => ({ tool: "create_event", args })));
+		} finally {
+			holding = false;
+			release?.();
+			await updating;
+		}
+	});
+
 	it("prepared sign-in identity preserves a server's account and arbitrary extra arguments", async () => {
 		const fake = await startFakeMcp({ auth: "oauth" });
 		fakes.push(fake);
