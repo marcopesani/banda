@@ -37,6 +37,21 @@ describe("landing downloads", () => {
 		expect([...files.keys()]).toEqual(["desktop/linux/x64/deb"]);
 	});
 
+	it("does not offer unsupported downloads even when old releases contain them", () => {
+		const files = downloadFiles([
+			release("old", "2026-11-01", [
+				"banda-1-win-x64.exe",
+				"banda-cli-1-win-x64.zip",
+				"banda-1-mac-x64.dmg",
+				"banda-cli-1-mac-x64.tar.gz",
+				"banda-1-linux-arm64.deb",
+				"banda-cli-1-linux-arm64.tar.gz",
+			]),
+			release("new", "2026-11-02", ["banda-2-mac-arm64.dmg", "banda-2-linux-amd64.deb"]),
+		]);
+		expect([...files.keys()]).toEqual(["desktop/mac/arm64/dmg", "desktop/linux/x64/deb"]);
+	});
+
 	it("bakes direct links and the matching checksums into HTML, without browser API access", async () => {
 		const html = await readFile(new URL("../site/index.html", import.meta.url), "utf8");
 		const names = [...html.matchAll(/data-file="([^"]+)"/g)].map(([, key]) => {
@@ -55,7 +70,7 @@ describe("landing downloads", () => {
 		const result = updateDownloads(html, releases);
 		const links = [...result.matchAll(/data-file="([^"]+)" href="([^"]+)"/g)];
 		// every file once in the list, and each shortcut to one (the hero's) follows the release too
-		expect(new Set(links.map(([, key]) => key)).size).toBe(8);
+		expect(new Set(links.map(([, key]) => key)).size).toBe(5);
 		expect(result).not.toContain("mac-x64");
 		for (const [, key, url] of links)
 			expect(url).toContain(`/releases/download/${key.startsWith("phone") ? "phone2" : "v2"}/`);
@@ -86,7 +101,7 @@ for (const arch of ["x64", "amd64"]) {
 it("removes a previously published Debian link when the latest release has no suitable Linux desktop", () => {
 	const old = release("old", "2026-11-01", ["banda-1-linux-amd64.deb", "banda-1-mac-arm64.dmg", "banda-1-win-x64.exe"]);
 	const html =
-		'<span data-file="desktop/linux/x64/deb"><i aria-hidden="true"></i>Linux unavailable</span><a data-file="desktop/mac/arm64/dmg" href="old">macOS</a><a data-file="desktop/win/x64/exe" href="old">Windows</a><!-- checksums:start --><!-- checksums:end -->';
+		'<span data-file="desktop/linux/x64/deb"><i aria-hidden="true"></i>Linux (Debian, x64) unavailable</span><a data-file="desktop/mac/arm64/dmg" href="old">macOS</a><!-- checksums:start --><!-- checksums:end -->';
 	const available = updateDownloads(html, [old]);
 	expect(available).toContain(
 		'<a data-file="desktop/linux/x64/deb" href="https://github.com/purrgrammer/banda/releases/download/old/banda-1-linux-amd64.deb">',
@@ -101,12 +116,12 @@ it("removes a previously published Debian link when the latest release has no su
 		const current = [old, release("new", "2026-11-02", names)];
 		const unavailable = updateDownloads(available, current);
 		expect(unavailable).toContain(
-			'<span data-file="desktop/linux/x64/deb"><i aria-hidden="true"></i>Linux unavailable</span>',
+			'<span data-file="desktop/linux/x64/deb"><i aria-hidden="true"></i>Linux (Debian, x64) unavailable</span>',
 		);
 		expect(unavailable).not.toContain(".deb");
 		expect(unavailable).not.toContain(".AppImage");
 		expect(unavailable).toContain("/old/banda-1-mac-arm64.dmg");
-		expect(unavailable).toContain("/old/banda-1-win-x64.exe");
+		expect(unavailable).not.toContain("/old/banda-1-win-x64.exe");
 		expect(updateDownloads(unavailable, current)).toBe(unavailable);
 		expect(updateDownloads(unavailable, [old])).toBe(available);
 	}
