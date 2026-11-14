@@ -7,6 +7,13 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      build_target:
+        description: Choose the platform candidates to build
+        type: choice
+        default: all
+        options:
+          - all
+          - linux-x64
       native_computer:
         description: Verify the staged Linux computer through the app (requires KVM and Chrome on the runner)
         type: boolean
@@ -33,9 +40,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { arch: arm64, runner: ubuntu-24.04-arm }
-          - { arch: x64, runner: ubuntu-latest }
+        include: >-
+          ${{ fromJSON(inputs.build_target == 'linux-x64' && '[{"arch":"x64","runner":"ubuntu-latest"}]' || '[{"arch":"arm64","runner":"ubuntu-24.04-arm"},{"arch":"x64","runner":"ubuntu-latest"}]') }}
     name: build computer images (linux-${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -61,11 +67,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { runner: macos-latest, target: mac-arm64, computer: arm64 }
-          - { runner: windows-latest, target: win-x64, computer: "" }
-          - { runner: ubuntu-latest, target: linux-x64, computer: x64 }
-          - { runner: ubuntu-24.04-arm, target: linux-arm64, computer: arm64 }
+        include: >-
+          ${{ fromJSON(inputs.build_target == 'linux-x64' && '[{"runner":"ubuntu-latest","target":"linux-x64","computer":"x64"}]' || '[{"runner":"macos-latest","target":"mac-arm64","computer":"arm64"},{"runner":"windows-latest","target":"win-x64","computer":""},{"runner":"ubuntu-latest","target":"linux-x64","computer":"x64"},{"runner":"ubuntu-24.04-arm","target":"linux-arm64","computer":"arm64"}]') }}
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -103,20 +106,6 @@ jobs:
         env:
           BANDA_COMPUTER_IMAGES: ${{ matrix.computer != '' && format('{0}/computer-images', runner.temp) || '' }}
       - run: node scripts/smoke-release.ts
-      - name: Prepare native Linux KVM access
-        if: inputs.native_computer && startsWith(matrix.target, 'linux-')
-        run: |
-          if [ ! -c /dev/kvm ]; then
-            echo "::error::Native Linux qualification requires /dev/kvm. This runner has no KVM device; Linux remains unqualified."
-            exit 1
-          fi
-          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            sudo setfacl -m "u:$(id -u):rw" /dev/kvm
-          fi
-          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo "::error::Native Linux qualification cannot access /dev/kvm after granting the runner account access."
-            exit 1
-          fi
       - name: Prepare the native Linux acceptance browser
         id: native-chrome
         if: inputs.native_computer && startsWith(matrix.target, 'linux-')
@@ -128,9 +117,10 @@ jobs:
         if: inputs.native_computer && startsWith(matrix.target, 'linux-')
         env:
           CHROME: ${{ steps.native-chrome.outputs.chrome-path }}
+          BANDA_RELEASE_ROOT: ${{ github.workspace }}/release/banda
         run: |
           "$CHROME" --version
-          node scripts/verify-computer.ts "${{ runner.temp }}/native-computer-evidence"
+          node scripts/verify-linux-computer.ts "$RUNNER_TEMP/native-computer-evidence"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && inputs.native_computer && startsWith(matrix.target, 'linux-')
         with:
@@ -159,7 +149,7 @@ jobs:
   # Java it needs). A tag's APK is signed with banda's key from the repository's secrets, so each release installs over
   # the one before; a manual run without the key uploads an unsigned APK, to try the build and nothing more.
   android:
-    if: github.event_name == 'workflow_dispatch' && inputs.linux_start_diagnostic != true && inputs.public_delivery != true
+    if: github.event_name == 'workflow_dispatch' && inputs.linux_start_diagnostic != true && inputs.public_delivery != true && inputs.build_target != 'linux-x64'
     name: build (android-arm64)
     runs-on: ubuntu-latest
     timeout-minutes: 45
