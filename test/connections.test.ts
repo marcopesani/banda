@@ -1952,7 +1952,16 @@ describe("accounts", () => {
 		const covered = await write();
 		await s.done(covered.turn);
 		expect(fake.calls).toHaveLength(2);
+		const granted = Object.keys((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+		expect(granted).toHaveLength(1);
 		await signInAsOwner(s.capabilities, "cal", { choice: { account: "ana" } });
+		// what can never match again is not left listed as granted: it is taken back, and said
+		expect((await s.harness.snapshot(Permissions, context))?.permissions).toEqual({});
+		expect(
+			(await s.harness.snapshot(ActivityLog, context))?.events.filter((event) =>
+				event.what.startsWith("You took back"),
+			),
+		).toHaveLength(1);
 		const replaced = await write();
 		const approval = await Promise.race([
 			s.done(replaced.turn).then(() => undefined),
