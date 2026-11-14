@@ -25,7 +25,7 @@ import {
 	createWriteTool,
 	type ImageProcessor,
 } from "@earendil-works/pi-durable/tools";
-import { Accepted } from "../core/agents.ts";
+import { Accepted, AGENT_NAME } from "../core/agents.ts";
 import { type HoldingEgress, intake, withIntake } from "../core/egress.ts";
 
 import { context } from "../core/store.ts";
@@ -167,8 +167,12 @@ const BEFORE = ["agents", "routines", "watches"];
 
 /** The "before" file at `at` (absolute), relative to the workspace; undefined for any other file. */
 function beforeFile(workspace: string, at: string): string | undefined {
-	const folder = BEFORE.find((name) => at.startsWith(`${workspace}/${name}/`));
-	return folder === undefined ? undefined : posix.relative(workspace, at);
+	const relative = posix.relative(workspace, at);
+	return BEFORE.includes(posix.dirname(relative)) &&
+		posix.extname(relative) === ".md" &&
+		AGENT_NAME.test(posix.basename(relative, ".md"))
+		? relative
+		: undefined;
 }
 
 /** What the model is told of a "before" file a call changed (by its path in the workspace), as a diagnostic. */
@@ -194,7 +198,8 @@ async function beforeFiles(
 ): Promise<Map<string, string> | undefined> {
 	const found = new Map<string, string>();
 	const look = async (path: string, info: { kind: string; size: number; mtimeMs: number }) => {
-		const relative = posix.relative(workspace, path);
+		const relative = beforeFile(workspace, path);
+		if (relative === undefined) return;
 		if (info.kind !== "file") return found.set(relative, info.kind);
 		if (info.size > HASHED) return found.set(relative, `${info.size}:${info.mtimeMs}`);
 		const opened = await env.openBinaryReader(path, { noFollow: true }, ctx);
