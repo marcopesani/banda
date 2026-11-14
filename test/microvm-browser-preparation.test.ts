@@ -100,6 +100,7 @@ if (args[0] === "image") {
     });
   }
   if (args.includes("/banda/ctl.py")) {
+    if (args.at(-1) === "ping") appendFileSync(join(process.env.MSB_HOME, "pings"), "ping\\n");
     process.stdout.write(args.at(-1) === "ping" ? JSON.stringify({ up: true }) : "{}");
   }
   if (args.includes("/banda/connect.py")) process.stdin.pipe(process.stdout);
@@ -149,6 +150,7 @@ if (args[0] === "image") {
 		proxyState: async () => readFile(join(cache, `${await proxy()}.json`), "utf8"),
 		browserLaunches: () => readFile(join(cache, "browser-launches"), "utf8"),
 		implicitStarts: () => readFile(join(cache, "implicit-starts"), "utf8").catch(() => ""),
+		pings: async () => (await readFile(join(cache, "pings"), "utf8").catch(() => "")).split("\n").length - 1,
 		vmNames: async () => (await readdir(cache)).filter((entry) => /^banda-microvm-.*\.json$/.test(entry)),
 		pauseBoxCreate: async () => {
 			await mkdir(cache, { recursive: true, mode: 0o700 });
@@ -375,6 +377,17 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 				await expect(egress.configure()).rejects.toThrow("This computer is closed");
 			} finally {
 				release();
+				await close();
+			}
+		});
+		it("asks a network guard that answers once for each preparation", async () => {
+			const { ensure, pings, close } = await fixture(true);
+			try {
+				await ensure();
+				const before = await pings();
+				await ensure();
+				expect((await pings()) - before).toBe(1);
+			} finally {
 				await close();
 			}
 		});
