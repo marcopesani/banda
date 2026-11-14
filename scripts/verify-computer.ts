@@ -373,7 +373,7 @@ try {
 	const History = Type.Array(
 		Type.Object({ entry: Type.Integer({ minimum: 1 }), mine: Type.Boolean(), text: Type.String() }),
 	);
-	const history = `[...document.querySelectorAll('[data-message-bubble]')].map(el => ({
+	const history = `[...document.querySelectorAll('[data-entry] [data-message-bubble]')].map(el => ({
 		entry: Number(el.closest('[data-entry]')?.getAttribute('data-entry') ?? 0),
 		mine: el.hasAttribute('data-mine'), text: el.textContent
 	}))`;
