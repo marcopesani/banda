@@ -494,7 +494,7 @@ export function FeedView({
 		if (at !== undefined && day(at) !== lastDay) {
 			flush();
 			lastDay = day(at);
-			nodes.push(<DaySeparator key={`day-${lastDay}`}>{dayLabel(at)}</DaySeparator>);
+			nodes.push(<DaySeparator key={`day-${segment.key}`}>{dayLabel(at)}</DaySeparator>);
 		}
 		if (firstUnread >= 0 && index === firstUnread) {
 			const after = segments.slice(index).filter((each) => unread.includes(each)).length;
