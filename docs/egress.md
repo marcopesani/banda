@@ -19,6 +19,9 @@ Entry points: ../proxy/state.py, ../proxy/addon.py, ../proxy/policy.py, ../proxy
   take finds the same disposition. Use the existing store and proxy receipts rather than a second queue.
 - Recover every stored ticket into a discoverable app action even when the command result was lost. Bind replay to
   the stored bytes; an uncertain send enters the existing owner retry/skip flow.
+- Keep a routine request attributable to its original agent and execution after the run ends. Show its existing
+  approval in the agent's chat. Archiving cancels waiting requests and queued result continuations; an already-started
+  send must never be repeated automatically.
 - Explicitly address GET/query disclosure, redirects, allowed hosts, credentials and browser subresources.
   HTTP method classification cannot prove consequence; special-case detectors cannot be the security boundary.
 - Exit: a reported ticket is either actionable or explicitly resolved, and no uncertain send
@@ -39,8 +42,8 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] Rethink how a held request is shown to the owner (issue #49): the card is still its method, address, headers and
   body; one command can hold several requests, one card each; the `ask_hosts` card does not say that approving it also
   sends the held requests waiting for those hosts
-- [ ] Qualify no-command held-request recovery under CI faults at transfer, store commit, acknowledgement and send
-  boundaries, including a daemon killed before tool intake
+- [ ] Qualify the rebased routine-request recovery under CI faults at transfer, store commit, acknowledgement and send
+  boundaries, including archive while waiting, archive during an admitted send and a kill before tool intake
 - [ ] A model that re-runs a held command opens a second card for the same request (a retried `git push`, a POST):
   intake could find a live release of the same request hash and open none
 - [ ] A group member's hidden chat is woken with how its held requests ended straight in that chat, outside its group

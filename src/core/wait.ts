@@ -373,6 +373,7 @@ export async function fill(
 			? { chat, input: 0 }
 			: ((ask.type === "approval" ? ask.errand : undefined) ?? (await errandOf(tx, chat)));
 	const agent = giving === undefined ? undefined : await agentOfChat(tx, chat);
+	if (giving !== undefined && agent === undefined) return { refused: "this approval no longer has an active agent" };
 	const covered =
 		giving === undefined || permission === undefined || ask.type !== "approval"
 			? []

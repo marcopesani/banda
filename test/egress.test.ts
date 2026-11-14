@@ -7,21 +7,22 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-import { type ConversationId, createRegistry, type Harness, type TaskId } from "@earendil-works/pi-durable";
+import { type ConversationId, createRegistry, type Harness, LiveDoc, type TaskId } from "@earendil-works/pi-durable";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { openBox } from "../src/box/box.ts";
+import { type BoxEgress, openBox } from "../src/box/box.ts";
 import { writeHash } from "../src/box/browser.ts";
 import { containerBox, proxyDown } from "../src/box/container.ts";
 import { browserLogin, browserMark, proxyMark, tabStamp } from "../src/box/guarded-proxy.ts";
 import { boxEnv, boxTools } from "../src/box/tools.ts";
 import { ActivityLog } from "../src/core/activity.ts";
-import { Accepted, AgentChats, agentPath, LEAD } from "../src/core/agents.ts";
+import { Accepted, AgentChats, agentPath, LEAD, shaOf } from "../src/core/agents.ts";
 import { stopArchived } from "../src/core/archive.ts";
 import { EFFECT } from "../src/core/ask.ts";
 import { allowHost, askHostsTool } from "../src/core/ask-hosts.ts";
@@ -54,15 +55,21 @@ import {
 import { OWNER, type Received } from "../src/core/gateway.ts";
 import { Groups } from "../src/core/groups.ts";
 import { hostCovers } from "../src/core/hosts.ts";
-import { covering, errandOf, Permissions, revoke } from "../src/core/permissions.ts";
+import { covering, errandOf, isOpen, Permissions, revoke } from "../src/core/permissions.ts";
 import { MAX_OPEN_ASKS, RELEASE, RELEASED, releasedText } from "../src/core/release.ts";
+import { RoutineRuns, Routines, routinePath } from "../src/core/routines.ts";
 import { openWaits } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
-import { defineCore, stop } from "../src/core/turn.ts";
+import { defineCore, Routes, stop } from "../src/core/turn.ts";
 import { type Approving, answer, liveWaits } from "../src/core/wait.ts";
+import { startDaemon } from "../src/daemon.ts";
+import { ownerToken } from "../src/home.ts";
+import { save, seed, type Workspace } from "../src/server/agents.ts";
+import type { LiveEvent } from "../src/server/api.ts";
+import { live } from "../src/server/transcript.ts";
 import { hostBox } from "./fixtures/host-box.ts";
-import { answerNudge } from "./fixtures/models.ts";
-import { blobStore, FAUX_MODEL, FakeGateway, tempHome, until } from "./helpers.ts";
+import { answerNudge, newestSaid } from "./fixtures/models.ts";
+import { allowTools, blobStore, FAUX_MODEL, FakeGateway, tempHome, until } from "./helpers.ts";
 import { pbtRuns } from "./pbt.ts";
 
 const owner = { gateway: "fake", peer: OWNER };
@@ -133,7 +140,7 @@ class FakeProxy implements EgressControl {
 }
 
 /** A core with the box's tools (on the host), over a fake proxy. The model runs `bash` for an owner message, then is done. */
-function setup() {
+function setup(options: { gate?: () => Promise<void>; report?: boolean; afterFailedRun?: "keep" } = {}) {
 	const gateway = new FakeGateway();
 	const faux = fauxProvider();
 	const models = createModels();
@@ -142,13 +149,22 @@ function setup() {
 	const core = defineCore({ blobs: blobStore(), gateway: () => gateway, model: () => FAUX_MODEL, retryDelay: () => 5 });
 	const holding = core.held(proxy);
 	let n = 0;
+	let continuations = 0;
 	faux.setResponses(
-		Array.from({ length: 1000 }, () => (ctx: { messages: readonly { role: string; content: unknown }[] }) => {
+		Array.from({ length: 1000 }, () => async (ctx: { messages: readonly { role: string; content: unknown }[] }) => {
+			await options.gate?.();
 			const heed = answerNudge(ctx.messages);
 			if (heed !== undefined) return heed;
-			const last = ctx.messages.at(-1);
+			const last = options.report ? newestSaid(ctx.messages) : ctx.messages.at(-1);
 			const text = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
 			n += 1;
+			if (options.report && last?.role === "user" && text.includes("<held-request-result>")) {
+				continuations += 1;
+				return fauxAssistantMessage(
+					[fauxToolCall("message_user", { text: "The retained request finished." }, { id: `report${n}` })],
+					{ stopReason: "toolUse" },
+				);
+			}
 			if (last?.role === "user" && !text.includes("<held-request-result>"))
 				return fauxAssistantMessage([fauxToolCall("bash", { command: "true" }, { id: `b${n}` })], {
 					stopReason: "toolUse",
@@ -162,13 +178,28 @@ function setup() {
 		registry.install(core.extension);
 		registry.install(core.groupExtension);
 		registry.install(boxTools({ egress }));
-		const harness = await openStore(home, { models, registry, env: boxEnv(box) });
+		const harness = await openStore(home, {
+			models,
+			registry,
+			env: boxEnv(box),
+			settings: { afterFailedRun: options.afterFailedRun ?? "continue" },
+		});
 		harness.resume();
 		const close = async () => {
 			await harness.close(context);
 			await box.close();
 		};
-		return { harness, close };
+		const workspace: Workspace = {
+			env: () => box.env(),
+			root: box.workspace,
+			tools: () =>
+				registry
+					.snapshot()
+					.tools()
+					.map(({ tool }) => tool.name),
+			known: () => true,
+		};
+		return { harness, close, workspace };
 	};
 	const say = async (harness: Harness, thread = "t") => {
 		const received: Received = await core.receive(harness, {
@@ -179,7 +210,18 @@ function setup() {
 		if (!("turn" in received)) throw new Error(JSON.stringify(received));
 		return received;
 	};
-	return { core, proxy, open, say, holding, withFault: (fault: (point: string) => void) => core.held(proxy, fault) };
+	return {
+		core,
+		proxy,
+		open,
+		say,
+		holding,
+		gateway,
+		get continuations() {
+			return continuations;
+		},
+		withFault: (fault: (point: string) => void) => core.held(proxy, fault),
+	};
 }
 
 /** Turn `turn` ended, and so did what it held: no release left, and no Turn waking the agent with one. */
@@ -222,6 +264,36 @@ const intakeApi = (harness: Harness, chat: number, now = Date.now): Parameters<t
 	now,
 });
 
+async function runRoutine(s: ReturnType<typeof setup>, harness: Harness, name = "receipt", agent = LEAD) {
+	const text = "---\ndescription: Retained request\nevery: 24h\n---\nSend the request.\n";
+	await harness.commit(async (tx) => {
+		(await tx.doc(Accepted)).files[routinePath(name)] = { sha: shaOf(text), text, at: Date.now() };
+		(await tx.doc(Routines)).routines[name] = { since: Date.now(), agent };
+	}, context);
+	await s.core.reconcile(harness);
+	await s.core.runRoutine(harness, name, randomUUID());
+	return until(async () => {
+		const record = (await harness.snapshot(Routines, context))?.routines[name]?.runs?.at(-1);
+		return record?.run !== undefined && record.turn !== undefined
+			? { ...record, run: record.run, turn: record.turn }
+			: undefined;
+	});
+}
+
+async function archiveAgent(s: ReturnType<typeof setup>, harness: Harness, workspace: Workspace, agent: string) {
+	await seed(harness, workspace);
+	const file = (await harness.snapshot(Accepted, context))?.files[agentPath(agent)];
+	if (file === undefined) throw new Error("Missing accepted agent");
+	await save(
+		harness,
+		workspace,
+		agent,
+		file.text.replace("---\n", "---\nstate: archived\n"),
+		file.sha,
+		s.core.agentChanged,
+	);
+}
+
 async function results(harness: Harness, chat: number): Promise<string[]> {
 	const page = await (await harness.conversation(chat as ConversationId, context))!.entries(
 		{ order: "ascending" },
@@ -237,6 +309,525 @@ async function results(harness: Harness, chat: number): Promise<string[]> {
 }
 
 describe("a held write", () => {
+	it.each([LEAD, "mara"])(
+		"archiving either contradictory routine owner (%s) cancels its existing approval",
+		async (agent) => {
+			const s = setup();
+			const { harness, close, workspace } = await s.open(await tempHome());
+			try {
+				const initial = await s.say(harness);
+				await until(() => done(harness, initial.turn));
+				await allowTools(harness, "mara", ["bash", "message_user"]);
+				const run = await runRoutine(s, harness, "contradictory-receipt", "mara");
+				await until(() => done(harness, run.turn));
+				s.proxy.pending.set(run.run, [held(run.run)]);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				const [wait] = await openWaits(harness, run.run);
+				if (wait === undefined) throw new Error("Missing recovered approval");
+				await harness.commit(async (tx) => {
+					(await tx.doc(AgentChats)).chats[run.run] = LEAD;
+				}, context);
+				await archiveAgent(s, harness, workspace, agent);
+				await stopArchived(harness);
+				expect(await approve(harness, wait.key)).toHaveProperty("refused");
+				expect(await openWaits(harness, run.run)).toEqual([]);
+				expect(s.proxy.sent).toEqual([]);
+			} finally {
+				await close();
+			}
+		},
+	);
+
+	it.each(["cleanup", "daemon startup"])(
+		"archive %s withdraws an admitted routine result queued behind a failed run with no live run",
+		async (boundary) => {
+			let block = false;
+			let entered = false;
+			let finish = () => {};
+			const gate = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			const s = setup({
+				report: true,
+				afterFailedRun: "keep",
+				gate: async () => {
+					if (!block) return;
+					entered = true;
+					await gate;
+					throw new Error("The model request failed before consuming the queued receipt.");
+				},
+			});
+			const home = await tempHome();
+			let { harness, close, workspace } = await s.open(home);
+			try {
+				const initial = await s.say(harness);
+				await until(() => done(harness, initial.turn));
+				await allowTools(harness, "mara", ["bash", "message_user"]);
+				const run = await runRoutine(s, harness, "queued-receipt", "mara");
+				await until(() => done(harness, run.turn));
+				const chat = run.run as ConversationId;
+				block = true;
+				await (await harness.conversation(chat, context))?.submit(
+					{ type: "input", content: "Another input is running." },
+					context,
+				);
+				await until(() => entered);
+				const request = held(run.run);
+				s.proxy.pending.set(run.run, [request]);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				const [wait] = await openWaits(harness, run.run);
+				if (wait === undefined) throw new Error("Missing recovered approval");
+				await approve(harness, wait.key);
+				const submission = () =>
+					harness.commit((tx) => tx.submissionByRequest(chat, `${RELEASED}:${request.ticket}`), context);
+				await until(async () => (await submission())?.status === "queued");
+				await until(() => done(harness, run.turn));
+				finish();
+				await until(async () => (await harness.snapshot(LiveDoc, chat, context))?.run === undefined);
+				expect(await submission()).toMatchObject({ status: "queued" });
+				if (boundary === "daemon startup") {
+					const pending = held(run.run);
+					s.proxy.pending.set(run.run, [pending]);
+					await sweepReceipts(s.holding, harness, Date.now, "recover");
+					const [stale] = await openWaits(harness, run.run);
+					if (stale === undefined) throw new Error("Missing unapproved recovery Wait");
+					await archiveAgent(s, harness, workspace, "mara");
+					await close();
+					const paused = await openStore(home, { models: createModels(), registry: createRegistry() });
+					try {
+						expect((await paused.inspect(context)).scheduling).toBe("paused");
+						expect((await paused.snapshot(LiveDoc, chat, context))?.run).toBeUndefined();
+						expect(
+							await paused.commit((tx) => tx.submissionByRequest(chat, `${RELEASED}:${request.ticket}`), context),
+						).toMatchObject({ status: "queued" });
+						expect((await paused.snapshot(AgentChats, context))?.chats[run.run]).toBeUndefined();
+						expect((await paused.snapshot(Accepted, context))?.files[agentPath("mara")]?.text).toContain(
+							"state: archived",
+						);
+						expect(await openWaits(paused, run.run)).toHaveLength(1);
+					} finally {
+						await paused.close(context);
+					}
+					let requests = 0;
+					const faux = fauxProvider();
+					faux.setResponses(
+						Array.from({ length: 100 }, () => () => {
+							requests += 1;
+							return fauxAssistantMessage("This archived agent must not start.");
+						}),
+					);
+					const models = createModels();
+					models.setProvider(faux.provider);
+					await writeFile(join(home, "config.json"), JSON.stringify({ model: FAUX_MODEL }));
+					const token = await ownerToken(home);
+					const egress: BoxEgress = {
+						env: () => ({}),
+						source: () => {},
+						configure: async () => "told",
+						pass: async () => {},
+						receiptChats: () => s.proxy.receiptChats(),
+						take: (chat) => s.proxy.take(chat),
+						ack: (chat, bytes, tickets) => s.proxy.ack(chat, bytes, tickets),
+						replay: (request) => s.proxy.replay(request),
+					};
+					const daemon = await startDaemon({ home, port: 0, models, box: { ...hostBox(home), egress }, log: () => {} });
+					try {
+						const response = await fetch(`http://127.0.0.1:${daemon.port}/api/waits/${stale.key}`, {
+							method: "POST",
+							headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+							body: JSON.stringify({ answer: "approve", type: "approval", via: "web" }),
+						});
+						expect(response.ok).toBe(false);
+						expect(await response.json()).toEqual({ error: "no open ask has this id" });
+						expect(requests).toBe(0);
+						expect(s.proxy.sent).toEqual([request]);
+					} finally {
+						await daemon.close();
+					}
+					harness = await openStore(home, { models, registry: createRegistry() });
+					close = () => harness.close(context);
+					expect(await submission()).toMatchObject({ status: "unanswered", reason: "aborted" });
+					expect(await openWaits(harness, run.run)).toEqual([]);
+					expect(await released(harness, run.run)).toEqual([]);
+					expect(requests).toBe(0);
+					return;
+				}
+				await archiveAgent(s, harness, workspace, "mara");
+				await stopArchived(harness);
+				expect(await submission()).toMatchObject({ status: "unanswered", reason: "aborted" });
+				await close();
+				block = false;
+				({ harness, close, workspace } = await s.open(home));
+				await stopArchived(harness);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				expect(await submission()).toMatchObject({ status: "unanswered", reason: "aborted" });
+				expect(s.proxy.sent).toEqual([request]);
+				expect(s.continuations).toBe(0);
+				expect(await released(harness, run.run)).toEqual([]);
+			} finally {
+				finish();
+				await close();
+			}
+		},
+	);
+
+	it("archiving a completed routine after recovery cancels its stale plain approval across restart", async () => {
+		const s = setup({ report: true });
+		const home = await tempHome();
+		let { harness, close, workspace } = await s.open(home);
+		try {
+			const initial = await s.say(harness);
+			await until(() => done(harness, initial.turn));
+			await allowTools(harness, "mara", ["bash", "message_user"]);
+			const run = await runRoutine(s, harness, "archived-receipt", "mara");
+			await until(async () => (await harness.getTask(run.turn as TaskId, context))?.state.status === "terminal");
+			expect((await harness.snapshot(AgentChats, context))?.chats[run.run]).toBeUndefined();
+			const request = held(run.run);
+			s.proxy.pending.set(run.run, [request]);
+			await sweepReceipts(s.holding, harness, Date.now, "recover");
+			const [wait] = await openWaits(harness, run.run);
+			if (wait === undefined) throw new Error("Missing recovered approval");
+			await archiveAgent(s, harness, workspace, "mara");
+			await stopArchived(harness);
+			expect(await approve(harness, wait.key)).toHaveProperty("refused");
+			expect(await openWaits(harness, run.run)).toEqual([]);
+			await close();
+			({ harness, close, workspace } = await s.open(home));
+			await stopArchived(harness);
+			await sweepReceipts(s.holding, harness, Date.now, "recover");
+			expect(await openWaits(harness, run.run)).toEqual([]);
+			expect(s.proxy.sent).toEqual([]);
+			expect(await released(harness, run.run)).toEqual([]);
+			expect(s.gateway.sent.filter((one) => one.out.text === "The retained request finished.")).toEqual([]);
+		} finally {
+			await close();
+		}
+	});
+
+	it.each(["before-start", "after-start"] as const)(
+		"archiving a completed routine %s stops admission and its result continuation before cleanup",
+		async (when) => {
+			const s = setup({ report: true });
+			const home = await tempHome();
+			let { harness, close, workspace } = await s.open(home);
+			let finish = () => {};
+			try {
+				const initial = await s.say(harness);
+				await until(() => done(harness, initial.turn));
+				await allowTools(harness, "mara", ["bash", "message_user"]);
+				const run = await runRoutine(s, harness, "archive-race", "mara");
+				await until(async () => (await harness.getTask(run.turn as TaskId, context))?.state.status === "terminal");
+				const request = held(run.run);
+				s.proxy.pending.set(run.run, [request]);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				const [wait] = await openWaits(harness, run.run);
+				if (wait === undefined) throw new Error("Missing recovered approval");
+				if (when === "after-start") {
+					const hold = new Promise<void>((resolve) => {
+						finish = resolve;
+					});
+					s.proxy.replay = async (request) => {
+						s.proxy.sent.push(request);
+						await hold;
+						return { status: 200, reason: "OK", headers: [], body: "" };
+					};
+					await approve(harness, wait.key);
+					await until(() => s.proxy.sent.length === 1);
+				}
+				await archiveAgent(s, harness, workspace, "mara");
+				if (when === "before-start") await approve(harness, wait.key);
+				finish();
+				await until(() => done(harness, run.turn));
+				await (await harness.conversation(run.run as ConversationId, context))?.waitForIdle(context);
+				expect(s.proxy.sent).toEqual(when === "before-start" ? [] : [request]);
+				expect(await released(harness, run.run)).toEqual([]);
+				expect(s.continuations).toBe(0);
+				await stopArchived(harness);
+				expect(await openWaits(harness, run.run)).toEqual([]);
+				await close();
+				({ harness, close, workspace } = await s.open(home));
+				await stopArchived(harness);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				expect(s.proxy.sent).toEqual(when === "before-start" ? [] : [request]);
+				expect(s.continuations).toBe(0);
+			} finally {
+				finish();
+				await close();
+			}
+		},
+	);
+
+	it("a routine approval's parent stream follows route authority changes without another task event", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		const controller = new AbortController();
+		let streaming: Promise<boolean> | undefined;
+		try {
+			const initial = await s.say(harness);
+			await until(() => done(harness, initial.turn));
+			const run = await runRoutine(s, harness);
+			await until(async () => (await harness.getTask(run.turn as TaskId, context))?.state.status === "terminal");
+			const parent = (await harness.snapshot(RoutineRuns, context))?.runs[run.run]?.chat;
+			if (parent === undefined) throw new Error("Missing routine parent");
+			s.proxy.pending.set(run.run, [held(run.run)]);
+			await sweepReceipts(s.holding, harness, Date.now, "recover");
+			const [wait] = await openWaits(harness, parent);
+			if (wait === undefined) throw new Error("Missing recovered approval");
+			const events: Extract<LiveEvent, { type: "waits" }>[] = [];
+			streaming = live(
+				harness,
+				parent,
+				(event) => {
+					if (event.type === "waits") events.push(event);
+				},
+				controller.signal,
+			);
+			await until(() => events.at(-1)?.waits.length === 1);
+			const route = (await harness.snapshot(Routes, context))?.chats[parent];
+			if (route === undefined) throw new Error("Missing parent route");
+			await harness.commit(async (tx) => {
+				delete (await tx.doc(Routes)).chats[parent];
+			}, context);
+			await until(() => events.at(-1)?.waits.length === 0);
+			expect((await openWaits(harness)).map((one) => one.key)).toEqual([wait.key]);
+			await harness.commit(async (tx) => {
+				(await tx.doc(Routes)).chats[parent] = route;
+			}, context);
+			await until(() => events.at(-1)?.waits.length === 1);
+			expect(events.at(-1)?.waits[0]).toMatchObject({ key: wait.key, chat: run.run });
+		} finally {
+			controller.abort();
+			await streaming;
+			await close();
+		}
+	});
+
+	it.each([
+		["active", "recovery"],
+		["active", "tool"],
+		["finished", "recovery"],
+		["finished", "tool"],
+	] as const)(
+		"an %s routine keeps one approval and one original continuation when %s intake wins",
+		async (state, first) => {
+			let resume = () => {};
+			let gate: Promise<void> | undefined;
+			const s = setup({ gate: () => gate ?? Promise.resolve(), report: true });
+			const { harness, close } = await s.open(await tempHome());
+			try {
+				const initial = await s.say(harness);
+				await until(() => done(harness, initial.turn));
+				if (state === "active")
+					gate = new Promise<void>((resolve) => {
+						resume = resolve;
+					});
+				const run = await runRoutine(s, harness);
+				if (state === "finished")
+					await until(async () => (await harness.getTask(run.turn as TaskId, context))?.state.status === "terminal");
+				const parent = (await harness.snapshot(RoutineRuns, context))?.runs[run.run]?.chat;
+				expect(parent).toBeDefined();
+				const request = held(run.run);
+				s.proxy.pending.set(run.run, [request]);
+				const lostAck = (point: string) => {
+					if (point.endsWith(":stored")) throw new Error("lost ACK");
+				};
+				await expect(
+					first === "recovery"
+						? sweepReceipts(s.holding, harness, Date.now, "recover", context, lostAck)
+						: intake(s.holding, intakeApi(harness, run.run), context, lostAck),
+				).rejects.toThrow("lost ACK");
+				const [wait] = await openWaits(harness, parent);
+				expect(wait).toMatchObject({ chat: run.run, displayChat: parent, ask: { args: { _ticket: request.ticket } } });
+				if (wait === undefined || wait.ask.type !== "approval") throw new Error("Missing retained routine approval");
+				expect(s.proxy.acked).toEqual([]);
+				expect(wait.ask.scopes).toEqual(first === "recovery" ? [] : expect.any(Array));
+				if (first === "recovery")
+					expect(await approve(harness, wait.key, { permission: { scope: "always" } })).toHaveProperty("refused");
+				await intake(s.holding, intakeApi(harness, run.run), context);
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				await intake(s.holding, intakeApi(harness, run.run), context);
+				expect((await openWaits(harness)).map((one) => one.key)).toEqual([wait.key]);
+				expect(Object.keys((await harness.snapshot(Tickets, context))?.tickets ?? {})).toEqual([request.ticket]);
+				expect(s.proxy.sent).toEqual([]);
+				expect(s.proxy.acked).toEqual([request.ticket]);
+				resume();
+				await until(async () => (await harness.getTask(run.turn as TaskId, context))?.state.status === "terminal");
+				expect((await harness.snapshot(AgentChats, context))?.chats[run.run]).toBeUndefined();
+				await approve(harness, wait.key);
+				await until(() => done(harness, run.turn));
+				await until(
+					() => s.gateway.sent.filter((one) => one.out.text === "The retained request finished.").length === 1,
+				);
+				expect(s.proxy.sent).toEqual([request]);
+				expect(await released(harness, run.run)).toHaveLength(1);
+				expect(await released(harness, parent!)).toEqual([]);
+				expect(await approve(harness, wait.key)).toHaveProperty("refused");
+				await sweepReceipts(s.holding, harness, Date.now, "recover");
+				expect(s.proxy.sent).toEqual([request]);
+				expect(s.gateway.sent.filter((one) => one.out.text === "The retained request finished.")).toHaveLength(1);
+			} finally {
+				resume();
+				await close();
+			}
+		},
+	);
+
+	it.each([
+		"archived",
+		"unknown",
+		"missing-parent",
+		"missing-conversation",
+		"missing-run",
+		"mismatched-parent",
+		"mismatched-execution",
+		"missing-route",
+		"mismatched-route",
+		"visible-execution",
+	] as const)("a retained routine with %s authority is resolved without reviving or granting it", async (state) => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const initial = await s.say(harness);
+			await until(() => done(harness, initial.turn));
+			const run = await runRoutine(s, harness);
+			await until(async () => (await harness.getTask(run.turn as TaskId, context))?.state.status === "terminal");
+			const parent = (await harness.snapshot(RoutineRuns, context))?.runs[run.run]?.chat;
+			if (parent === undefined) throw new Error("Missing routine parent");
+			const ordinary = held(run.run);
+			s.proxy.pending.set(run.run, [ordinary]);
+			await intake(s.holding, intakeApi(harness, run.run), context);
+			const [wait] = await openWaits(harness, parent);
+			if (wait === undefined) throw new Error("Missing ordinary approval");
+			await harness.commit(async (tx) => {
+				const accepted = await tx.doc(Accepted);
+				const chats = (await tx.doc(AgentChats)).chats;
+				const routes = (await tx.doc(Routes)).chats;
+				const runs = (await tx.doc(RoutineRuns)).runs;
+				if (state === "archived")
+					accepted.files[agentPath(LEAD)] = {
+						sha: "archived",
+						text: "---\ndescription: Archived\nstate: archived\n---\n",
+						at: 1,
+					};
+				if (state === "unknown") delete accepted.files[agentPath(LEAD)];
+				if (state === "missing-parent") delete chats[parent];
+				if (state === "missing-run") delete runs[run.run];
+				if (state === "missing-conversation") {
+					const record = runs[run.run];
+					if (record === undefined) throw new Error("Missing retained run");
+					const missing = parent + 10000;
+					runs[run.run] = { ...record, chat: missing };
+					chats[missing] = LEAD;
+					routes[missing] = { origin: owner, agent: LEAD };
+				}
+				if (state === "mismatched-parent") chats[parent] = "mara";
+				if (state === "mismatched-execution") chats[run.run] = "mara";
+				if (state === "missing-route") delete routes[parent];
+				if (state === "mismatched-route") routes[parent] = { origin: owner, agent: "mara" };
+				if (state === "visible-execution") routes[run.run] = { origin: owner, agent: LEAD };
+			}, context);
+			const recovered = held(run.run);
+			s.proxy.pending.set(run.run, [recovered]);
+			await sweepReceipts(s.holding, harness, Date.now, "recover");
+			expect((await harness.snapshot(Tickets, context))?.tickets[recovered.ticket]).toMatchObject({
+				notSent: state === "archived" ? "inactive" : "missing",
+			});
+			expect(s.proxy.acked).toEqual([ordinary.ticket, recovered.ticket]);
+			expect(s.proxy.sent).toEqual([]);
+			expect(await openWaits(harness, parent)).toEqual([]);
+			if (!["missing-route", "mismatched-route", "visible-execution"].includes(state)) {
+				expect(await approve(harness, wait.key, { permission: { scope: "always" } })).toHaveProperty("refused");
+				expect((await harness.snapshot(Permissions, context))?.permissions ?? {}).toEqual({});
+				expect((await openWaits(harness)).map((one) => one.key)).toEqual([wait.key]);
+			}
+		} finally {
+			await close();
+		}
+	});
+
+	it.each(["task", "until", "always"] as const)(
+		"a normal routine approval keeps its original agent and %s scope after its Turn ends and restarts",
+		async (scope) => {
+			const s = setup();
+			const home = await tempHome();
+			let { harness, close } = await s.open(home);
+			const requests = new Map<number, HeldRequest>();
+			const take = s.proxy.take.bind(s.proxy);
+			let holding = true;
+			s.proxy.take = async (chat) => {
+				if (
+					holding &&
+					(await harness.snapshot(RoutineRuns, context))?.runs[chat] !== undefined &&
+					!requests.has(chat)
+				) {
+					const request = held(chat);
+					requests.set(chat, request);
+					s.proxy.pending.set(chat, [request]);
+				}
+				return take(chat);
+			};
+			try {
+				const initial = await s.say(harness);
+				await until(() => done(harness, initial.turn));
+				await allowTools(harness, "mara", ["bash", "message_user"]);
+				const run = await runRoutine(s, harness);
+				const same = await runRoutine(s, harness, "same-agent");
+				const other = await runRoutine(s, harness, "other-agent", "mara");
+				const waits = await until(async () => {
+					const waits = await openWaits(harness);
+					return waits.length === 3 ? waits : undefined;
+				});
+				const wait = waits.find((one) => one.chat === run.run);
+				expect(wait).toBeDefined();
+				if (wait === undefined || wait.ask.type !== "approval") throw new Error("Missing routine approval");
+				expect(wait.ask.scopes?.map((one) => one.scope)).toContain(scope === "until" ? "hour" : scope);
+				for (const one of [run, same, other]) {
+					await until(async () => (await harness.getTask(one.turn as TaskId, context))?.state.status === "terminal");
+					expect((await harness.snapshot(AgentChats, context))?.chats[one.run]).toBeUndefined();
+				}
+				holding = false;
+				await close();
+				({ harness, close } = await s.open(home));
+				const permission = scope === "until" ? { scope, until: Date.now() + 3_600_000 } : { scope };
+				expect(await approve(harness, wait.key, { permission })).toHaveProperty("answered");
+				const permissions = Object.values((await harness.snapshot(Permissions, context))?.permissions ?? {});
+				expect(permissions).toHaveLength(1);
+				const [given] = permissions;
+				expect(given).toMatchObject({ agent: LEAD, from: wait.ask.errand });
+				if (given === undefined || wait.ask.errand === undefined) throw new Error("Missing scoped grant");
+				if (scope === "task") {
+					expect(given.task).toEqual(wait.ask.errand);
+					expect(given.task?.chat).toBe(run.run);
+					expect(isOpen(given, Date.now(), { ...wait.ask.errand, input: wait.ask.errand.input + 1 })).toBe(false);
+				}
+				await until(() => s.proxy.sent.length === (scope === "task" ? 1 : 2));
+				expect(s.proxy.sent.map((request) => request.chat).sort()).toEqual(
+					(scope === "task" ? [run.run] : [run.run, same.run]).sort(),
+				);
+				for (const request of s.proxy.sent) expect(request).toEqual(requests.get(request.chat));
+				const pending = await openWaits(harness);
+				expect(pending.map((one) => one.chat).sort()).toEqual(
+					(scope === "task" ? [same.run, other.run] : [other.run]).sort(),
+				);
+				const later = await runRoutine(s, harness, "later");
+				await until(async () => (await harness.getTask(later.turn as TaskId, context))?.state.status === "terminal");
+				const room = await s.core.groups.create(harness, { name: "Same agent", members: [LEAD] });
+				const group = (await harness.snapshot(Groups, context))?.groups[room]?.executions[LEAD]?.chat;
+				if (group === undefined) throw new Error("Missing group execution");
+				const draft = { tool: "propose_send", args: wait.ask.args };
+				for (const chat of [initial.chat, group, later.run, other.run, run.run]) {
+					const covered = await harness.commit((tx) => covering(tx, draft, chat, Date.now()), context);
+					expect(covered !== undefined, `scope ${scope}, execution ${chat}`).toBe(
+						chat === run.run || (scope !== "task" && chat !== other.run),
+					);
+				}
+				for (const one of pending) await answer(harness, one.key, "deny", web, "bearer");
+			} finally {
+				await close();
+			}
+		},
+	);
+
 	it("is taken into the store and listed; approved, it is sent exactly as held, once", async () => {
 		const s = setup();
 		const home = await tempHome();
@@ -1252,10 +1843,11 @@ describe("a held write's release", () => {
 		const s = setup();
 		const { harness, close } = await s.open(await tempHome());
 		try {
-			const chat = await harness.commit(
-				async (tx) => Number((await tx.createConversation({ ownership: { kind: "ownerless" } })).id),
-				context,
-			);
+			const initial = await s.say(harness);
+			await until(() => done(harness, initial.turn));
+			const room = await s.core.groups.create(harness, { name: "Receipt group", members: [LEAD] });
+			const chat = (await harness.snapshot(Groups, context))?.groups[room]?.executions[LEAD]?.chat;
+			if (chat === undefined) throw new Error("Missing group execution");
 			const request = held(chat);
 			await harness.commit(async (tx) => {
 				await s.holding.retain(tx, chat, [request], Date.now(), "tool");
