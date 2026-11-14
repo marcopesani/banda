@@ -146,7 +146,8 @@ function runtime(assets: MicrovmAssets, home: string) {
 type Runtime = ReturnType<typeof runtime>;
 
 async function openRuntime(home: string): Promise<Runtime> {
-	const assets = await installedMicrovmAssets();
+	// asked before the bundle is verified: a computer offline for this is tried again now and then, and each try
+	// would hash the whole bundle to say the same thing
 	if (process.platform === "linux") {
 		await access("/dev/kvm", constants.R_OK | constants.W_OK).catch(() => {
 			throw new Error(
@@ -154,6 +155,7 @@ async function openRuntime(home: string): Promise<Runtime> {
 			);
 		});
 	}
+	const assets = await installedMicrovmAssets();
 	const storage = join(home, "computer");
 	for (const path of [assets.root, assets.msb, assets.firmware, assets.box.archive, assets.proxy.archive]) {
 		const below = relative(storage, await realpath(path));
@@ -507,16 +509,18 @@ export function microvmBox(input: string): BoxSetup {
 					`${join(storage, "proxy", directory)}:/${directory}:uid=1000,gid=1000`,
 				]),
 			]);
-			if (!(await proxyReady(transport)))
+			// a guard that answers is asked once: this runs before every command
+			if (!(await proxyReady(transport))) {
 				await current.detach(
 					{ name: names.proxy, user: "1000:1000", argv: ["/usr/local/bin/python3", "/banda/start.py"] },
 					startup.signal,
 				);
-			const deadline = Date.now() + 30_000;
-			while (!(await proxyReady(transport))) {
-				assertOpen();
-				if (Date.now() >= deadline) throw new Error("The computer's network guard did not start.");
-				await new Promise((done) => setTimeout(done, 150));
+				const deadline = Date.now() + 30_000;
+				while (!(await proxyReady(transport))) {
+					assertOpen();
+					if (Date.now() >= deadline) throw new Error("The computer's network guard did not start.");
+					await new Promise((done) => setTimeout(done, 150));
+				}
 			}
 			if ((await guarded.egress.configure()) !== "told")
 				throw new Error("The computer's network guard could not be configured.");
