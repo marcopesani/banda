@@ -100,10 +100,93 @@ jobs:
         with:
           chrome-version: "157.0.8103.78"
           install-dependencies: true
+      - name: Install the Linux test browser with scoped user namespaces
+        id: installed-chrome
+        if: matrix.target == 'linux-x64' || (inputs.native_computer && startsWith(matrix.target, 'linux-'))
+        env:
+          CHROME_SOURCE: ${{ steps.native-chrome.outputs.chrome-path }}
+        run: |
+          mkdir "$RUNNER_TEMP/browser-setup"
+          sudo /bin/bash -euo pipefail -s -- "$CHROME_SOURCE" "$RUNNER_TOOL_CACHE" "$RUNNER_ARCH" <<'BASH' 2>&1 | tee "$RUNNER_TEMP/browser-setup/install.log"
+          source=$1
+          case "$3" in
+            X64) architecture=x64 ;;
+            ARM64) architecture=arm64 ;;
+            *) exit 1 ;;
+          esac
+          expected="$2/setup-chrome/chrome/157.0.8103.78/$architecture/chrome"
+          installation=/opt/banda-ci-chrome
+          profile=/etc/apparmor.d/banda-ci-chrome
+          test "$source" = "$expected"
+          test "$(realpath -e -- "$source")" = "$source"
+          test -f "$source"
+          test ! -L "$source"
+          test -x "$source"
+          source_directory=$(dirname -- "$source")
+          unexpected=$(find "$source_directory" ! -type d ! -type f -print -quit)
+          test -z "$unexpected"
+          privileged=$(find "$source_directory" -perm /6000 -print -quit)
+          test -z "$privileged"
+          for directory in / /opt /etc /etc/apparmor.d; do
+            test -d "$directory"
+            test ! -L "$directory"
+            test "$(stat -c %u "$directory")" = 0
+            mode=$(stat -c %a "$directory")
+            test "$((8#$mode & 0022))" = 0
+          done
+          test ! -e "$installation"
+          test ! -L "$installation"
+          test ! -e "$profile"
+          test ! -L "$profile"
+          restrictions=(
+            /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+            /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined
+            /proc/sys/kernel/unprivileged_userns_clone
+            /proc/sys/user/max_user_namespaces
+          )
+          before=$(sha256sum "${restrictions[@]}")
+          printf '%s\n' "$before"
+          for setting in "${restrictions[@]}"; do
+            printf '%s=' "$setting"
+            cat "$setting"
+          done
+          source_sha=$(sha256sum "$source" | cut -d ' ' -f 1)
+          mkdir -m 0700 "$installation"
+          find "$source_directory" -mindepth 1 -maxdepth 1 -exec \
+            cp -R --preserve=mode,timestamps --no-preserve=ownership -t "$installation" -- {} +
+          chown -R root:root "$installation"
+          chmod -R go-w "$installation"
+          chmod 0755 "$installation"
+          test "$(sha256sum "$installation/chrome" | cut -d ' ' -f 1)" = "$source_sha"
+          cmp "$source" "$installation/chrome"
+          unsafe=$(find "$installation" \( ! -user root -o -perm /6022 \) -print -quit)
+          test -z "$unsafe"
+          umask 022
+          set -o noclobber
+          cat > "$profile" <<'PROFILE'
+          abi <abi/4.0>,
+          profile banda-ci-chrome /opt/banda-ci-chrome/chrome flags=(unconfined) {
+            userns,
+          }
+          PROFILE
+          chmod 0644 "$profile"
+          cat "$profile"
+          sha256sum "$source" "$installation/chrome" "$profile"
+          stat -c '%n uid=%u gid=%g mode=%a' "$installation" "$installation/chrome" "$profile"
+          /sbin/apparmor_parser --add "$profile"
+          test "$(sha256sum "${restrictions[@]}")" = "$before"
+          BASH
+          echo 'chrome-path=/opt/banda-ci-chrome/chrome' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && (matrix.target == 'linux-x64' || (inputs.native_computer && startsWith(matrix.target, 'linux-')))
+        with:
+          name: browser-setup-${{ matrix.target }}
+          path: ${{ runner.temp }}/browser-setup
+          if-no-files-found: ignore
       - name: Preserve Linux browser startup evidence
         if: matrix.target == 'linux-x64' || (inputs.native_computer && startsWith(matrix.target, 'linux-'))
         env:
-          CHROME: ${{ steps.native-chrome.outputs.chrome-path }}
+          CHROME: ${{ steps.installed-chrome.outputs.chrome-path }}
         run: node scripts/verify-linux-browser.ts "$RUNNER_TEMP/browser-preflight"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && (matrix.target == 'linux-x64' || (inputs.native_computer && startsWith(matrix.target, 'linux-')))
@@ -115,7 +198,7 @@ jobs:
       - name: Format, lint, types and the ordinary suites
         if: matrix.target == 'linux-x64'
         env:
-          CHROME: ${{ steps.native-chrome.outputs.chrome-path }}
+          CHROME: ${{ steps.installed-chrome.outputs.chrome-path }}
         run: |
           "$CHROME" --version
           npm run check && npm run typecheck && npm run test:fast
@@ -131,7 +214,7 @@ jobs:
       - name: Verify the native Linux computer through the app
         if: inputs.native_computer && startsWith(matrix.target, 'linux-')
         env:
-          CHROME: ${{ steps.native-chrome.outputs.chrome-path }}
+          CHROME: ${{ steps.installed-chrome.outputs.chrome-path }}
           BANDA_RELEASE_ROOT: ${{ github.workspace }}/release/banda
         run: |
           "$CHROME" --version
