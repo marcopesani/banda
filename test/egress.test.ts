@@ -4,8 +4,9 @@
  * held, once), the route a permission binds, and the proxy's own policy (proxy/policy.py) run by the host's python3
  * against the same vectors the proxy sees.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2409,10 +2410,13 @@ describe("routes", () => {
 	});
 });
 
+const PYTHON_TIMEOUT = 10_000;
+
 const python = (() => {
 	try {
 		const version = execFileSync("python3", ["-c", "import sys; print(sys.version_info >= (3, 9))"], {
 			encoding: "utf8",
+			timeout: PYTHON_TIMEOUT,
 		}).trim();
 		return version === "True";
 	} catch {
@@ -2420,8 +2424,19 @@ const python = (() => {
 	}
 })();
 
-/** Run proxy/policy.py's `expression` for each of `cases` (a JSON value each, as `x`), with names resolved by `names`. */
-function policy(expression: string, cases: readonly unknown[], names: { [host: string]: string[] } = {}): unknown[] {
+function pythonInput(cases: readonly unknown[]): string {
+	return `${JSON.stringify(cases)}\n`;
+}
+
+function runPython(args: string[], cases: readonly unknown[]): string {
+	return execFileSync("python3", args, {
+		input: pythonInput(cases),
+		encoding: "utf8",
+		timeout: PYTHON_TIMEOUT,
+	});
+}
+
+function policyArgs(expression: string, names: { [host: string]: string[] } = {}): string[] {
 	const dir = fileURLToPath(new URL("../proxy/", import.meta.url));
 	const script = [
 		"import json, sys",
@@ -2431,16 +2446,62 @@ function policy(expression: string, cases: readonly unknown[], names: { [host: s
 		"def resolve(host, port):",
 		"    if host not in names: raise OSError('no such name')",
 		"    return names[host]",
-		`print(json.dumps([(lambda x: ${expression})(x) for x in json.load(sys.stdin)]))`,
+		`print(json.dumps([(lambda x: ${expression})(x) for x in json.loads(sys.stdin.readline())]))`,
 	].join("\n");
-	const out = execFileSync("python3", ["-I", "-B", "-c", script, JSON.stringify(names)], {
-		input: JSON.stringify(cases),
-		encoding: "utf8",
-	});
-	return JSON.parse(out) as unknown[];
+	return ["-I", "-B", "-c", script, JSON.stringify(names)];
+}
+
+/** Run proxy/policy.py's `expression` for each of `cases` (a JSON value each, as `x`), with names resolved by `names`. */
+function policy(expression: string, cases: readonly unknown[], names: { [host: string]: string[] } = {}): unknown[] {
+	return JSON.parse(runPython(policyArgs(expression, names), cases)) as unknown[];
 }
 
 describe.skipIf(!python)("the proxy's policy", () => {
+	it("reads a complete JSON frame without waiting for stdin to close", async () => {
+		const state = mkdtempSync(join(tmpdir(), "banda-proxy-frame-"));
+		const text = `${"x".repeat(1_300_000)}\n\r\0é🙂`;
+		try {
+			for (const { args, cases, expected } of [
+				{
+					args: policyArgs("len(x.encode('utf8'))"),
+					cases: [text],
+					expected: [Buffer.byteLength(text)],
+				},
+				{
+					args: admitArgs({ key: "44".repeat(32), credentials: [] }, state),
+					cases: [{ login: "c7", method: "GET", host: "forge.example" }],
+					expected: { cases: [{ on: true, headers: [] }], held: {}, sent: {} },
+				},
+			]) {
+				const child = spawn("python3", args, { timeout: PYTHON_TIMEOUT });
+				const closed = once(child, "close");
+				let stdout = "";
+				let stderr = "";
+				child.stdout.setEncoding("utf8").on("data", (chunk) => {
+					stdout += chunk;
+				});
+				child.stderr.setEncoding("utf8").on("data", (chunk) => {
+					stderr += chunk;
+				});
+				try {
+					await new Promise<void>((resolve, reject) => {
+						child.stdin.once("error", reject);
+						child.stdin.write(pythonInput(cases), (error) => (error ? reject(error) : resolve()));
+					});
+					const [code, signal] = await closed;
+					expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: "" });
+					expect(child.stdin.writableEnded).toBe(false);
+					expect(JSON.parse(stdout)).toEqual(expected);
+				} finally {
+					child.stdin.end();
+					await closed;
+				}
+			}
+		} finally {
+			rmSync(state, { recursive: true, force: true });
+		}
+	});
+
 	it("refuses loopback, private, link-local and metadata addresses, in every spelling; passes public ones", () => {
 		const refused = [
 			"127.0.0.1",
@@ -2705,16 +2766,17 @@ describe.skipIf(!python)("the proxy's policy", () => {
 	});
 });
 
-/** proxy/addon.py on the host (test/fixtures/proxy-addon.py stands in for mitmproxy): what each request met. */
-function admit(config: object, cases: readonly object[]) {
+function admitArgs(config: object, state: string): string[] {
 	const dir = fileURLToPath(new URL("../proxy/", import.meta.url));
 	const harness = fileURLToPath(new URL("./fixtures/proxy-addon.py", import.meta.url));
+	return ["-I", "-B", harness, dir, state, JSON.stringify(config)];
+}
+
+/** proxy/addon.py on the host (test/fixtures/proxy-addon.py stands in for mitmproxy): what each request met. */
+function admit(config: object, cases: readonly object[]) {
 	const state = mkdtempSync(join(tmpdir(), "banda-proxy-state-"));
 	try {
-		const out = execFileSync("python3", ["-I", "-B", harness, dir, state, JSON.stringify(config)], {
-			input: JSON.stringify(cases),
-			encoding: "utf8",
-		});
+		const out = runPython(admitArgs(config, state), cases);
 		return JSON.parse(out) as {
 			cases: (
 				| { status: number; body: string }
