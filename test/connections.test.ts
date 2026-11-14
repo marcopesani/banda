@@ -1934,13 +1934,14 @@ describe("accounts", () => {
 		expect((await s.results(ran.chat)).at(-1)?.error).toBe(true);
 	});
 
-	it("a replacement sign-in cannot reuse a standing permission from its predecessor", async () => {
+	it("signing the same account in again keeps the owner's standing permission, bound to the new sign-in", async () => {
 		const fake = await startFakeMcp({ auth: "oauth" });
 		fakes.push(fake);
 		const s = await open(fake);
 		await define(s, "cal", fileOf(fake));
 		fake.user = "ana";
 		await signInAsOwner(s.capabilities, "cal");
+		const originalTokens = new Set(fake.tokens);
 		const write = async () => {
 			s.model.plan([{ tool: "cal__create_event", args: { title: "Tea", day: "mon" } }]);
 			return s.say("tea");
@@ -1952,27 +1953,30 @@ describe("accounts", () => {
 		const covered = await write();
 		await s.done(covered.turn);
 		expect(fake.calls).toHaveLength(2);
-		const granted = Object.keys((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
-		expect(granted).toHaveLength(1);
+		const before = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+		expect(before).toHaveLength(1);
 		await signInAsOwner(s.capabilities, "cal", { choice: { account: "ana" } });
-		// what can never match again is not left listed as granted: it is taken back, and said
-		expect((await s.harness.snapshot(Permissions, context))?.permissions).toEqual({});
+		const generation = (await s.harness.snapshot(Connected, context))?.accounts.cal?.ana?.generation;
+		const after = Object.entries((await s.harness.snapshot(Permissions, context))?.permissions ?? {});
+		// the same permission, carried to the sign-in that replaced its own: none taken back, none left matching nothing
+		expect(after.map(([id]) => id)).toEqual(before.map(([id]) => id));
+		expect(after[0]?.[1].match.account).toEqual({ key: "ana", generation });
+		expect(before[0]?.[1].match.account).not.toEqual({ key: "ana", generation });
 		expect(
 			(await s.harness.snapshot(ActivityLog, context))?.events.filter((event) =>
 				event.what.startsWith("You took back"),
 			),
-		).toHaveLength(1);
+		).toEqual([]);
+		const sent: boolean[] = [];
+		fake.onCall = async (_tool, _args, authorization) => {
+			sent.push(!originalTokens.has(authorization.slice(7)));
+			return { text: "created" };
+		};
 		const replaced = await write();
-		const approval = await Promise.race([
-			s.done(replaced.turn).then(() => undefined),
-			until(async () => (await openWaits(s.harness)).find((w) => w.ask.type === "approval")),
-		]);
-		expect(approval?.ask.type).toBe("approval");
-		if (approval === undefined) throw new Error("a replacement sign-in reused the old permission");
-		expect(fake.calls).toHaveLength(2);
-		await answer(s.harness, approval.key, "approve", web, "bearer");
 		await s.done(replaced.turn);
-		expect(fake.calls).toHaveLength(3);
+		// covered without another ask, and sent with the replacement's credentials
+		expect(await openWaits(s.harness)).toEqual([]);
+		expect(sent).toEqual([true]);
 	});
 
 	it("prepared sign-in identity preserves a server's account and arbitrary extra arguments", async () => {

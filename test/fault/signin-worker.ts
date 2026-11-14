@@ -5,6 +5,7 @@ import { defineDoc, type Storage, type TaskId } from "@earendil-works/pi-durable
 import { Value } from "typebox/value";
 import { Connected, credentialsOf } from "../../src/core/connections.ts";
 import { OWNER } from "../../src/core/gateway.ts";
+import { Permissions } from "../../src/core/permissions.ts";
 import { openWaits, status } from "../../src/core/status.ts";
 import { context } from "../../src/core/store.ts";
 import { connectionDefinition, openConnected, signInAsOwner } from "../fixtures/connected.ts";
@@ -158,10 +159,14 @@ async function run(): Promise<SigninSummary> {
 		if (!(await signIn()).ok) throw new Error("owner could not sign in after recovery");
 		const proof = await receive("proof-draft", "proof request");
 		const proofWait = await waitingOrDone(proof, "Fresh proof");
-		if (proofWait === undefined) throw new Error("new work did not ask for its own approval");
-		await ownerAnswer(s.harness, proofWait.key, "approve", { gateway: "web", peer: OWNER }, "bearer", {
-			type: "approval",
-		});
+		// the owner's standing permission is carried to the sign-in that replaced its own, and may cover new work
+		const standing = Object.keys((await s.harness.snapshot(Permissions, context))?.permissions ?? {}).length > 0;
+		if (proofWait === undefined && !(scenario.grant && standing))
+			throw new Error("new work did not ask for its own approval");
+		if (proofWait !== undefined)
+			await ownerAnswer(s.harness, proofWait.key, "approve", { gateway: "web", peer: OWNER }, "bearer", {
+				type: "approval",
+			});
 		const proofCompleted = (await s.harness.waitForTask(proof, context)).state.outcome.status === "completed";
 		const current = await account();
 		const held = await credential();
