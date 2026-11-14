@@ -115,7 +115,7 @@ jobs:
             *) exit 1 ;;
           esac
           expected="$2/setup-chrome/chrome/157.0.8103.78/$architecture/chrome"
-          installation=/opt/banda-ci-chrome
+          installation=/usr/lib/banda-ci-chrome
           profile=/etc/apparmor.d/banda-ci-chrome
           test "$source" = "$expected"
           test "$(realpath -e -- "$source")" = "$source"
@@ -127,7 +127,7 @@ jobs:
           test -z "$unexpected"
           privileged=$(find "$source_directory" -perm /6000 -print -quit)
           test -z "$privileged"
-          for directory in / /opt /etc /etc/apparmor.d; do
+          for directory in / /usr /usr/lib /etc /etc/apparmor.d; do
             test -d "$directory"
             test ! -L "$directory"
             test "$(stat -c %u "$directory")" = 0
@@ -165,7 +165,7 @@ jobs:
           set -o noclobber
           cat > "$profile" <<'PROFILE'
           abi <abi/4.0>,
-          profile banda-ci-chrome /opt/banda-ci-chrome/chrome flags=(unconfined) {
+          profile banda-ci-chrome /usr/lib/banda-ci-chrome/chrome flags=(unconfined) {
             userns,
           }
           PROFILE
@@ -176,7 +176,7 @@ jobs:
           /sbin/apparmor_parser --add "$profile"
           test "$(sha256sum "${restrictions[@]}")" = "$before"
           BASH
-          echo 'chrome-path=/opt/banda-ci-chrome/chrome' >> "$GITHUB_OUTPUT"
+          echo 'chrome-path=/usr/lib/banda-ci-chrome/chrome' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && (matrix.target == 'linux-x64' || (inputs.native_computer && startsWith(matrix.target, 'linux-')))
         with:
