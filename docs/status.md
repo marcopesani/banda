@@ -2,6 +2,14 @@
 
 ## Current work
 
+The native-computer candidate is rebased onto current main. Routine requests now retain their original agent and
+execution after the run ends, and their existing approvals appear in that agent's chat. Archiving cancels retained
+requests and queued result continuations. Captured tool authority prevents permissions and pending drafts from
+crossing a tool's removal or definition replacement, while preserving same-definition sign-in and relisting.
+Focused backend checks, desktop/phone app walkthroughs and independent source review pass. Combined qualification
+covers the full ordinary suite, a fresh Mac package and candidate-ref fault CI. Native Linux work is held until
+this recovery slice is qualified; its startup abort remains undiagnosed.
+
 Every pi-ai provider and servers of the owner's are in review on `feat/custom-providers` (#112): Add a provider in
 Settings and, searchable, at first run; cloud forms for Cloudflare, Bedrock, Vertex and Azure; Ollama, LM Studio,
 llama.cpp, vLLM and OpenAI-, Anthropic- and Mistral-compatible servers, their models listed from the server. First run
@@ -18,12 +26,14 @@ remains open.
 General shows shared browser preparation, verified-download progress, safe failures and an explicit retry, separately
 from running pages. Opening Settings leaves browser preparation lazy. Ordinary backend checks and desktop/phone
 walkthroughs against throwaway daemons pass; independent review found no reproduced blocker. The exact packaged
-Mac shell lifecycle passes. Native General availability after proxy recovery is under qualification. Public asset
-delivery and owner review remain open.
+Mac shell lifecycle passes for the published alpha.12. Its native proxy-recovery walkthrough and public asset
+delivery pass. The rebased candidate's packaged qualification and owner review remain open.
 
-Replacement-sign-in authority is implemented for connection drafts and reusable permissions. Ordinary tests and
-desktop/phone browser walkthroughs against a throwaway daemon pass; independent review findings are fixed.
-Replacement publication and replay fault scenarios pass in CI. Owner acceptance remains open.
+Signing in again as the same account carries its standing permissions for the same accepted tool to the new sign-in,
+with their original agent and ids. A waiting draft stays bound to the credentials it was prepared with and cannot
+borrow the replacement. Tool-listing turnover must end the old authority, including grants from late approvals.
+Desktop/phone app checks pass for old-draft refusal, standing permission reuse and fresh approval after tool turnover.
+Owner acceptance remains open.
 
 Agent-definition publication is integrated into the native-computer candidate. Owner saves compare
 their accepted base inside the commit, keep publication intent with the accepted bytes, and preserve competing
@@ -36,7 +46,7 @@ Retained proxy requests now recover without another command, into a once-only ow
 resolution. Ordinary checks, typecheck, build and independent review pass after rebasing onto main. Native macOS ARM64
 restart walkthroughs pass at desktop and phone widths. Receipt fault scenarios pass in CI. Owner acceptance remains open.
 
-The bundled computer is in `prototype/microvm-box`. The macOS ARM64 candidate has packaged desktop/phone-width
+The bundled computer is being integrated onto main. The published macOS ARM64 candidate has packaged desktop/phone-width
 walkthrough evidence, including lazy browser preparation, guarded sends and restart persistence. General shows
 browser preparation and retry, and the packaged app preserves that status through proxy recovery. Linux x64 and
 ARM64 source builds, ABI and smoke checks pass, but neither has native acceptance. The ARM64 runner has no KVM device.
@@ -46,14 +56,14 @@ The current recovery fix makes guest command sessions connect only to running VM
 policy updates. Native packaging builds that CLI capability from pinned source. Ordinary suites and real native
 execution-boundary checks, packaged recovery walkthroughs and all six fault shards and Docker in CI pass. Mac,
 Windows and Android artifact builds pass. The owner accepted the source and notice packet for the unsigned Mac
-pre-release; the final public-download check remains.
+pre-release; its public-download and source reconstruction checks pass.
 Windows retains the existing backend while its native runtime boundaries are unresolved ([Operations](operations.md)).
 macOS support requires Apple silicon; Intel Macs are no longer a release target. Public browser download delivery
-and clean-machine distribution remain open.
+passes for alpha.12. Clean-machine distribution remains open.
 Workspace refreshes come from tool completion and owner actions; startup and explicit reads reconcile missed
 changes. Native Mac proxy and command-VM recovery have throwaway-home evidence, including concurrent homes;
-CI fault and Docker qualification pass for the integrated authority and publication changes. Host sleep/wake and
-recovery preflight latency remain open.
+CI fault and Docker qualification pass for the published authority and publication changes. The owner verified
+Mac sleep/wake. Prolonged outages, broader recovery qualification and preflight latency remain open.
 
 Agent search is in review on `feat/agent-search`: messages, shared group histories and artifacts use the same
 retrieval as Cmd+K, with bounded results and source reads. Recall now searches saved facts only. Validation and
