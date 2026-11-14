@@ -183,6 +183,11 @@ export type BrowserOptions = {
 	readonly setup: BrowserSetup;
 	/** Bring the box up before starting the browser in it. */
 	readonly ensure: () => Promise<void>;
+	/**
+	 * Repair the computer before a new effect on a browser already open (`Box.recover`): given where part of a
+	 * computer can go while its browser stays. An open browser is otherwise used as it is, at no cost.
+	 */
+	readonly recover?: () => Promise<void>;
 	/** Tell the proxy whose the browser's requests are, and whether the owner holds it; resolves once it knows. */
 	readonly tell: (holder: { readonly chat: number; readonly owner: boolean } | undefined) => Promise<void>;
 	/**
@@ -752,7 +757,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 	/** The browser, started for `chat` if it is not open; one start at a time. */
 	const opened = async (chat: number): Promise<Session> => {
 		if (session !== undefined) {
-			await options.ensure();
+			await options.recover?.();
 			if (session !== undefined) return session;
 		}
 		if (starting === undefined) {
@@ -1353,7 +1358,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 				cut.abort(new Taken());
 				cut = new AbortController();
 				try {
-					await options.ensure();
+					await options.recover?.();
 					if (session !== s) throw new Refused("The browser closed while its computer was starting.");
 					await options.tell({ chat: s.chat, owner: true });
 					// what they press and type goes to this tab, in front
@@ -1372,7 +1377,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 					await s.cdp.send("Page.reload", { ignoreCache: true }, s.page);
 				}
 			} else {
-				await options.ensure();
+				await options.recover?.();
 				if (session !== s) throw new Refused("The browser closed while its computer was starting.");
 				// the agent's next request is held again before the proxy is told
 				control = "agent";
@@ -1387,7 +1392,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 		input: async (input) => {
 			const s = session;
 			if (s === undefined || control !== "owner") throw new Refused("Take the browser first.");
-			if (input.type !== "mouse" || (input.action !== "move" && input.action !== "wheel")) await options.ensure();
+			if (input.type !== "mouse" || (input.action !== "move" && input.action !== "wheel")) await options.recover?.();
 			if (session !== s || control !== "owner") throw new Refused("Take the browser first.");
 			touch();
 			if (input.type === "navigate") {

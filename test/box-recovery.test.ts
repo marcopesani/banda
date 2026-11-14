@@ -176,3 +176,15 @@ it("starts no waiting command when the computer closes during recovery", async (
 		await box.close();
 	}
 });
+
+it("only a native computer is repaired before an effect on something already open", async () => {
+	const native = openBox({ ...hostBox(await tempHome()), kind: "microvm" }, () => {});
+	const container = openBox({ ...hostBox(await tempHome()), kind: "container" }, () => {});
+	try {
+		expect(native.recover).toBe(native.ensure);
+		expect(container.recover).toBeUndefined();
+	} finally {
+		await native.close();
+		await container.close();
+	}
+});

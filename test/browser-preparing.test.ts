@@ -49,7 +49,8 @@ describe("optional browser preparation", () => {
 		let repairing = false;
 		const browser = openBrowser({
 			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
-			ensure: async () => {
+			ensure: async () => {},
+			recover: async () => {
 				if (repairing) await recovery.command();
 			},
 			tell: async () => {},
@@ -75,7 +76,8 @@ describe("optional browser preparation", () => {
 		let repairing = false;
 		const browser = openBrowser({
 			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
-			ensure: async () => {
+			ensure: async () => {},
+			recover: async () => {
 				if (repairing) await recovery.command();
 			},
 			tell: async () => {},
@@ -96,7 +98,8 @@ describe("optional browser preparation", () => {
 		let repairing = false;
 		const browser = openBrowser({
 			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
-			ensure: async () => {
+			ensure: async () => {},
+			recover: async () => {
 				if (repairing) await recovery.command();
 			},
 			tell: async () => {},
@@ -112,6 +115,24 @@ describe("optional browser preparation", () => {
 		} finally {
 			recovery.ready([]);
 		}
+	});
+
+	it("an open browser brings the box up once: its actions, takeover and input cost no bring-up", async () => {
+		const ensure = vi.fn(async () => {});
+		const browser = openBrowser({
+			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
+			ensure,
+			tell: async () => {},
+			log: () => {},
+		});
+		cleanups.push(browser.close);
+		await browser.forget("example.com");
+		expect(ensure).toHaveBeenCalledTimes(1);
+		await browser.forget("example.org");
+		await browser.hold(true);
+		await browser.input({ type: "text", text: "a" }).catch(() => undefined);
+		await browser.hold(false);
+		expect(ensure).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps a later opening intact when an earlier preparation finishes after close", async () => {

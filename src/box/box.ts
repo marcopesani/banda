@@ -94,6 +94,11 @@ export type Box = {
 	readonly browser?: PreparedBrowser;
 	/** Bring it up, if it is not; what failed, thrown. */
 	ensure(): Promise<void>;
+	/**
+	 * Repair it before a new effect on something already open in it, where part of it can go while the rest stays up
+	 * (a native computer's proxy); absent for a box whose loss ends its connection, which costs such an effect nothing.
+	 */
+	readonly recover?: () => Promise<void>;
 	/** The box as an `ExecutionEnv`, at `cwd` (default the workspace), with `env` added to every command's environment. */
 	env(cwd?: string, env?: Record<string, string>): ExecutionEnv;
 	/** Bring it up now rather than at the first tool call; its failure is logged, and the next use tries again. */
@@ -202,6 +207,7 @@ export function openBox(setup: BoxSetup, log: (line: string) => void): Box {
 					},
 				}),
 		ensure,
+		...(setup.kind === "microvm" ? { recover: ensure } : {}),
 		env: (cwd, env) =>
 			new Environment({
 				connection,
