@@ -50,7 +50,13 @@ async function setup() {
 		c.connections.example = {
 			version: shaOf(text),
 			at: 1,
-			tools: { get: { description: "read", schema: { type: "object", properties: { number: { type: "integer" } } } } },
+			tools: {
+				get: {
+					generation: ++c.versions,
+					description: "read",
+					schema: { type: "object", properties: { number: { type: "integer" } } },
+				},
+			},
 		};
 		c.accounts.example = { alice: { id: "alice", at: 1 }, bob: { id: "bob", at: 1 } };
 		c.on.reader = { example: ["alice"] };

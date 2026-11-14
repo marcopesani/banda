@@ -6,9 +6,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai";
-import { createRegistry, defineDoc } from "@earendil-works/pi-durable";
+import { createRegistry, defineDoc, defineExtension } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { Accepted, agentPath, LEAD, LEAD_TEXT, shaOf } from "../src/core/agents.ts";
+import { EffectRun } from "../src/core/ask.ts";
 import { Connected, ToolSettings } from "../src/core/connections.ts";
 import { Devices, INVITE_MS, pairingState } from "../src/core/devices.ts";
 import { Harnesses } from "../src/core/harness.ts";
@@ -16,11 +17,81 @@ import { keepReading, Readings } from "../src/core/objects.ts";
 import { Permissions } from "../src/core/permissions.ts";
 import { FileCredentialStore } from "../src/core/provider-credentials.ts";
 import { context, openStore } from "../src/core/store.ts";
+import { defineWait } from "../src/core/wait.ts";
 import { Followed } from "../src/core/watches.ts";
 import { AgentPublications, queueAgentPublication } from "../src/server/agent-publication.ts";
 import { tempHome } from "./helpers.ts";
 
 const open = (home: string) => openStore(home, { models: createModels(), registry: createRegistry() });
+
+it("reopens one captured connection authority on its task, approval and permission without a migration", async () => {
+	const home = await tempHome();
+	const wait = defineWait(async () => {});
+	const registry = createRegistry();
+	registry.install(defineExtension({ name: "test.authority", tasks: [wait] }));
+	const before = await openStore(home, { models: createModels(), registry });
+	const authority = { connection: "cal", tool: "create", version: "s1", listing: 2, accountArg: "as_account" as const };
+	const args = { account: { key: "provider", generation: "provider" }, as_account: { key: "ana", generation: "G1" } };
+	const id = await before.commit(async (tx) => {
+		const connected = await tx.doc(Connected);
+		connected.versions = 2;
+		connected.servers.cal = { service: "Calendar", url: "https://cal.example/mcp", auth: "oauth", version: 1, at: 0 };
+		connected.connections.cal = {
+			version: "s1",
+			tools: {
+				create: {
+					generation: 2,
+					description: "create",
+					schema: { type: "object", properties: { account: { type: "object" } } },
+				},
+			},
+			at: 0,
+		};
+		const permissions = await tx.doc(Permissions);
+		permissions.permissions["1"] = {
+			tool: "cal__create",
+			authority,
+			match: args,
+			what: "create",
+			scope: "always",
+			agent: LEAD,
+			at: 0,
+			wait: 0,
+		};
+		permissions.next = 2;
+		const chat = await tx.createConversation({ ownership: { kind: "ownerless" } });
+		return tx.createTask(
+			wait,
+			{
+				key: "approval",
+				ask: { type: "approval", tool: "cal__create", authority, args, floor: "money" },
+				deadline: Date.now() + 60_000,
+			},
+			{ conversationId: chat.id, ownership: { kind: "conversation" } },
+		);
+	}, context);
+	await before.commit(async (tx) => {
+		const run = await tx.doc(EffectRun, id);
+		run.authority = authority;
+		run.draft = args;
+	}, context);
+	const expected = {
+		connected: await before.snapshot(Connected, context),
+		permissions: await before.snapshot(Permissions, context),
+		run: await before.snapshot(EffectRun, id, context),
+		ask: (await before.getTask(id, context))?.input,
+	};
+	await before.close(context);
+	const after = await openStore(home, { models: createModels(), registry });
+	try {
+		expect(await after.snapshot(Connected, context)).toEqual(expected.connected);
+		expect(await after.snapshot(Permissions, context)).toEqual(expected.permissions);
+		expect(await after.snapshot(EffectRun, id, context)).toEqual(expected.run);
+		expect((await after.getTask(id, context))?.input).toEqual(expected.ask);
+	} finally {
+		await after.close(context);
+	}
+});
 
 it("reopens the exact pending owner publication and accepted bytes without a migration", async () => {
 	const home = await tempHome();

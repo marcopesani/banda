@@ -51,13 +51,14 @@ for (let attempt = 0; attempt < 4; attempt++) {
 				version: shaOf(definition),
 				at: 1,
 				tools: {
-					get_profile: { description: "profile", schema: { type: "object" } },
-					search_messages: { description: "search", schema: { type: "object" } },
+					get_profile: { generation: ++connected.versions, description: "profile", schema: { type: "object" } },
+					search_messages: { generation: ++connected.versions, description: "search", schema: { type: "object" } },
 					get_message: {
+						generation: ++connected.versions,
 						description: "message",
 						schema: { type: "object", properties: { message_id: { type: "string" } }, required: ["message_id"] },
 					},
-					get_thread: { description: "thread", schema: { type: "object" } },
+					get_thread: { generation: ++connected.versions, description: "thread", schema: { type: "object" } },
 				},
 			};
 			connected.accounts.gmail ??= { alice: { id: "alice@example.test", at: 1 } };

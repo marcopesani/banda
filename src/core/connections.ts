@@ -310,6 +310,7 @@ export const readItems = (connection: Connection): string[] => [
 
 /** A tool as a server listed it when it was connected: what the model is offered, fixed until it is listed again. */
 export type Listed = {
+	generation: number;
 	description: string;
 	schema: JsonObject;
 	/** The server's own word that it only reads, shown, never trusted. */
@@ -365,8 +366,8 @@ type ConnectedValue = {
 			/** The tool whose description carries them, chosen then: they never move to another. */
 			notesOn?: string;
 			/**
-			 * Carried over from an earlier build's definition at start, so a draft waiting on it can still finish. Its next
-			 * listing counts as a new version: shapes and notes as given then, a new tool waits.
+			 * Carried over from an earlier build's definition. Its next listing accepts the current shapes and notes;
+			 * a newly listed tool waits for the owner.
 			 */
 			due?: true;
 			at: number;
@@ -388,7 +389,7 @@ type ConnectedValue = {
 	servers: { [connection: string]: Server };
 	/** The owner's reads over a connection's definition; they outlive its versions and go when the connection does. */
 	reads: { [connection: string]: OwnerReads };
-	/** The last version given to a record or an overlay here: never reused, even for a removed connection's name. */
+	/** The last version given to a record, overlay or listed tool: never reused after removal. */
 	versions: number;
 };
 
@@ -529,7 +530,11 @@ async function activeAgent(tx: Tx, id: string): Promise<boolean> {
 }
 
 /** The version a definition or record has before the owner's overlay: what an allowed read does not move. */
-export const definitionVersion = (version: string | undefined) => version?.replace(/\.r\d+$/, "");
+export function definitionVersion(version: string): string;
+export function definitionVersion(version: string | undefined): string | undefined;
+export function definitionVersion(version: string | undefined): string | undefined {
+	return version?.replace(/\.r\d+$/, "");
+}
 
 /**
  * The name the model knows a connection's tool by: stable, `<connection>__<tool>`, within a model's 64 characters. A name
@@ -660,6 +665,49 @@ export type InEffect = {
 	/** The server's notes, carried by the one tool chosen when it was listed, so they reach the model once. */
 	readonly notes?: string;
 };
+
+export const accountArg = (schema: JsonObject) =>
+	(schema.properties as { [key: string]: unknown } | undefined)?.account === undefined ? "account" : "as_account";
+
+export type ToolAuthority = {
+	readonly connection: string;
+	readonly tool: string;
+	readonly version: string;
+	readonly listing: number;
+	readonly accountArg?: "account" | "as_account";
+};
+
+export const toolAuthority = (tool: InEffect): ToolAuthority => ({
+	connection: tool.connection.name,
+	tool: tool.tool,
+	version: definitionVersion(tool.connection.version),
+	listing: tool.listed.generation,
+	...(signsIn(tool.connection) ? { accountArg: accountArg(tool.listed.schema) } : {}),
+});
+
+export function sameToolAuthority(left: ToolAuthority | undefined, right: ToolAuthority | undefined): boolean {
+	return left === undefined || right === undefined
+		? left === right
+		: left.connection === right.connection &&
+				left.tool === right.tool &&
+				left.version === right.version &&
+				left.listing === right.listing &&
+				left.accountArg === right.accountArg;
+}
+
+export async function validToolAuthority(tx: Tx, name: string, authority: ToolAuthority | undefined): Promise<boolean> {
+	if (authority === undefined) return true;
+	if (toolName(authority.connection, authority.tool) !== name) return false;
+	const connection = await acceptedConnection(tx, authority.connection);
+	const listed = (await tx.doc(Connected)).connections[authority.connection]?.tools[authority.tool];
+	return (
+		connection !== undefined &&
+		listed !== undefined &&
+		definitionVersion(connection.version) === authority.version &&
+		listed.generation === authority.listing &&
+		(signsIn(connection) ? accountArg(listed.schema) : undefined) === authority.accountArg
+	);
+}
 
 /**
  * Every connection tool in effect now: its connection on, listed for that very version, and not switched

@@ -29,7 +29,7 @@ import {
 import { log } from "./activity.ts";
 import { AgentChats, acceptedAgent, agentWords, ChatAgent, LEAD } from "./agents.ts";
 import { Companion } from "./companion.ts";
-import { connectionTool } from "./connections.ts";
+import { connectionTool, sameToolAuthority, type ToolAuthority, validToolAuthority } from "./connections.ts";
 
 import { FLOOR_WORDS, type Floor } from "./floor.ts";
 import { allowedHost, hostCovers } from "./hosts.ts";
@@ -82,6 +82,7 @@ export type OfferedScope = { readonly scope: ScopeKind; readonly words: string; 
 
 export type Permission = {
 	readonly tool: string;
+	readonly authority?: ToolAuthority;
 	readonly match: JsonObject;
 	/** The effects it covers, in the daemon's words: "send an email to ana@example.com". */
 	readonly what: string;
@@ -197,16 +198,19 @@ export function matches(
 		tool,
 		args,
 		agent,
+		authority,
 	}: {
 		readonly tool: string;
 		readonly args: { readonly [key: string]: unknown };
 		readonly agent: string | undefined;
+		readonly authority?: ToolAuthority | undefined;
 	},
 ): boolean {
 	return (
 		agent !== undefined &&
 		permission.agent === agent &&
 		permission.tool === tool &&
+		sameToolAuthority(permission.authority, authority) &&
 		Object.entries(permission.match).every(
 			([key, value]) =>
 				key in args &&
@@ -280,15 +284,21 @@ export async function floorNow(
  */
 export async function covering(
 	tx: Tx,
-	draft: { readonly tool: string; readonly args: JsonObject; readonly floor?: Floor },
+	draft: {
+		readonly tool: string;
+		readonly args: JsonObject;
+		readonly floor?: Floor;
+		readonly authority?: ToolAuthority;
+	},
 	chat: number,
 	now: number,
 ): Promise<{ readonly id: string; readonly permission: Permission } | undefined> {
 	if ((await floorNow(tx, draft)) !== undefined) return undefined;
+	if (!(await validToolAuthority(tx, draft.tool, draft.authority))) return undefined;
 	const agent = await agentOfChat(tx, chat);
 	const { permissions } = await tx.doc(Permissions);
 	const candidates = Object.entries(permissions).filter(([, permission]) =>
-		matches(permission, { tool: draft.tool, args: draft.args, agent }),
+		matches(permission, { tool: draft.tool, args: draft.args, agent, authority: draft.authority }),
 	);
 	if (candidates.length === 0) return undefined;
 	const errand = candidates.some(([, permission]) => permission.scope === "task")
@@ -394,6 +404,7 @@ export async function give(
 	tx: Tx,
 	{
 		tool,
+		authority,
 		shape,
 		scope,
 		wait,
@@ -402,6 +413,7 @@ export async function give(
 		now,
 	}: {
 		tool: string;
+		authority?: ToolAuthority | undefined;
 		shape: PermissionShape;
 		scope: PermissionScope;
 		wait: number;
@@ -418,6 +430,7 @@ export async function give(
 	doc.next += 1;
 	doc.permissions[id] = {
 		tool,
+		...(authority === undefined ? {} : { authority: { ...authority } }),
 		match: JSON.parse(JSON.stringify(shape.match)) as JsonObject,
 		what: shape.what,
 		scope: scope.scope,
@@ -435,6 +448,15 @@ export async function give(
 			: `You allowed ${shape.what}, ${permissionWhen(scope)}`;
 	await log(tx, { at: now, what: said });
 	return id;
+}
+
+export async function retireInvalidPermissions(tx: Tx, now: number): Promise<void> {
+	const doc = await tx.doc(Permissions);
+	for (const [id, permission] of Object.entries(doc.permissions)) {
+		if (await validToolAuthority(tx, permission.tool, permission.authority)) continue;
+		delete doc.permissions[id];
+		await log(tx, { at: now, what: `Permission ended: ${permission.what} (the connection's tools changed)` });
+	}
 }
 
 /** For how long, in the daemon's words: the time in its own zone, which is the owner's machine's. */
