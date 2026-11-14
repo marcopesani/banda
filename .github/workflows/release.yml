@@ -93,10 +93,21 @@ jobs:
           path: release/cache/computer/runtime
           key: native-runtime-${{ matrix.target }}-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
       - run: npm ci
+      - name: Prepare the Linux test browser
+        id: native-chrome
+        if: matrix.target == 'linux-x64' || (inputs.native_computer && startsWith(matrix.target, 'linux-'))
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          chrome-version: "157.0.8103.78"
+          install-dependencies: true
       # once, on Linux, as CI runs them; every target proves its own build with the smoke run below
       - name: Format, lint, types and the ordinary suites
         if: matrix.target == 'linux-x64'
-        run: npm run check && npm run typecheck && npm run test:fast
+        env:
+          CHROME: ${{ steps.native-chrome.outputs.chrome-path }}
+        run: |
+          "$CHROME" --version
+          npm run check && npm run typecheck && npm run test:fast
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: matrix.computer != ''
         with:
@@ -106,13 +117,6 @@ jobs:
         env:
           BANDA_COMPUTER_IMAGES: ${{ matrix.computer != '' && format('{0}/computer-images', runner.temp) || '' }}
       - run: node scripts/smoke-release.ts
-      - name: Prepare the native Linux acceptance browser
-        id: native-chrome
-        if: inputs.native_computer && startsWith(matrix.target, 'linux-')
-        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
-        with:
-          chrome-version: "157.0.8103.78"
-          install-dependencies: true
       - name: Verify the native Linux computer through the app
         if: inputs.native_computer && startsWith(matrix.target, 'linux-')
         env:
@@ -142,7 +146,6 @@ jobs:
             release/desktop/banda-*.dmg
             release/desktop/banda-*.zip
             release/desktop/banda-*.exe
-            release/desktop/banda-*.AppImage
             release/desktop/banda-*.deb
 
   # The phone's shell: one APK for arm64 Android phones, built on Linux (the runner's Android SDK; Gradle fetches the
