@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readFile, readlink, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type ExecutionEnv, FileError } from "@earendil-works/pi-durable/env";
 import { describe, expect, it } from "vitest";
@@ -110,6 +110,37 @@ describe("owner agent file publication", () => {
 		try {
 			await expect(decline(harness, workspace, "sancho", context, null)).rejects.toMatchObject({ status: 409 });
 			expect(await readFile(target, "utf8")).toBe(unseen);
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("declines a box symlink without following it and retains the link", async () => {
+		const { harness, workspace, accepted } = await agentSaveScenario(await tempHome());
+		const before = await accepted();
+		const target = join(workspace.root, agentPath("sancho"));
+		const untrusted = join(workspace.root, "untrusted-agent.txt");
+		const text = "Untrusted link target.\n";
+		await writeFile(untrusted, text);
+		await unlink(target);
+		await symlink("../untrusted-agent.txt", target);
+		try {
+			expect((await agents(harness, workspace)).find((row) => row.name === "sancho")?.change).toMatchObject({
+				kind: "removed",
+			});
+			await decline(harness, workspace, "sancho", context, null);
+			expect((await lstat(target)).isFile()).toBe(true);
+			expect(await readFile(target, "utf8")).toBe(before.text);
+			expect(await accepted()).toEqual(before);
+			expect(await readFile(untrusted, "utf8")).toBe(text);
+			expect((await agents(harness, workspace)).find((row) => row.name === "sancho")?.change).toBeUndefined();
+			const history = await publicationHistory(harness, workspace, "sancho");
+			const retained = history.items.flatMap((item) => item.retained);
+			expect(retained).toContainEqual(expect.objectContaining({ kind: "unreadable" }));
+			const link = retained.find((file) => file.kind === "unreadable");
+			if (link === undefined) throw new Error("missing retained symlink");
+			expect((await lstat(link.path)).isSymbolicLink()).toBe(true);
+			expect(await readlink(link.path)).toBe("../untrusted-agent.txt");
 		} finally {
 			await harness.close(context);
 		}
@@ -297,12 +328,56 @@ describe("owner agent file publication", () => {
 		}
 	});
 
-	it("preserves a final symlink that replaces the reviewed file and never writes its referent", async () => {
+	it.each(["absolute", "relative"] as const)(
+		"preserves a final %s symlink that replaces the reviewed file and never writes its referent",
+		async (kind) => {
+			const { harness, workspace, accepted } = await agentSaveScenario(await tempHome());
+			const before = await accepted();
+			const target = join(workspace.root, agentPath("sancho"));
+			const elsewhere = join(workspace.root, "elsewhere.txt");
+			const linkTarget = kind === "absolute" ? elsewhere : "../elsewhere.txt";
+			const owner = `${before.text}\nOwner version.\n`;
+			await writeFile(elsewhere, "unrelated work");
+			try {
+				await save(
+					harness,
+					{
+						...workspace,
+						publicationPoint: async (point) => {
+							if (point !== "agent:retain:before") return;
+							await rename(target, `${target}.box-kept`);
+							await symlink(linkTarget, target);
+						},
+					},
+					"sancho",
+					owner,
+					before.sha,
+					changed,
+				);
+				expect(await readFile(elsewhere, "utf8")).toBe("unrelated work");
+				expect(await readFile(`${target}.box-kept`, "utf8")).toBe(before.text);
+				expect((await lstat(target)).isSymbolicLink()).toBe(true);
+				expect(await readlink(target)).toBe(linkTarget);
+				const retained = (await publicationHistory(harness, workspace, "sancho")).items.flatMap(
+					(item) => item.retained,
+				);
+				const preserved = retained.find((file) => file.kind === "unreadable");
+				if (preserved === undefined) throw new Error("missing retained symlink");
+				expect(await readlink(preserved.path)).toBe(linkTarget);
+				expect((await agents(harness, workspace))[0]?.publication?.state).toBe("conflict");
+			} finally {
+				await harness.close(context);
+			}
+		},
+	);
+
+	it("keeps a new destination that arrives while restoring a displaced link", async () => {
 		const { harness, workspace, accepted } = await agentSaveScenario(await tempHome());
 		const before = await accepted();
 		const target = join(workspace.root, agentPath("sancho"));
-		const elsewhere = join(workspace.root, "elsewhere.txt");
 		const owner = `${before.text}\nOwner version.\n`;
+		const rival = `${before.text}\nNew destination.\n`;
+		const elsewhere = join(workspace.root, "elsewhere.txt");
 		await writeFile(elsewhere, "unrelated work");
 		try {
 			await save(
@@ -310,9 +385,11 @@ describe("owner agent file publication", () => {
 				{
 					...workspace,
 					publicationPoint: async (point) => {
-						if (point !== "agent:retain:before") return;
-						await rename(target, `${target}.box-kept`);
-						await symlink(elsewhere, target);
+						if (point === "agent:retain:before") {
+							await rename(target, `${target}.box-kept`);
+							await symlink("../elsewhere.txt", target);
+						}
+						if (point === "agent:insert:before") await writeFile(target, rival, { flag: "wx" });
 					},
 				},
 				"sancho",
@@ -320,9 +397,14 @@ describe("owner agent file publication", () => {
 				before.sha,
 				changed,
 			);
+			expect(await readFile(target, "utf8")).toBe(rival);
 			expect(await readFile(elsewhere, "utf8")).toBe("unrelated work");
-			expect(await readFile(`${target}.box-kept`, "utf8")).toBe(before.text);
-			expect((await agents(harness, workspace))[0]?.publication?.state).toBe("conflict");
+			expect((await accepted()).text).toBe(owner);
+			const publication = (await agents(harness, workspace))[0]?.publication;
+			expect(publication?.state).toBe("conflict");
+			const retained = publication?.retained.find((file) => file.kind === "unreadable");
+			if (retained === undefined) throw new Error("missing retained symlink");
+			expect(await readlink(retained.path)).toBe("../elsewhere.txt");
 		} finally {
 			await harness.close(context);
 		}
