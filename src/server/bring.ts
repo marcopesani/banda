@@ -351,7 +351,7 @@ export async function chooseBring(
 	const sources = new Map(sourcesOf(folders).map((source) => [source.name, source]));
 	const sourceOf = (name: string) => {
 		const source = sources.get(name);
-		if (source === undefined) throw new BadRequest(`banda brings from no harness named ${name}`, 404);
+		if (source === undefined) throw new BadRequest(`banda brings from no coding agent named ${name}`, 404);
 		return source;
 	};
 	const there = await present(harness, ctx);

@@ -30,7 +30,7 @@ import { killGroups, killMarked, MARKER, type ProcessGroup, treeGroups } from ".
 /** Host supervision currently relies on POSIX process groups and the platform's process listing. */
 export const harnessPlatform = (platform: string = process.platform) => platform === "darwin" || platform === "linux";
 export const HARNESS_UNAVAILABLE =
-	"Harnesses are available on macOS and Linux. Windows process supervision is not supported yet.";
+	"Coding agents are available on macOS and Linux. Windows process supervision is not supported yet.";
 
 /** A harness banda can run here: how it starts, the mode it is always set to (when it has one), and in words. */
 export type HarnessDefinition = {
@@ -767,7 +767,7 @@ export function defineHarnesses(options: HarnessOptions) {
 	/** Full one-time approval content. Ambiguous/oversized asks are refused, never approved from a preview. */
 	function askOf(request: AcpPermissionRequest): HarnessAsk {
 		if (Buffer.byteLength(JSON.stringify(request)) > 64 * 1024)
-			throw new Error("The harness requested an action too large to review (64 KB maximum). It was refused.");
+			throw new Error("The coding agent requested an action too large to review (64 KB maximum). It was refused.");
 		const call = request.toolCall as AcpPermissionRequest["toolCall"] & { content?: unknown; locations?: unknown };
 		const raw = (call.rawInput ?? {}) as { command?: unknown; file_path?: unknown; url?: unknown };
 		const allows = request.options.filter((option) => option.kind === "allow_once");
@@ -775,7 +775,7 @@ export function defineHarnesses(options: HarnessOptions) {
 		const allow = allows[0];
 		if (allow === undefined || allows.length !== 1 || denies.length > 1)
 			throw new Error(
-				"The harness did not offer an unambiguous one-time approval. Its action was refused; persistent permissions are not supported.",
+				"The coding agent did not offer an unambiguous one-time approval. Its action was refused; persistent permissions are not supported.",
 			);
 		const command =
 			typeof raw.command === "string"

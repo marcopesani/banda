@@ -109,7 +109,7 @@ it.skipIf(!hasChrome())("the shortcuts dialog returns focus to its opener", asyn
 
 it.skipIf(!hasChrome())("the harness dialog returns focus to its opener", async () => {
 	await withPage(base, { width: 1280, height: 900 }, async (page) => {
-		await opensAndReturns(page, "Open harness", "Add a harness");
+		await opensAndReturns(page, "Open harness", "Add a coding agent");
 		expect(page.errors()).toEqual([]);
 	});
 });

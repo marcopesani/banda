@@ -49,7 +49,7 @@ code holds the details. If a sentence here only restates code, delete it.
 ## Words
 agent, band, group, chat, turn, queue, message, part, tool, wait, draft, permission, routine, watch, event, connection,
 account, object, harness, session, artifact, memory, box, workspace, gateway, inference, device. One word per thing, in code, docs and
-the UI.
+the UI; a harness alone has two, "harness" in code and docs and "coding agent" in what the owner reads.
 The words the rules lean on:
 - **band**: the owner's agents, as the sidebar lists them.
 - **origin**: where a message came from (gateway, peer, thread); **replyTo**: the origin a Turn's messages and asks go
@@ -66,7 +66,8 @@ The words the rules lean on:
   ("GitHub · @bandarra"), and a connection may have several.
 - **harness**: a coding agent on the owner's computer that the band hands work to over ACP (Claude Code, Codex, pi); a
   connection whose account is the owner's code folder. A **session** is one piece of work a harness does, from the
-  agent's ask to its end.
+  agent's ask to its end. The owner never reads "harness": the app says the harness's own name (Claude Code), and
+  "coding agent" for the kind ("Add a coding agent").
 - **object**: a thing in a connection the owner recognises (a pull request, an issue, a check run), drawn as a card.
 - **artifact**: a work product the agent made (a document, a table, a page), shown beside the chat and versioned in
   the store.

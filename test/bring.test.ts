@@ -174,7 +174,7 @@ describe("bringing from the other harnesses at first run", () => {
 			const choose = (skills: { harness: string; name: string }[]) =>
 				chooseBring(harness, workspace, { skills, agents: [] }, onChanged, { folders });
 			await expect(choose([{ harness: "claude-code", name: "wrong" }])).rejects.toThrow(/name must be wrong/);
-			await expect(choose([{ harness: "cursor", name: "review" }])).rejects.toThrow(/no harness named cursor/);
+			await expect(choose([{ harness: "cursor", name: "review" }])).rejects.toThrow(/no coding agent named cursor/);
 			await expect(choose([{ harness: "claude-code", name: "gone" }])).rejects.toThrow(/no skill named gone/);
 			await expect(
 				choose([

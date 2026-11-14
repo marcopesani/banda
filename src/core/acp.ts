@@ -97,7 +97,7 @@ export function startAcp(start: AcpStart): AcpConnection {
 			ended = true;
 			// whatever it started dies with it
 			killGroup("SIGKILL");
-			for (const [, waiting] of pending) waiting.reject(new AcpError("the harness ended"));
+			for (const [, waiting] of pending) waiting.reject(new AcpError("the coding agent ended"));
 			pending.clear();
 			resolve({ code, signal });
 		};
@@ -150,7 +150,7 @@ export function startAcp(start: AcpStart): AcpConnection {
 					// `"error": null` beside a result is how some JSON-RPC peers say there was none
 					if (message.error !== undefined && message.error !== null)
 						waiting.reject(
-							new AcpError(message.error.message ?? "the harness refused", message.error.code, message.error.data),
+							new AcpError(message.error.message ?? "the coding agent refused", message.error.code, message.error.data),
 						);
 					else waiting.resolve(message.result);
 					return;
@@ -186,7 +186,7 @@ export function startAcp(start: AcpStart): AcpConnection {
 		pid: child.pid,
 		request: <T>(method: string, params: unknown) =>
 			new Promise<T>((resolve, reject) => {
-				if (ended) return reject(new AcpError("the harness ended"));
+				if (ended) return reject(new AcpError("the coding agent ended"));
 				const id = next++;
 				pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
 				write({ id, method, params });
@@ -277,7 +277,7 @@ export async function openSession(
 		clientInfo: { name: "banda", version: "0" },
 	});
 	if (init.protocolVersion !== ACP_PROTOCOL_VERSION)
-		throw new AcpError("The harness does not support the required ACP protocol version.");
+		throw new AcpError("The coding agent does not support the required ACP protocol version.");
 	const capabilities = init.agentCapabilities?.sessionCapabilities ?? {};
 	const instructed =
 		system === undefined || !offered(capabilities.systemPrompt)
@@ -310,7 +310,8 @@ export async function openSession(
 			: (await connection.request<{ sessionId: string }>("session/new", { cwd, mcpServers: [], ...instructed }))
 					.sessionId;
 	// everything after this names the session: a harness that named none has none to prompt, or to stop
-	if (typeof sessionId !== "string" || sessionId === "") throw new AcpError("The harness did not name its session.");
+	if (typeof sessionId !== "string" || sessionId === "")
+		throw new AcpError("The coding agent did not name its session.");
 	// the harness starts in the owner's own default (which may ask nothing): the connection's mode is set, always
 	if (mode !== undefined) await connection.request("session/set_mode", { sessionId, modeId: mode });
 	return { sessionId, loaded, canClose: offered(capabilities.close) };

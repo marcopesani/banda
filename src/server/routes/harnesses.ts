@@ -412,7 +412,7 @@ export const harnessesArea: AreaModule = {
 						(tx) => addHarness(tx, name, service.trim(), command.trim(), new Set(definitions().keys())),
 						context,
 					);
-					if (!added) throw new BadRequest(`there is a harness called ${name} already`, 409);
+					if (!added) throw new BadRequest(`there is a coding agent called ${name} already`, 409);
 					await refresh();
 					await reinstall();
 					deps.changed();
@@ -435,7 +435,7 @@ export const harnessesArea: AreaModule = {
 					}
 					if (!harnessPlatform() && action !== "disconnect") throw new BadRequest(HARNESS_UNAVAILABLE);
 					if (!definitions().has(name) && action !== "disconnect")
-						throw new BadRequest("no such harness on this computer", 404);
+						throw new BadRequest("no such coding agent on this computer", 404);
 					if (action === "disconnect") {
 						await harness.commit(async (tx) => {
 							for (const agent of await disconnectHarness(tx, name)) await deps.core.agentChanged(tx, agent);

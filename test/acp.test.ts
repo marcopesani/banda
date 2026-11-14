@@ -110,7 +110,7 @@ describe("acp", () => {
 	it("refuses waiting requests when the harness dies, and close kills its whole group", async () => {
 		const { connection } = fake(() => ({ outcome: "cancelled" }));
 		const { sessionId } = await openSession(connection, { cwd: tmpdir() });
-		await expect(prompt(connection, sessionId, "crash")).rejects.toThrow("the harness ended");
+		await expect(prompt(connection, sessionId, "crash")).rejects.toThrow("the coding agent ended");
 		const other: AcpConnection = fake(() => ({ outcome: "cancelled" })).connection;
 		const { sessionId: second } = await openSession(other, { cwd: tmpdir() });
 		void prompt(other, second, "sleep 60000").catch(() => {});
@@ -193,7 +193,9 @@ describe("acp session capabilities", () => {
 			cwd: tmpdir(),
 			handlers: { update: () => {}, permission: async () => ({ outcome: "cancelled" }) },
 		});
-		await expect(openSession(connection, { cwd: tmpdir(), resume: "gone-2" })).rejects.toThrow("the harness ended");
+		await expect(openSession(connection, { cwd: tmpdir(), resume: "gone-2" })).rejects.toThrow(
+			"the coding agent ended",
+		);
 		await connection.close();
 	});
 

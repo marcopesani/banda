@@ -1,6 +1,6 @@
 /**
  * Harnesses where the owner manages them, on the daemon's data: the tiles of Connections, the rows of an agent's
- * Access, and "Add a harness"; each opens the connect dialog on its harness.
+ * Access, and "Add a coding agent"; each opens the connect dialog on its harness.
  */
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ export function AddHarnessButton({
 	return (
 		<>
 			<Button variant="outline" size={size} className="self-start" onClick={() => setOpen(true)}>
-				{agent === undefined ? "Add a harness" : "Add"}
+				{agent === undefined ? "Add a coding agent" : "Add"}
 			</Button>
 			<HarnessDialog open={open} onOpenChange={setOpen} agent={agent} />
 		</>

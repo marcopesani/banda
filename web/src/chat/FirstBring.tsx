@@ -110,7 +110,7 @@ export function BringPicker({ harnesses, picked, left, busy = false, onHarness, 
 	const showFrom = picked.size > 1;
 	return (
 		<div className="flex w-full flex-col gap-6">
-			<ul aria-label="Harnesses on this computer" className="flex w-full flex-col gap-2">
+			<ul aria-label="Coding agents on this computer" className="flex w-full flex-col gap-2">
 				{harnesses.map((harness) => (
 					<HarnessCard
 						key={harness.name}

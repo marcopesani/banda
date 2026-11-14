@@ -276,7 +276,7 @@ function HarnessAccess({ agent }: { agent: { readonly id: string; readonly name:
 	const connected = harnesses.harnesses.filter(({ name }) => harnesses.accounts[name] !== undefined);
 	const names = connected.map(({ name }) => name);
 	return (
-		<Block title="Harnesses" note={`Coding agents on this computer ${agent.name} may hand work to.`}>
+		<Block title="Coding agents" note={`On this computer, for ${agent.name} to hand work to.`}>
 			{names.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">
 					{`${agent.name} hands work to none yet.`}

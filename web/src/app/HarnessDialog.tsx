@@ -119,7 +119,7 @@ export function HarnessDialog({
 			setBusy(false);
 		}
 	};
-	const service = chosen?.service ?? name ?? "a harness";
+	const service = chosen?.service ?? name ?? "a coding agent";
 	const asksNothing = chosen?.custom === true || ASKS_NOTHING.test(chosen?.asks ?? "");
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -130,7 +130,7 @@ export function HarnessDialog({
 				<DialogHeader>
 					<DialogTitle>
 						{step === "pick" || step === "own"
-							? "Add a harness"
+							? "Add a coding agent"
 							: account === undefined
 								? `Connect ${service}`
 								: `${service}`}
@@ -243,7 +243,7 @@ export function HarnessDialog({
 					) : (
 						<>
 							<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-field bg-paper-2 px-3.5 py-3 text-ui">
-								<dt className="text-ink-2">Harness</dt>
+								<dt className="text-ink-2">Coding agent</dt>
 								<dd className="flex min-w-0 items-center gap-2 text-ink">
 									<HarnessMark provider={chosen?.provider} logo={chosen?.logo} className="size-4" />
 									{service}
