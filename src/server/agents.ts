@@ -239,7 +239,10 @@ export async function accept(
 	return agents(harness, workspace, ctx);
 }
 
-/** Decline the box's change to agent `name`: the accepted file is written back, or a new one removed. */
+/**
+ * Decline the box's change to agent `name`: the accepted file is written back, or a new one removed. `reviewedSha` is
+ * the hash of the box's text the owner saw, or null when they saw none: a removal, or a file that cannot be read.
+ */
 export async function decline(
 	harness: Harness,
 	workspace: Workspace,
@@ -252,7 +255,10 @@ export async function decline(
 	const file = (await harness.snapshot(Accepted, ctx))?.files[agentPath(name)];
 	const box = (await boxFiles(workspace, ctx)).files.get(name);
 	const workingBase = box === undefined ? null : "text" in box ? shaOf(box.text) : "unreadable";
-	if (reviewedSha !== undefined && reviewedSha !== workingBase)
+	// a file with no readable text has no hash to show, so the owner who reviewed it sent none
+	const reviewed =
+		reviewedSha === null ? workingBase === null || workingBase === "unreadable" : reviewedSha === workingBase;
+	if (reviewedSha !== undefined && !reviewed)
 		throw new BadRequest(`agents/${name}.md changed since you saw it: look again`, 409);
 	await harness.commit(async (tx) => {
 		await queueAgentPublication(tx, {
