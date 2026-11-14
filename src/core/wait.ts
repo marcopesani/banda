@@ -15,6 +15,7 @@ import {
 	type TaskId,
 	type Tx,
 } from "@earendil-works/pi-durable";
+import { type ToolAuthority, validToolAuthority } from "./connections.ts";
 import { type Origin, OWNER, type Strength } from "./gateway.ts";
 import {
 	agentOfChat,
@@ -71,6 +72,7 @@ export type Ask =
 	| {
 			readonly type: "approval";
 			readonly tool: string;
+			readonly authority?: ToolAuthority;
 			/** The draft: the exact arguments the effect runs with, once approved, stored whole. */
 			readonly args: JsonObject;
 			/** What it would do, in the daemon's words (the tool's own code), never the model's. */
@@ -347,6 +349,12 @@ export async function fill(
 	const { edits, permission } = approving;
 	let draft: JsonObject | undefined;
 	let ask = input.ask;
+	if (
+		ask.type === "approval" &&
+		normal.answer === "approve" &&
+		!(await validToolAuthority(tx, ask.tool, ask.authority))
+	)
+		return { refused: "the connection tool changed since this approval was prepared" };
 	if (edits !== undefined || permission !== undefined) {
 		if (ask.type !== "approval" || normal.answer !== "approve")
 			return { refused: "only an approval, approved, carries edits or a permission" };
@@ -377,14 +385,28 @@ export async function fill(
 	const covered =
 		giving === undefined || permission === undefined || ask.type !== "approval"
 			? []
-			: await coveredAsks(tx, id, { tool: ask.tool, shape: giving, scope: permission, errand, agent }, now);
+			: await coveredAsks(
+					tx,
+					id,
+					{ tool: ask.tool, authority: ask.authority, shape: giving, scope: permission, errand, agent },
+					now,
+				);
 	slot.answer = normal.answer;
 	if (message !== undefined && ask.type === "question") slot.message = message;
 	slot.by = sender;
 	slot.at = now;
 	if (draft !== undefined) slot.draft = draft;
 	if (giving !== undefined && permission !== undefined && ask.type === "approval") {
-		const given = await give(tx, { tool: ask.tool, shape: giving, scope: permission, wait: id, errand, agent, now });
+		const given = await give(tx, {
+			tool: ask.tool,
+			authority: ask.authority,
+			shape: giving,
+			scope: permission,
+			wait: id,
+			errand,
+			agent,
+			now,
+		});
 		const permitted = {
 			id: given,
 			scope: permission.scope,
@@ -429,11 +451,19 @@ export async function dismissQuestion(
 async function coveredAsks(
 	tx: Tx,
 	id: number,
-	given: { tool: string; shape: PermissionShape; scope: PermissionScope; errand: Errand; agent: string | undefined },
+	given: {
+		tool: string;
+		authority?: ToolAuthority | undefined;
+		shape: PermissionShape;
+		scope: PermissionScope;
+		errand: Errand;
+		agent: string | undefined;
+	},
 	now: number,
 ): Promise<number[]> {
 	const permission: Permission = {
 		tool: given.tool,
+		...(given.authority === undefined ? {} : { authority: given.authority }),
 		match: given.shape.match,
 		what: given.shape.what,
 		scope: given.scope.scope,
@@ -448,7 +478,16 @@ async function coveredAsks(
 		const { ask } = wait.input;
 		if (wait.id === id || ask.type !== "approval" || now >= wait.input.deadline) continue;
 		if ((await floorNow(tx, ask)) !== undefined || ask.permission === undefined || ask.interrupted === true) continue;
-		if (!matches(permission, { tool: ask.tool, args: ask.args, agent: await agentOfChat(tx, wait.chat) })) continue;
+		if (!(await validToolAuthority(tx, ask.tool, ask.authority))) continue;
+		if (
+			!matches(permission, {
+				tool: ask.tool,
+				args: ask.args,
+				agent: await agentOfChat(tx, wait.chat),
+				authority: ask.authority,
+			})
+		)
+			continue;
 		const errand = permission.scope === "task" ? (ask.errand ?? (await errandOf(tx, wait.chat))) : undefined;
 		if (!isOpen(permission, now, errand)) continue;
 		if ((await tx.doc(Answers, wait.id as TaskId)).answer !== undefined) continue;

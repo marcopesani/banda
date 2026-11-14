@@ -456,7 +456,10 @@ lives inside agents' settings and the app's Settings, never as a screen of its o
   a required `account` parameter to each tool and names the accounts in the description; with one, nothing is added.
   Objects, events, drafts and permissions carry their account; a permission binds one account and never covers
   another. A draft may edit its text, never its acting account. Nothing is on by default: an agent gets an account
-  when the owner switches it on. Replacing a sign-in does not lend its authority to work still using the old one.
+  when the owner switches it on. Signing in again as the same identity keeps the owner's standing permissions for
+  that agent and account. A permission belongs to the accepted tool: removing it or replacing its definition ends
+  that permission and prevents its pending drafts from running. Switching a listed tool off and on keeps its
+  permissions. Replacing a sign-in does not lend its authority to a draft prepared under the old one.
 - **Switches and settings.** The owner switches any tool off, signs an account out or removes a connection from
   Settings. Whether a tool is in effect is checked in the commit that starts each call, so one taken back is refused
   even mid-run, a write waiting for approval included. Each tool has a kind, said by its definition, by the owner, by

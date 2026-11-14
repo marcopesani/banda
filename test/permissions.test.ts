@@ -11,7 +11,8 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { ActivityLog } from "../src/core/activity.ts";
 import { AgentChats, LEAD } from "../src/core/agents.ts";
-import { EFFECT, type EffectRan } from "../src/core/ask.ts";
+import { EFFECT, type EffectApi, type EffectRan, EffectRun, type EffectTool, effectRun } from "../src/core/ask.ts";
+import { Connected, connectionTools, toolAuthority } from "../src/core/connections.ts";
 
 import { OWNER, type Received } from "../src/core/gateway.ts";
 import {
@@ -31,7 +32,7 @@ import {
 import { openWaits } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
-import { type Approving, type Ask, answer, WAIT, type WaitEnded } from "../src/core/wait.ts";
+import { type Approving, type Ask, answer, defineWait, WAIT, type WaitEnded } from "../src/core/wait.ts";
 import { groupApprovals, scopeOf, servesGroups, sharedScopes } from "../web/src/lib/permissions.ts";
 import { allowTools, blobStore, FAUX_MODEL, FakeGateway, tempHome, until } from "./helpers.ts";
 import { pbtRuns } from "./pbt.ts";
@@ -39,6 +40,107 @@ import { pbtRuns } from "./pbt.ts";
 const owner = { gateway: "fake", peer: OWNER };
 const web = { gateway: "web", peer: OWNER };
 const HOUR = 60 * 60_000;
+
+it.each(["replayed before expansion", "admitted after expansion", "a generic double-underscore name"])(
+	"an idempotent effect respects captured authority with %s",
+	async (boundary) => {
+		const task = defineWait(async () => {});
+		const registry = createRegistry();
+		registry.install(defineExtension({ name: "test.authority", tasks: [task] }));
+		const harness = await openStore(await tempHome(), { models: createModels(), registry });
+		try {
+			const owned = await harness.commit(async (tx) => {
+				const connected = await tx.doc(Connected);
+				connected.servers.test = { service: "Test", url: "https://test.example/mcp", auth: "none", version: 1, at: 0 };
+				connected.connections.test = {
+					version: "s1",
+					tools: { send: { generation: 2, description: "send", schema: { type: "object" } } },
+					at: 0,
+				};
+				connected.versions = 2;
+				const chat = await tx.createConversation({ ownership: { kind: "ownerless" } });
+				const id = await tx.createTask(
+					task,
+					{ key: "original", ask: { type: "question", question: "holding" }, deadline: Date.now() + 60_000 },
+					{ conversationId: chat.id, ownership: { kind: "conversation" } },
+				);
+				return { chat: chat.id, task: id };
+			}, context);
+			const authority = await harness.commit(async (tx) => {
+				const tool = (await connectionTools(tx))[0];
+				if (tool === undefined) throw new Error("the tool was not listed");
+				return toolAuthority(tool);
+			}, context);
+			const api: EffectApi = {
+				taskId: owned.task,
+				conversationId: owned.chat,
+				now: Date.now,
+				commit: (change, ctx) => harness.commit(change, ctx),
+				waitForTask: (id, ctx) => harness.waitForTask(id, ctx),
+			};
+			const turnover = () =>
+				harness.commit(async (tx) => {
+					const connected = await tx.doc(Connected);
+					connected.connections.test.tools.send.generation = ++connected.versions;
+				}, context);
+			let expanded = 0;
+			let calls = 0;
+			const parameters = Type.Object({ body: Type.String() });
+			const tool: EffectTool<typeof parameters, EffectApi> = {
+				name: boundary === "a generic double-underscore name" ? "local__send" : "test__send",
+				...(boundary === "a generic double-underscore name" ? {} : { authority }),
+				description: "send",
+				parameters,
+				effect: "idempotent",
+				expand: async (args) => {
+					expanded++;
+					if (boundary === "replayed before expansion") throw new Error("interrupted expansion");
+					if (boundary !== "a generic double-underscore name") await turnover();
+					return args;
+				},
+				run: async () => {
+					calls++;
+					return { output: [{ type: "text", text: "sent" }] };
+				},
+			};
+			const asking = async () => {
+				throw new Error("stale work must not create an approval");
+			};
+			if (boundary === "replayed before expansion") {
+				await expect(effectRun(asking, tool)({ body: "hello" }, "one", api, context)).rejects.toThrow(
+					"interrupted expansion",
+				);
+				await turnover();
+				const current = await harness.commit(async (tx) => {
+					const tool = (await connectionTools(tx))[0];
+					if (tool === undefined) throw new Error("the tool was not listed");
+					return toolAuthority(tool);
+				}, context);
+				expect(
+					await effectRun(asking, { ...tool, authority: current })({ body: "hello" }, "one", api, context),
+				).toMatchObject({
+					isError: true,
+				});
+			} else {
+				await harness.commit(async (tx) => {
+					const run = await tx.doc(EffectRun, api.taskId);
+					if (boundary !== "a generic double-underscore name") run.authority = authority;
+					run.draft = { body: "hello" };
+					run.started[1] = { wait: 3 };
+				}, context);
+				const result = await effectRun(asking, tool)({ body: "hello" }, "one", api, context);
+				expect(result.isError).toBe(boundary === "a generic double-underscore name" ? undefined : true);
+			}
+			expect(expanded).toBe(1);
+			expect(calls).toBe(boundary === "a generic double-underscore name" ? 1 : 0);
+			expect((await harness.snapshot(EffectRun, api.taskId, context))?.authority).toEqual(
+				boundary === "a generic double-underscore name" ? undefined : authority,
+			);
+		} finally {
+			await harness.close(context);
+		}
+	},
+);
 
 type Call = { readonly tool: "send" | "pay" | "deploy"; readonly to: string; readonly body?: string };
 

@@ -21,6 +21,7 @@ import { log } from "./activity.ts";
 import { publishedBy } from "./artifacts.ts";
 import { type Attachment, attachmentLine, type BlobStore, safeName, sizeOf, tooBig } from "./blobs.ts";
 import { oneEmoji } from "./choices.ts";
+import { sameToolAuthority, type ToolAuthority, validToolAuthority } from "./connections.ts";
 import { mimeOf } from "./gateway.ts";
 import { AVATAR_GEOMETRY } from "./parts/avatar.ts";
 import { artifact, avatar, connect, MESSAGE_PARTS, reaction } from "./parts/index.ts";
@@ -572,6 +573,7 @@ export function proposeAvatarTool({ asking, sending, blobs, limit }: Speaking): 
 /** `A` is what its `run` and `expand` are given of the task running them: a tool call's whole view, unless it needs less. */
 export type EffectTool<P extends TSchema, A extends EffectApi = ToolExecutionApi> = {
 	readonly name: string;
+	readonly authority?: ToolAuthority;
 	/** What its words call it, when that is not its name: an effect no model calls has no name a model knows. */
 	readonly spoken?: string;
 	readonly description: string;
@@ -626,7 +628,11 @@ export type EffectRan = {
  * An effect's run, under its tool task: the draft that runs (as approved, edits included), and each attempt that
  * started with what let it (a permission, or an approval's Wait), written in the commit that let it.
  */
-type Run = { draft?: JsonObject; started: { [attempt: string]: { permission?: string; wait?: number } } };
+type Run = {
+	authority?: ToolAuthority;
+	draft?: JsonObject;
+	started: { [attempt: string]: { permission?: string; wait?: number } };
+};
 
 export const EffectRun = defineDoc<Run>({
 	kind: "banda.effect-run",
@@ -689,6 +695,7 @@ export function draftOf<P extends TSchema, A extends EffectApi>(tool: EffectTool
 	return {
 		type: "approval",
 		tool: tool.name,
+		...(tool.authority === undefined ? {} : { authority: tool.authority }),
 		args,
 		label,
 		...(editable.length === 0 ? {} : { editable }),
@@ -760,6 +767,7 @@ export function effectRun<P extends TSchema, A extends EffectApi>(
 	/** Record attempt `attempt` started, with what let it, and the draft it runs; or why it may not start. */
 	const start = (api: EffectApi, attempt: number, by: { wait: number }, draft: JsonObject, ctx: Context) =>
 		api.commit(async (tx): Promise<string | undefined> => {
+			if (!(await validToolAuthority(tx, tool.name, tool.authority))) return "the connection tool changed";
 			const refused = await tool.allowed?.(tx, draft, Number(api.conversationId));
 			if (refused !== undefined) return refused;
 			const run = await tx.doc(EffectRun, api.taskId);
@@ -773,6 +781,7 @@ export function effectRun<P extends TSchema, A extends EffectApi>(
 	 */
 	const withinPermission = (api: EffectApi, attempt: number, draft: Draft, ctx: Context) =>
 		api.commit(async (tx): Promise<string | { readonly refused: string } | undefined> => {
+			if (!(await validToolAuthority(tx, tool.name, tool.authority))) return { refused: "the connection tool changed" };
 			const refused = await tool.allowed?.(tx, draft.args, Number(api.conversationId));
 			if (refused !== undefined) return { refused };
 			if (attempt === 1 && (await tx.doc(TasksOf, api.taskId)).tasks.approval !== undefined) return undefined;
@@ -800,16 +809,24 @@ export function effectRun<P extends TSchema, A extends EffectApi>(
 			return found.id;
 		}, ctx);
 	return async (called, key, api, ctx) => {
+		const notAllowed = (why: string) => text(`${spoken} did not run: ${why}.`, true);
+		const before = await api.commit(async (tx): Promise<Run | { refused: string }> => {
+			if (!(await validToolAuthority(tx, tool.name, tool.authority))) return { refused: "the connection tool changed" };
+			const stored = await tx.doc(EffectRun, api.taskId);
+			if (stored.authority === undefined && tool.authority !== undefined) {
+				if (Object.keys(stored.started).length > 0 || Object.keys((await tx.doc(TasksOf, api.taskId)).tasks).length > 0)
+					return { refused: "the original connection tool authority is missing" };
+				stored.authority = { ...tool.authority };
+			}
+			if (!sameToolAuthority(stored.authority, tool.authority)) return { refused: "the connection tool changed" };
+			return JSON.parse(JSON.stringify(stored)) as Run;
+		}, ctx);
+		if ("refused" in before) return notAllowed(before.refused);
 		const run = (draft: JsonObject) => tool.run(draft as Static<P>, { key, api }, ctx);
 		const args = tool.expand === undefined ? (called as JsonObject) : await tool.expand(called as Static<P>, api, ctx);
 		if (typeof args === "string") return text(`${spoken} did not run: ${args}.`, true);
 		const draft = draftOf(tool, args);
-		const before = await api.commit(
-			async (tx) => JSON.parse(JSON.stringify(await tx.doc(EffectRun, api.taskId))) as Run,
-			ctx,
-		);
 		const last = Math.max(0, ...Object.keys(before.started).map(Number));
-		const notAllowed = (why: string) => text(`${spoken} did not run: ${why}.`, true);
 		if (last === 0) {
 			await inTurn(api, ctx);
 			const permitted = await withinPermission(api, 1, draft, ctx);
@@ -834,7 +851,13 @@ export function effectRun<P extends TSchema, A extends EffectApi>(
 		if (tool.effect === "idempotent") {
 			// the same key makes a second run a no-op: again unasked, if what let it run still does
 			const by = before.started[last];
-			if (by?.permission === undefined) return withEdits(await run(stored), draft.args, stored);
+			if (by?.permission === undefined) {
+				const refused = await api.commit(async (tx) => {
+					if (!(await validToolAuthority(tx, tool.name, tool.authority))) return "the connection tool changed";
+					return tool.allowed?.(tx, stored, Number(api.conversationId));
+				}, ctx);
+				return refused === undefined ? withEdits(await run(stored), draft.args, stored) : notAllowed(refused);
+			}
 			const permitted = await withinPermission(api, last, shown, ctx);
 			if (typeof permitted === "object") return notAllowed(permitted.refused);
 			if (permitted !== undefined) return withEdits(await run(stored), draft.args, stored);

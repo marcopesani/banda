@@ -6,7 +6,7 @@
  * as approved, and no credential is in the store. The same again signing in by code, as a file's named client, with a
  * kill once the code was given, once the owner's tokens came, and once they were kept. And a draft waiting across a
  * new build that says its tool only reads: one kill at every commit and at the listing carried and the call found to
- * stay a write, and the owner's answer still decides it, once.
+ * stay a write. Old approval is refused and denied; a fresh request asks again and sends only once when approved.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +18,8 @@ import { tempHome } from "./helpers.ts";
 
 type Summary = {
 	outcome: { status: string; result?: unknown };
+	oldOutcome?: { status: string };
+	permissions?: string[];
 	parked: unknown[];
 	accepted: boolean;
 	connected: boolean;
@@ -41,7 +43,14 @@ const run = async (
 	);
 	try {
 		const { last, kills } = await runWorker("test/fault/connection-worker.ts", [home, fake.url, mode], schedules);
-		return { ...(last as Summary), kills, home, creates: count(fake, "create_event"), tokens: [...fake.tokens] };
+		return {
+			...(last as Summary),
+			kills,
+			home,
+			creates: count(fake, "create_event"),
+			events: fake.calls.filter((call) => call.tool === "create_event"),
+			tokens: [...fake.tokens],
+		};
 	} finally {
 		await fake.close();
 	}
@@ -143,11 +152,14 @@ describe("connections under faults", () => {
 		["carry", false],
 		["carry-deny", true],
 	] as const)
-		it(`sweep, a draft waiting across a new build (${denied ? "denied" : "approved"}): one kill at every commit, at the listing carried and at the call that stays a write`, async () => {
+		it(`sweep, an old draft refused across a new build (${denied ? "no fresh request" : "fresh request approved"}): one kill at every commit and connection boundary`, async () => {
 			const clean = await run([], mode);
 			check(clean, { denied });
 			expect(clean.creates).toBe(denied ? 0 : 1);
-			expect(clean.answers).toEqual([denied ? "deny" : "approve"]);
+			expect(clean.answers).toEqual(denied ? ["refused", "deny"] : ["refused", "deny", "approve"]);
+			expect(clean.oldOutcome?.status).toBe("completed");
+			expect(clean.permissions).toEqual([]);
+			expect(clean.events).toEqual(denied ? [] : [{ tool: "create_event", args: { title: "Fresh tea", day: "mon" } }]);
 			expect(clean.due).toBe(false);
 			// the guard ran: the call went through the read path of the new build, and on as the write it was
 			expect(clean.points?.["connection:stays-write"]).toBeGreaterThan(0);
@@ -170,8 +182,13 @@ describe("connections under faults", () => {
 					const killed = await run([[fault]], mode);
 					try {
 						expect(killed.kills).toBe(1);
-						// nothing ran unapproved, and the owner decided this draft once, however the build changed around it
+						// An old draft never sends; only the separately approved current request may reach the server.
 						check(killed, { denied });
+						expect(killed.oldOutcome?.status).toBe("completed");
+						expect(killed.permissions).toEqual([]);
+						expect(killed.events).toEqual(
+							killed.creates === 0 ? [] : [{ tool: "create_event", args: { title: "Fresh tea", day: "mon" } }],
+						);
 						expect(killed.answers.filter((a) => a === (denied ? "deny" : "approve")).length).toBeLessThanOrEqual(1);
 						expect(killed.due).toBe(false);
 					} catch (error) {

@@ -9,8 +9,9 @@
  * code dies with the process that waited for it, so a restart starts it again.
  *
  * With "carry", the run reaches its draft for the event, and the store is opened again on a build whose definition says
- * create_event only reads: the listing is carried, the draft stays the draft it was, and the owner still decides it.
- * With "carry-deny" the owner says no, so a call that went on as a read, unasked, is seen at once: it reached the server.
+ * create_event only reads. The old approval is refused, gives no permission, and the owner denies the old draft.
+ * A fresh owner message asks again under the owner's Ask setting and is approved once. With "carry-deny", there is
+ * no fresh request, so any call that went on as a read, unasked, is seen at once at the server.
  *
  * With "shipped", the calendar is a definition banda ships, the owner adds it as a switch. With "remove", the owner adds
  * it, signs in, and removes it: the process ends with no fact, no account and no credential of it, whatever was killed.
@@ -23,9 +24,11 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import type { TaskId } from "@earendil-works/pi-durable";
 import { Connected } from "../../src/core/connections.ts";
 import { OWNER } from "../../src/core/gateway.ts";
+import { Permissions } from "../../src/core/permissions.ts";
 import { openWaits, status } from "../../src/core/status.ts";
 import { context } from "../../src/core/store.ts";
 import type { TurnResult } from "../../src/core/turn.ts";
+import { answer } from "../../src/core/wait.ts";
 import { connectionDefinition, openConnected, signInAsOwner, typingAt } from "../fixtures/connected.ts";
 import { answerNudge } from "../fixtures/models.ts";
 import { type Fault, type FaultPoint, Faults } from "./faults.ts";
@@ -86,14 +89,26 @@ const respond = (ctx: { messages: readonly { role: string; content: unknown }[] 
 	if (heed !== undefined) return heed;
 	const after = ctx.messages.length - [...ctx.messages].reverse().findIndex((m) => m.role === "user");
 	const results = ctx.messages.slice(after).filter((m) => m.role === "toolResult").length;
+	const fresh = ctx.messages.some(
+		(m) => m.role === "user" && JSON.stringify(m.content).includes("fresh tea on monday"),
+	);
 	if (results === 0)
-		return fauxAssistantMessage([fauxToolCall("cal__list_events", { day: "mon" }, { id: "c1" })], {
+		return fauxAssistantMessage([fauxToolCall("cal__list_events", { day: "mon" }, { id: fresh ? "fresh-c1" : "c1" })], {
 			stopReason: "toolUse",
 		});
 	if (results === 1)
-		return fauxAssistantMessage([fauxToolCall("cal__create_event", { title: "Tea", day: "mon" }, { id: "c2" })], {
-			stopReason: "toolUse",
-		});
+		return fauxAssistantMessage(
+			[
+				fauxToolCall(
+					"cal__create_event",
+					{ title: fresh ? "Fresh tea" : "Tea", day: "mon" },
+					{ id: fresh ? "fresh-c2" : "c2" },
+				),
+			],
+			{
+				stopReason: "toolUse",
+			},
+		);
 	return fauxAssistantMessage("Done.");
 };
 
@@ -203,20 +218,48 @@ if (carrying && !existsSync(onNextBuild)) {
 	await s.close();
 	s = await open();
 }
-const ended = s.harness.waitForTask(received.turn as TaskId<TurnResult>, context).then(() => true);
 const web = { gateway: "web", peer: OWNER };
-while (!(await Promise.race([ended, new Promise<false>((r) => setTimeout(r, 10, false))]))) {
-	for (const wait of await openWaits(s.harness)) {
-		if (wait.ask.type !== "approval") continue;
-		faults.hit("answer");
-		const again = wait.ask.interrupted === true;
-		const no = again || mode === "carry-deny";
-		noteAnswer(home, again ? "no-again" : no ? "deny" : "approve", wait.key);
-		await ownerAnswer(s.harness, wait.key, no ? "deny" : "approve", web, "bearer");
+async function finish(turn: number, stale: boolean) {
+	const ended = s.harness.waitForTask(turn as TaskId<TurnResult>, context).then(() => true);
+	while (!(await Promise.race([ended, new Promise<false>((r) => setTimeout(r, 10, false))]))) {
+		for (const wait of await openWaits(s.harness)) {
+			if (wait.ask.type !== "approval") continue;
+			faults.hit("answer");
+			if (stale) {
+				const refused = await answer(s.harness, wait.key, "approve", web, "bearer", {
+					approving: { permission: { scope: "always" } },
+				});
+				if (
+					!("refused" in refused) ||
+					refused.refused !== "the connection tool changed since this approval was prepared"
+				)
+					throw new Error(`an old approval was not refused after definition turnover: ${JSON.stringify(refused)}`);
+				if (Object.keys((await s.harness.snapshot(Permissions, context))?.permissions ?? {}).length !== 0)
+					throw new Error("an old approval gave a permission after definition turnover");
+				noteAnswer(home, "refused", wait.key);
+			}
+			const again = wait.ask.interrupted === true;
+			const no = stale || again;
+			noteAnswer(home, again ? "no-again" : no ? "deny" : "approve", wait.key);
+			await ownerAnswer(s.harness, wait.key, no ? "deny" : "approve", web, "bearer");
+		}
 	}
+	return (await s.harness.getTask(turn as TaskId<TurnResult>, context))?.state.outcome;
+}
+const oldOutcome = await finish(received.turn, carrying);
+let outcome = oldOutcome;
+if (mode === "carry") {
+	const version = (await s.capabilities.view()).connections.find((c) => c.name === "cal")?.accepted?.version;
+	await s.capabilities.setTools("cal", { create_event: "ask" }, version);
+	const fresh = await s.core.receive(s.harness, {
+		id: "m2",
+		origin: { gateway: "fake", peer: OWNER },
+		text: "fresh tea on monday",
+	});
+	if (!("turn" in fresh)) throw new Error(`the fresh message started no Turn: ${JSON.stringify(fresh)}`);
+	outcome = await finish(fresh.turn, false);
 }
 
-const outcome = (await s.harness.getTask(received.turn as TaskId<TurnResult>, context))?.state.outcome;
 const { parked } = await status(s.harness);
 const accepted = (await s.harness.snapshot(Connected, context))?.added.cal !== undefined || (await hasRecord());
 const connected = (await s.harness.snapshot(Connected, context))?.connections.cal !== undefined;
@@ -225,6 +268,8 @@ const due = (await s.harness.snapshot(Connected, context))?.connections.cal?.due
 console.log(
 	JSON.stringify({
 		outcome,
+		oldOutcome,
+		permissions: Object.keys((await s.harness.snapshot(Permissions, context))?.permissions ?? {}),
 		parked,
 		accepted,
 		connected,

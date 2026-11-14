@@ -51,7 +51,11 @@ async function setup(reads: { [as: string]: object }) {
 			tools: Object.fromEntries(
 				TOOLS.map((tool) => [
 					tool,
-					{ description: "read", schema: { type: "object", properties: { number: { type: "integer" } } } },
+					{
+						generation: ++c.versions,
+						description: "read",
+						schema: { type: "object", properties: { number: { type: "integer" } } },
+					},
 				]),
 			),
 		};
