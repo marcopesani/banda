@@ -70,7 +70,6 @@ async function proof(page: Page, name: string, width: number) {
 for (const width of [390, 1440]) {
 	for (const [platform, system, extension] of [
 		["MacIntel", "Macintosh; Intel Mac OS X 14_0", ".dmg"],
-		["Win32", "Windows NT 10.0; Win64; x64", ".exe"],
 		["Linux armv8l", "Linux; Android 14; Pixel 8", ".apk"],
 	]) {
 		it.skipIf(!hasChrome())(`offers ${extension} with GitHub API blocked at ${width}px`, async () => {
@@ -80,7 +79,7 @@ for (const width of [390, 1440]) {
 				expect(await page.run(`document.querySelector('#download').href.endsWith('${extension}')`)).toBe(true);
 				expect(
 					await page.run(`new Set([...document.querySelectorAll('a[data-file][href]')].map(a => a.dataset.file)).size`),
-				).toBe(7);
+				).toBe(4);
 				expect(await page.run(`document.querySelectorAll('a[data-file*="/mac/x64/"]').length`)).toBe(0);
 				expect(
 					await page.run(
@@ -90,6 +89,36 @@ for (const width of [390, 1440]) {
 				expect(await page.run(`document.querySelectorAll('a[data-file^="desktop/linux/"]').length`)).toBe(0);
 				expect(await page.run(`document.querySelectorAll('span[data-file="desktop/linux/x64/deb"]').length`)).toBe(2);
 				expect(await page.run(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+			});
+		});
+	}
+
+	for (const [platform, system, architecture] of [
+		["Win32", "Windows NT 10.0; Win64; x64", "x86"],
+		["MacIntel", "Macintosh; Intel Mac OS X 14_0", "x86"],
+	]) {
+		it.skipIf(!hasChrome())(`offers the platform chooser on ${platform} ${architecture} at ${width}px`, async () => {
+			releases = [older, release("new", "2026-11-02", ["banda-2-linux-amd64.deb"])];
+			await withPage("about:blank", { width, height: 900 }, async (page) => {
+				await page.input("Page.addScriptToEvaluateOnNewDocument", {
+					source: `Object.defineProperty(navigator, 'userAgentData', { value: { getHighEntropyValues: async () => ({ architecture: '${architecture}' }) } });`,
+				});
+				await visit(page, platform, system);
+				await page.until(`document.querySelector('#download-label').textContent === 'Choose your platform'`);
+				expect(await page.run(`document.querySelector('#download').getAttribute('href')`)).toBe("#downloads");
+				expect(
+					await page.run(
+						`document.querySelectorAll('a[href$=".exe"], a[data-file*="/win/"], a[data-file*="/mac/x64/"], a[data-file*="/linux/arm64/"]').length`,
+					),
+				).toBe(0);
+				expect(await page.run(`document.body.textContent.includes('Windows')`)).toBe(false);
+				expect(await page.run(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+				if (platform === "Win32") {
+					await proof(page, "platform-chooser", width);
+					await page.click(`document.querySelector('#download')`);
+					await page.until(`location.hash === '#downloads'`);
+					await proof(page, "downloads-supported", width);
+				}
 			});
 		});
 	}
@@ -141,7 +170,7 @@ for (const width of [390, 1440]) {
 				expect(await page.run(`document.querySelectorAll('span[data-file="desktop/linux/x64/deb"]').length`)).toBe(2);
 				expect(
 					await page.run(
-						`[...document.querySelectorAll('[data-file="desktop/linux/x64/deb"]')].every(el => el.tagName === 'SPAN' && el.textContent.includes('Linux unavailable') && !el.hasAttribute('href') && !el.hasAttribute('role') && !el.hasAttribute('tabindex'))`,
+						`[...document.querySelectorAll('[data-file="desktop/linux/x64/deb"]')].every(el => el.tagName === 'SPAN' && el.textContent.includes('Linux (Debian, x64) unavailable') && !el.hasAttribute('href') && !el.hasAttribute('role') && !el.hasAttribute('tabindex'))`,
 					),
 				).toBe(true);
 				expect(await page.run(`document.querySelectorAll('a[href$=".AppImage"]').length`)).toBe(0);
@@ -160,10 +189,8 @@ for (const width of [390, 1440]) {
 		releases = [older, release("new", "2026-11-02", ["banda-2-linux-amd64.deb", "banda-2-linux-arm64.deb"])];
 		await withPage("about:blank", { width, height: 900 }, async (page) => {
 			await visit(page, "Linux aarch64", "X11; Linux");
-			expect(await page.run(`document.querySelector('#download').href`)).toBe(
-				"https://github.com/purrgrammer/banda/releases",
-			);
-			expect(await page.run(`document.querySelector('#download-label').textContent`)).toBe("View releases");
+			expect(await page.run(`document.querySelector('#download').getAttribute('href')`)).toBe("#downloads");
+			expect(await page.run(`document.querySelector('#download-label').textContent`)).toBe("Choose your platform");
 			expect(await page.run(`document.querySelectorAll('a[data-file^="desktop/linux/arm64"]').length`)).toBe(0);
 		});
 	});

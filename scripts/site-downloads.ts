@@ -7,6 +7,14 @@ export type Release = {
 	assets: { name: string; browser_download_url: string }[];
 };
 
+const supportedFiles = new Set([
+	"desktop/mac/arm64/dmg",
+	"desktop/linux/x64/deb",
+	"cli/mac/arm64/tar.gz",
+	"cli/linux/x64/tar.gz",
+	"phone/android/arm64/apk",
+]);
+
 /** Newest published asset per platform; Linux desktop is offered only by the latest release. */
 export function downloadFiles(releases: Release[]) {
 	const files = new Map<string, { url: string; release: Release }>();
@@ -27,6 +35,7 @@ export function downloadFiles(releases: Release[]) {
 			)
 				continue;
 			const key = `${kind}/${os}/${aliases[arch] ?? arch}/${ext}`;
+			if (!supportedFiles.has(key)) continue;
 			if (!files.has(key)) files.set(key, { url: asset.browser_download_url, release });
 		}
 	}
@@ -46,7 +55,7 @@ export function updateDownloads(html: string, releases: Release[]) {
 			const file = files.get(key);
 			const linux = key.startsWith("desktop/linux/");
 			const label = linux
-				? content.replace(/Linux[^<]*$/, file ? "Linux (Debian, x64)" : "Linux unavailable")
+				? content.replace(/Linux[^<]*$/, file ? "Linux (Debian, x64)" : "Linux (Debian, x64) unavailable")
 				: content;
 			if (!file) {
 				if (linux) return `<span data-file="${key}">${label}</span>`;
