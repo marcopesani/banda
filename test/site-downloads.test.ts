@@ -25,7 +25,7 @@ describe("landing downloads", () => {
 		expect(files.get("phone/android/arm64/apk")?.release.tag_name).toBe("new-android");
 	});
 
-	it("recognises the packagers' architecture aliases and excludes unsigned APKs", () => {
+	it("offers only x64 Debian desktop assets and excludes unsigned APKs", () => {
 		const files = downloadFiles([
 			release("v1", "2026-11-01", [
 				"banda-1-linux-x86_64.AppImage",
@@ -34,11 +34,7 @@ describe("landing downloads", () => {
 				"banda-1-android-arm64-unsigned.apk",
 			]),
 		]);
-		expect([...files.keys()]).toEqual([
-			"desktop/linux/x64/AppImage",
-			"desktop/linux/x64/deb",
-			"desktop/linux/arm64/AppImage",
-		]);
+		expect([...files.keys()]).toEqual(["desktop/linux/x64/deb"]);
 	});
 
 	it("bakes direct links and the matching checksums into HTML, without browser API access", async () => {
@@ -50,16 +46,16 @@ describe("landing downloads", () => {
 		const releases = [
 			release(
 				"v2",
-				"2026-11-02",
+				"2026-11-03",
 				names.filter((name) => !name.includes("android")),
 			),
-			release("phone2", "2026-11-03", ["banda-2-android-arm64.apk"]),
+			release("phone2", "2026-11-02", ["banda-2-android-arm64.apk"]),
 			release("old-intel", "2026-10-01", ["banda-1-mac-x64.dmg", "banda-cli-1-mac-x64.tar.gz"]),
 		];
 		const result = updateDownloads(html, releases);
 		const links = [...result.matchAll(/data-file="([^"]+)" href="([^"]+)"/g)];
 		// every file once in the list, and each shortcut to one (the hero's) follows the release too
-		expect(new Set(links.map(([, key]) => key)).size).toBe(11);
+		expect(new Set(links.map(([, key]) => key)).size).toBe(8);
 		expect(result).not.toContain("mac-x64");
 		for (const [, key, url] of links)
 			expect(url).toContain(`/releases/download/${key.startsWith("phone") ? "phone2" : "v2"}/`);
@@ -69,4 +65,49 @@ describe("landing downloads", () => {
 		expect(updateDownloads(result, releases)).toBe(result);
 		expect(() => updateDownloads(html, [])).toThrow("No published download");
 	});
+});
+
+for (const arch of ["x64", "amd64"]) {
+	it(`selects ${arch} Debian from the latest published release without reviving older Linux packages`, () => {
+		const files = downloadFiles([
+			release("old", "2026-11-01", ["banda-1-linux-amd64.deb", "banda-1-linux-x86_64.AppImage"]),
+			release("new", "2026-11-02", [
+				`banda-2-linux-${arch}.deb`,
+				"banda-2-linux-arm64.deb",
+				"banda-2-linux-x86_64.AppImage",
+			]),
+			release("draft", "2026-11-03", ["banda-3-linux-amd64.deb"], true),
+		]);
+		expect([...files.keys()]).toEqual(["desktop/linux/x64/deb"]);
+		expect(files.get("desktop/linux/x64/deb")?.release.tag_name).toBe("new");
+	});
+}
+
+it("removes a previously published Debian link when the latest release has no suitable Linux desktop", () => {
+	const old = release("old", "2026-11-01", ["banda-1-linux-amd64.deb", "banda-1-mac-arm64.dmg", "banda-1-win-x64.exe"]);
+	const html =
+		'<span data-file="desktop/linux/x64/deb"><i aria-hidden="true"></i>Linux unavailable</span><a data-file="desktop/mac/arm64/dmg" href="old">macOS</a><a data-file="desktop/win/x64/exe" href="old">Windows</a><!-- checksums:start --><!-- checksums:end -->';
+	const available = updateDownloads(html, [old]);
+	expect(available).toContain(
+		'<a data-file="desktop/linux/x64/deb" href="https://github.com/purrgrammer/banda/releases/download/old/banda-1-linux-amd64.deb">',
+	);
+	expect(updateDownloads(available, [old])).toBe(available);
+	for (const names of [
+		["banda-2-linux-x86_64.AppImage"],
+		["banda-2-linux-arm64.deb"],
+		["banda-2-android-arm64.apk"],
+		[],
+	]) {
+		const current = [old, release("new", "2026-11-02", names)];
+		const unavailable = updateDownloads(available, current);
+		expect(unavailable).toContain(
+			'<span data-file="desktop/linux/x64/deb"><i aria-hidden="true"></i>Linux unavailable</span>',
+		);
+		expect(unavailable).not.toContain(".deb");
+		expect(unavailable).not.toContain(".AppImage");
+		expect(unavailable).toContain("/old/banda-1-mac-arm64.dmg");
+		expect(unavailable).toContain("/old/banda-1-win-x64.exe");
+		expect(updateDownloads(unavailable, current)).toBe(unavailable);
+		expect(updateDownloads(unavailable, [old])).toBe(available);
+	}
 });

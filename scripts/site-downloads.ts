@@ -7,18 +7,25 @@ export type Release = {
 	assets: { name: string; browser_download_url: string }[];
 };
 
-/** Newest published asset per platform, including pre-releases and platform-only releases. */
+/** Newest published asset per platform; Linux desktop is offered only by the latest release. */
 export function downloadFiles(releases: Release[]) {
 	const files = new Map<string, { url: string; release: Release }>();
 	const aliases: Record<string, string> = { x86_64: "x64", amd64: "x64", aarch64: "arm64" };
-	for (const release of releases
+	const published = releases
 		.filter((release) => !release.draft && release.published_at)
-		.sort((a, b) => Date.parse(b.published_at ?? "") - Date.parse(a.published_at ?? ""))) {
+		.sort((a, b) => Date.parse(b.published_at ?? "") - Date.parse(a.published_at ?? ""));
+	for (const release of published) {
 		for (const asset of release.assets) {
 			const match = /^banda-(cli-)?.+-(mac|win|linux|android)-([a-z0-9_]+)\.(tar\.gz|[A-Za-z]+)$/.exec(asset.name);
 			if (!match) continue;
 			const [, cli, os, arch, ext] = match;
 			const kind = cli ? "cli" : os === "android" ? "phone" : "desktop";
+			if (
+				kind === "desktop" &&
+				os === "linux" &&
+				(release !== published[0] || !["x64", "amd64"].includes(arch) || ext !== "deb")
+			)
+				continue;
 			const key = `${kind}/${os}/${aliases[arch] ?? arch}/${ext}`;
 			if (!files.has(key)) files.set(key, { url: asset.browser_download_url, release });
 		}
@@ -33,17 +40,27 @@ export function updateDownloads(html: string, releases: Release[]) {
 	const files = downloadFiles(releases);
 	const used = new Set<Release>();
 	let count = 0;
-	const updated = html.replace(/(<a data-file="([^"]+)" href=")[^"]*(")/g, (_match, start, key, end) => {
-		const file = files.get(key);
-		if (!file) throw new Error(`No published download for ${key}`);
-		const url = new URL(file.url);
-		if (url.origin !== "https://github.com" || !url.pathname.startsWith("/purrgrammer/banda/releases/download/")) {
-			throw new Error(`Not a banda release download: ${file.url}`);
-		}
-		used.add(file.release);
-		count++;
-		return `${start}${escapeHtml(file.url)}${end}`;
-	});
+	const updated = html.replace(
+		/<(a|span) data-file="([^"]+)"[^>]*>(.*?)<\/\1>/gs,
+		(_match, _tag: string, key: string, content: string) => {
+			const file = files.get(key);
+			const linux = key.startsWith("desktop/linux/");
+			const label = linux
+				? content.replace(/Linux[^<]*$/, file ? "Linux (Debian, x64)" : "Linux unavailable")
+				: content;
+			if (!file) {
+				if (linux) return `<span data-file="${key}">${label}</span>`;
+				throw new Error(`No published download for ${key}`);
+			}
+			const url = new URL(file.url);
+			if (url.origin !== "https://github.com" || !url.pathname.startsWith("/purrgrammer/banda/releases/download/")) {
+				throw new Error(`Not a banda release download: ${file.url}`);
+			}
+			used.add(file.release);
+			count++;
+			return `<a data-file="${key}" href="${escapeHtml(file.url)}">${label}</a>`;
+		},
+	);
 	if (!count) throw new Error("No download links found in landing page");
 	const checksums = [...used].map((release) => {
 		const asset = release.assets.find((asset) => asset.name === "SHA256SUMS");
