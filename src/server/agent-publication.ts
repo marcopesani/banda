@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, lstat, open, rename, symlink } from "node:fs/promises";
+import { link, lstat, open, readlink, rename, symlink } from "node:fs/promises";
 import { posix } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { defineDoc, type Harness, type Tx } from "@earendil-works/pi-durable";
@@ -119,6 +119,9 @@ async function fileInfo(env: ExecutionEnv, path: string, ctx: Context): Promise<
 
 type File = { kind: "missing" } | { kind: "text"; text: string; sha: string } | { kind: "unreadable"; message: string };
 
+const baseOf = (file: File): string | null =>
+	file.kind === "missing" ? null : file.kind === "text" ? file.sha : "unreadable";
+
 async function read(env: ExecutionEnv, path: string, ctx: Context): Promise<File> {
 	const opened = await env.openBinaryReader(path, { noFollow: true }, ctx);
 	if (!opened.ok)
@@ -141,6 +144,10 @@ async function read(env: ExecutionEnv, path: string, ctx: Context): Promise<File
 	} finally {
 		await opened.value.close(ctx);
 	}
+}
+
+export async function agentWorkingBase(workspace: Workspace, name: string, ctx: Context): Promise<string | null> {
+	return baseOf(await read(workspace.env(), `${workspace.root}/${agentPath(name)}`, ctx));
 }
 
 async function retained(workspace: Workspace, operation: Publication, ctx: Context): Promise<RetainedAgentFile[]> {
@@ -180,6 +187,15 @@ async function insert(env: ExecutionEnv, source: string, target: string, ctx: Co
 async function restore(env: ExecutionEnv, source: string, target: string, ctx: Context): Promise<boolean> {
 	const info = await fileInfo(env, source, ctx);
 	if (info === undefined) throw new Error("The preserved version is temporarily unavailable.");
+	if (info.kind === "symlink" && env.id === "node:local") {
+		try {
+			await symlink(await readlink(source, { encoding: "buffer" }), target);
+			return true;
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "EEXIST") return false;
+			throw error;
+		}
+	}
 	if (info.kind !== "directory") return insert(env, source, target, ctx);
 	const parent = posix.dirname(target);
 	const relative = posix.relative(parent, source);
@@ -339,8 +355,7 @@ export async function finishAgentPublication(
 				});
 		}
 		const was = await io(() => read(env, held, ctx));
-		const expected = was.kind === "missing" ? null : was.kind === "text" ? was.sha : "unreadable";
-		if (!(await current()) || expected !== operation.workingBase) {
+		if (!(await current()) || baseOf(was) !== operation.workingBase) {
 			if (was.kind !== "missing") {
 				await hit("agent:insert:before");
 				await io(() => restore(env, held, target, ctx));
