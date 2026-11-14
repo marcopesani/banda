@@ -30,7 +30,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { AgentBrowserView } from "../box/browsers.ts";
 import { ActivityLog } from "../core/activity.ts";
-import { Accepted, ChatTier } from "../core/agents.ts";
+import { Accepted, AgentChats, ChatTier } from "../core/agents.ts";
 import { ARTIFACT_EDIT } from "../core/artifacts.ts";
 import { EFFECT, type EffectRan } from "../core/ask.ts";
 import type { Attachment } from "../core/blobs.ts";
@@ -39,6 +39,7 @@ import { budgetPolicy } from "../core/compaction.ts";
 import { Companion } from "../core/companion.ts";
 import { Connected } from "../core/connections.ts";
 import { type Origin, type Outbound, OWNER } from "../core/gateway.ts";
+import { Groups } from "../core/groups.ts";
 import { HARNESS_ENDED } from "../core/harness.ts";
 import { Permissions } from "../core/permissions.ts";
 import {
@@ -54,6 +55,7 @@ import {
 	Control,
 	ROUTINE_SAID,
 	ROUTINE_TASK,
+	RoutineRuns,
 	type RoutineSaidData,
 	Routines,
 	TROUBLE,
@@ -466,7 +468,7 @@ export async function chats(harness: Harness, ctx: Context = context): Promise<C
 		now.chats.map(async (row) => {
 			const at = await lastSaid(harness, row.chat, ctx);
 			const tier = tiers[row.chat];
-			const wait = now.waits.find((open) => open.chat === row.chat);
+			const wait = now.waits.find((open) => (open.displayChat ?? open.chat) === row.chat);
 			const last = await lastWords(
 				harness,
 				row.chat,
@@ -1236,6 +1238,17 @@ export async function live(
 	graph?.start(async () => {
 		queued = queued.then(asks);
 	});
+	const homes = await Promise.all([
+		harness.watchDoc(RoutineRuns, ctx),
+		harness.watchDoc(Routes, ctx),
+		harness.watchDoc(AgentChats, ctx),
+		harness.watchDoc(Accepted, ctx),
+		harness.watchDoc(Groups, ctx),
+	]);
+	for (const home of homes)
+		home?.start(async () => {
+			queued = queued.then(asks);
+		});
 	// the owner's messages waiting for the run, from the inbox: written whole whenever it changes, on a line of its own
 	// so a slow read of the asks never holds it back
 	let waiting = "";
@@ -1306,6 +1319,7 @@ export async function live(
 	} finally {
 		signal.removeEventListener("abort", stop);
 		await graph?.stop();
+		await Promise.all(homes.map((home) => home?.stop()));
 		// the asks being read when it stopped are written before the stream ends
 		await queued;
 		await inboxed;

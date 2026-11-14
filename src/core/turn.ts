@@ -84,7 +84,7 @@ import {
 	routeKey,
 } from "./gateway.ts";
 import { defineGroups, Groups, groupSection } from "./groups.ts";
-import { FLOOR_WORDS } from "./permissions.ts";
+import { agentOfChat, FLOOR_WORDS } from "./permissions.ts";
 import { decidedText, makeProposal, PROPOSAL_DECIDED, type Proposal, proposalTools } from "./proposals.ts";
 import { defineReleases, RELEASED, stoppable } from "./release.ts";
 import { rosterSection } from "./roster.ts";
@@ -1779,6 +1779,22 @@ export function defineCore(options: CoreOptions) {
 		askTarget,
 		receiptHome: async (tx, chat) => {
 			if ((await tx.conversation(chat as ConversationId)) === undefined) return { kind: "missing" };
+			const run = (await tx.doc(RoutineRuns)).runs[chat];
+			if (run !== undefined) {
+				if ((await acceptedAgent(tx, run.agent)) === undefined)
+					return { kind: (await isArchived(tx, run.agent)) ? "inactive" : "missing" };
+				const routes = (await tx.doc(Routes)).chats;
+				const groups = (await tx.doc(Groups)).byExecution;
+				if (
+					(await agentOfChat(tx, chat)) !== run.agent ||
+					routes[run.chat]?.agent !== run.agent ||
+					routes[chat] !== undefined ||
+					groups[chat] !== undefined ||
+					groups[run.chat] !== undefined
+				)
+					return { kind: "missing" };
+				return { kind: "active", target: await askTarget(tx, run.chat) };
+			}
 			const agent = (await tx.doc(AgentChats)).chats[chat];
 			if (agent === undefined) return { kind: "missing" };
 			if ((await acceptedAgent(tx, agent)) === undefined)

@@ -6,12 +6,12 @@
  * Restoring is the same file saying `state: active`: its routines stay paused and its permissions stay gone.
  */
 import type { Context } from "@earendil-works/chord";
-import { type ConversationId, type Harness, LiveDoc, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import type { ConversationId, Harness, TaskId, Tx } from "@earendil-works/pi-durable";
 import { log } from "./activity.ts";
 import { Accepted, AgentChats, agentPath, agentWords, archivedFile } from "./agents.ts";
 import { Permissions } from "./permissions.ts";
 import { RELEASE } from "./release.ts";
-import { Routines, routineAgent } from "./routines.ts";
+import { RoutineRuns, Routines, routineAgent } from "./routines.ts";
 import { context } from "./store.ts";
 import { Watches, watchAgent } from "./watches.ts";
 
@@ -54,13 +54,16 @@ export async function retire(tx: Tx, id: string, now: number): Promise<void> {
 export async function stopArchived(harness: Harness, ctx: Context = context): Promise<void> {
 	const { archived, chats } = await harness.commit(async (tx) => {
 		const files = (await tx.doc(Accepted)).files;
-		const all = (await tx.doc(AgentChats)).chats;
+		const all = [
+			...Object.entries((await tx.doc(AgentChats)).chats),
+			...Object.entries((await tx.doc(RoutineRuns)).runs).map(([chat, run]) => [chat, run.agent] as const),
+		];
 		const archived = new Set(
-			[...new Set(Object.values(all))].filter((agent) => archivedFile(agent, files[agentPath(agent)])),
+			all.map(([, agent]) => agent).filter((agent) => archivedFile(agent, files[agentPath(agent)])),
 		);
-		const chats: number[] = [];
-		for (const [chat, agent] of Object.entries(all)) if (archived.has(agent)) chats.push(Number(chat));
-		return { archived, chats };
+		const chats = new Set<number>();
+		for (const [chat, agent] of all) if (archived.has(agent)) chats.add(Number(chat));
+		return { archived, chats: [...chats] };
 	}, ctx);
 	if (archived.size === 0) return;
 	const mine = new Set(chats);
@@ -77,11 +80,6 @@ export async function stopArchived(harness: Harness, ctx: Context = context): Pr
 		if (node.kind === "banda.group-turn" && !archived.has((task.input as { agent: string }).agent)) continue;
 		await harness.abortTask(node.id as TaskId, ctx);
 	}
-	for (const chat of chats) {
-		const busy = await harness.commit(
-			async (tx) => (await tx.doc(LiveDoc, chat as ConversationId)).run !== undefined,
-			ctx,
-		);
-		if (busy) await (await harness.conversation(chat as ConversationId, ctx))?.abort(ctx);
-	}
+	// A joined release can have queued input behind a failed run: withdraw it even when no run is live.
+	for (const chat of chats) await (await harness.conversation(chat as ConversationId, ctx))?.abort(ctx);
 }
