@@ -84,6 +84,37 @@ describe("owner agent file publication", () => {
 		}
 	});
 
+	it("declines an unreadable box file the owner reviewed without a hash", async () => {
+		const { harness, workspace, accepted } = await agentSaveScenario(await tempHome());
+		const before = await accepted();
+		const target = join(workspace.root, agentPath("sancho"));
+		await writeFile(target, Buffer.from([0xff, 0xfe, 0xfd]));
+		try {
+			const shown = (await agents(harness, workspace)).find((row) => row.name === "sancho")?.change;
+			expect(shown).toMatchObject({ kind: "changed", errors: [expect.any(String)] });
+			expect(shown).not.toHaveProperty("sha");
+			// the card has no hash to send for a file with no readable text
+			await decline(harness, workspace, "sancho", context, null);
+			expect(await readFile(target, "utf8")).toBe(before.text);
+			expect((await agents(harness, workspace)).find((row) => row.name === "sancho")?.change).toBeUndefined();
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("refuses to decline a readable box file the owner did not review", async () => {
+		const { harness, workspace } = await agentSaveScenario(await tempHome());
+		const target = join(workspace.root, agentPath("sancho"));
+		const unseen = "---\ndescription: Unseen\n---\nWritten after the review.\n";
+		await writeFile(target, unseen);
+		try {
+			await expect(decline(harness, workspace, "sancho", context, null)).rejects.toMatchObject({ status: 409 });
+			expect(await readFile(target, "utf8")).toBe(unseen);
+		} finally {
+			await harness.close(context);
+		}
+	});
+
 	it("returns saved and pending after publication transport loss also makes workspace listing unavailable", async () => {
 		const { harness, workspace, accepted, env } = await agentSaveScenario(await tempHome());
 		const before = await accepted();
