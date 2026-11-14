@@ -39,5 +39,5 @@ nsis:
   allowToChangeInstallationDirectory: true
 linux:
   category: Utility
-  target: [AppImage, deb]
+  target: [deb]
   maintainer: banda
