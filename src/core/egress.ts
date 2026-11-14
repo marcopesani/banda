@@ -389,9 +389,35 @@ async function keepSent(
 	return { logged, done };
 }
 
+/** The chats with a command running whose result takes their receipts, by the store side of the egress they share. */
+const commands = new WeakMap<Retain, Map<number, number>>();
+
 /**
- * Recover held requests and settled sends without a command. Shutdown's settled mode opens no new work. Neither
- * mode consumes read observations; their relative-prefix acknowledgement belongs to tool intake alone.
+ * `run`, a command that ends in `intake` for `chat`. While it runs, what the proxy holds for the chat is the
+ * command's to take, with its task and the owner's permissions: recovery leaves it (`sweepReceipts`). A command lost
+ * with its process leaves nothing here, so what it held is recovered by the next daemon.
+ */
+export async function withIntake<T>(egress: HoldingEgress, chat: number, run: () => Promise<T>): Promise<T> {
+	let running = commands.get(egress.retain);
+	if (running === undefined) {
+		running = new Map();
+		commands.set(egress.retain, running);
+	}
+	running.set(chat, (running.get(chat) ?? 0) + 1);
+	try {
+		return await run();
+	} finally {
+		const left = (running.get(chat) ?? 1) - 1;
+		if (left === 0) running.delete(chat);
+		else running.set(chat, left);
+	}
+}
+
+/**
+ * Recover held requests and settled sends without a command. A chat whose command is still running keeps its held
+ * requests for that command's intake: asked after the take, so a request held since is never recovery's. Shutdown's
+ * settled mode opens no new work. Neither mode consumes read observations; their relative-prefix acknowledgement
+ * belongs to tool intake alone.
  */
 export async function sweepReceipts(
 	egress: HoldingEgress & { receiptChats(ctx: Context): Promise<readonly number[]> },
@@ -405,7 +431,8 @@ export async function sweepReceipts(
 	for (const chat of await egress.receiptChats(ctx)) {
 		const taken = await egress.take(chat, ctx);
 		const at = now();
-		const own = mode === "recover" ? taken.held.filter((held) => held.chat === chat) : [];
+		const commanded = commands.get(egress.retain)?.has(chat) === true;
+		const own = mode === "recover" && !commanded ? taken.held.filter((held) => held.chat === chat) : [];
 		const sent = settled(taken.sent ?? [], chat, at);
 		if (own.length === 0 && sent.length === 0) continue;
 		if (mode === "recover") fault("recovery:taken");

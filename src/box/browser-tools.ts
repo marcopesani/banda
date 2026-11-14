@@ -32,7 +32,7 @@ import {
 import { log } from "../core/activity.ts";
 import { AgentChats } from "../core/agents.ts";
 import type { EffectTool } from "../core/ask.ts";
-import { type HoldingEgress, intake, ownCredential } from "../core/egress.ts";
+import { type HoldingEgress, intake, ownCredential, withIntake } from "../core/egress.ts";
 import { OWNER } from "../core/gateway.ts";
 import { covering } from "../core/permissions.ts";
 import { addressWords, bodyFields, bodyWords, headersWords } from "../core/request-words.ts";
@@ -347,7 +347,11 @@ export function browserTools(options: BrowserToolOptions): ToolRegistration[] {
 	 * Run `act`, then let go what the page wrote that acts as nobody, then take what the proxy saw into the store; a
 	 * refusal is the model's to read.
 	 */
-	const acting = async (api: ToolExecutionApi, ctx: Context, act: () => Promise<string>) => {
+	const acting = (api: ToolExecutionApi, ctx: Context, act: () => Promise<string>) =>
+		egress === undefined
+			? actingNow(api, ctx, act)
+			: withIntake(egress, Number(api.conversationId), () => actingNow(api, ctx, act));
+	const actingNow = async (api: ToolExecutionApi, ctx: Context, act: () => Promise<string>) => {
 		let said: string;
 		let failed = false;
 		try {

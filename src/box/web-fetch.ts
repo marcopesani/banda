@@ -22,7 +22,7 @@ import {
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { log } from "../core/activity.ts";
-import { type HoldingEgress, intake } from "../core/egress.ts";
+import { type HoldingEgress, intake, withIntake } from "../core/egress.ts";
 import { htmlToText } from "../core/html-text.ts";
 import { MAX_RESULT_CHARS } from "../core/mcp.ts";
 import { publicAddress } from "../core/public-fetch.ts";
@@ -277,17 +277,20 @@ export function webFetchTool(options: WebFetchOptions = {}): ToolRegistration {
 			}, ctx);
 			return "";
 		};
-		let result: ToolExecutionResult;
-		try {
-			result = await run();
-		} catch (error) {
-			// what was read is the chat's whatever stopped the call
-			await after().catch(() => undefined);
-			throw error;
-		}
-		const said = await after();
-		if (said === "") return result;
-		return { ...result, output: [...(result.output ?? []), { type: "text", text: said.trimStart() }] };
+		const whole = async (): Promise<ToolExecutionResult> => {
+			let result: ToolExecutionResult;
+			try {
+				result = await run();
+			} catch (error) {
+				// what was read is the chat's whatever stopped the call
+				await after().catch(() => undefined);
+				throw error;
+			}
+			const said = await after();
+			if (said === "") return result;
+			return { ...result, output: [...(result.output ?? []), { type: "text", text: said.trimStart() }] };
+		};
+		return options.egress === undefined ? whole() : withIntake(options.egress, Number(api.conversationId), whole);
 	};
 
 	return defineTool({

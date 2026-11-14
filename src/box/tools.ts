@@ -26,7 +26,7 @@ import {
 	type ImageProcessor,
 } from "@earendil-works/pi-durable/tools";
 import { Accepted } from "../core/agents.ts";
-import { type HoldingEgress, intake } from "../core/egress.ts";
+import { type HoldingEgress, intake, withIntake } from "../core/egress.ts";
 
 import { context } from "../core/store.ts";
 import type { CoreOptions } from "../core/turn.ts";
@@ -140,24 +140,25 @@ function taking(
 ): ToolRegistration {
 	return {
 		...tool,
-		execute: async (args, api, ctx) => {
-			// a proxy not yet told holds this chat's writes, which then ask: never a send the store does not allow
-			await ready?.(Number(api.conversationId)).catch(() => undefined);
-			try {
-				return await tool.execute(args, api, ctx);
-			} finally {
-				// after the command's own output, also when it failed or timed out: the result is the output retained
-				let said: string;
+		execute: (args, api, ctx) =>
+			withIntake(egress, Number(api.conversationId), async () => {
+				// a proxy not yet told holds this chat's writes, which then ask: never a send the store does not allow
+				await ready?.(Number(api.conversationId)).catch(() => undefined);
 				try {
-					said = await intake(egress, api, ctx, fault);
-				} catch (error) {
-					said =
-						"\n\n[banda] The egress proxy did not answer, so what this command sent out is not known yet: " +
-						`${error instanceof Error ? error.message : String(error)}`;
+					return await tool.execute(args, api, ctx);
+				} finally {
+					// after the command's own output, also when it failed or timed out: the result is the output retained
+					let said: string;
+					try {
+						said = await intake(egress, api, ctx, fault);
+					} catch (error) {
+						said =
+							"\n\n[banda] The egress proxy did not answer, so what this command sent out is not known yet: " +
+							`${error instanceof Error ? error.message : String(error)}`;
+					}
+					if (said !== "") api.output(said);
 				}
-				if (said !== "") api.output(said);
-			}
-		},
+			}),
 	};
 }
 
