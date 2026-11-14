@@ -1,11 +1,320 @@
-import { open, realpath } from "node:fs/promises";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
+import { type Static, Type } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 
 const fileLimit = 64 << 10;
-export async function diagnosticFile(path: string) {
+const unavailable = (error: unknown) => ({ state: "unavailable", error: String(error).slice(0, 4000) }) as const;
+const Unavailable = Type.Object({ state: Type.Literal("unavailable"), error: Type.String() });
+const BoundedObservation = Type.Union([
+	Type.Object({ state: Type.Union([Type.Literal("read"), Type.Literal("truncated")]), text: Type.String() }),
+	Unavailable,
+]);
+const Id = Type.Integer({ minimum: 0, maximum: 4294967295 });
+const Capability = Type.String({ pattern: "^[0-9a-fA-F]{16}$" });
+const Identity = Type.Object({
+	uid: Id,
+	euid: Id,
+	savedUid: Id,
+	fsuid: Id,
+	gid: Id,
+	egid: Id,
+	savedGid: Id,
+	fsgid: Id,
+	groups: Type.Array(Id),
+	capabilities: Type.Object({
+		inherited: Capability,
+		permitted: Capability,
+		effective: Capability,
+		bounding: Capability,
+		ambient: Capability,
+	}),
+});
+const KvmObservation = Type.Object({
+	at: Type.String(),
+	status: BoundedObservation,
+	identity: Type.Union([Type.Object({ state: Type.Literal("read"), value: Identity }), Unavailable]),
+	device: Type.Union([
+		Type.Object({
+			state: Type.Literal("read"),
+			kind: Type.Union([Type.Literal("character"), Type.Literal("symlink"), Type.Literal("other")]),
+			uid: Id,
+			gid: Id,
+			mode: Id,
+			inode: Type.Number(),
+			dev: Type.Number(),
+			rdev: Type.Number(),
+		}),
+		Unavailable,
+	]),
+	acl: BoundedObservation,
+	open: Type.Union([
+		Type.Object({ state: Type.Literal("opened-and-closed") }),
+		Type.Object({
+			state: Type.Literal("failed"),
+			code: Type.Union([Type.String(), Type.Null()]),
+			error: Type.String(),
+		}),
+		Unavailable,
+	]),
+});
+
+export function parseDiagnosticIdentity(status: unknown) {
+	assert.ok(typeof status === "string", "Missing process status.");
+	const field = (name: string) => {
+		const lines = status.split("\n").filter((line) => line.startsWith(`${name}:`));
+		assert.equal(lines.length, 1, `Missing or repeated ${name} in process status.`);
+		return lines[0]?.slice(name.length + 1).trim() ?? "";
+	};
+	const ids = (name: string) => {
+		const value = field(name);
+		assert.match(value, /^\d+\s+\d+\s+\d+\s+\d+$/);
+		return value.split(/\s+/).map(Number);
+	};
+	const [uid, euid, savedUid, fsuid] = ids("Uid");
+	const [gid, egid, savedGid, fsgid] = ids("Gid");
+	const groups = field("Groups");
+	assert.match(groups, /^(?:\d+(?:\s+\d+)*)?$/);
+	const identity = {
+		uid,
+		euid,
+		savedUid,
+		fsuid,
+		gid,
+		egid,
+		savedGid,
+		fsgid,
+		groups: groups ? groups.split(/\s+/).map(Number) : [],
+		capabilities: {
+			inherited: field("CapInh"),
+			permitted: field("CapPrm"),
+			effective: field("CapEff"),
+			bounding: field("CapBnd"),
+			ambient: field("CapAmb"),
+		},
+	};
+	if (!Value.Check(Identity, identity)) throw new Error("Invalid process identity.");
+	return identity;
+}
+
+export function assertDiagnosticIdentity(actual: unknown, expected: unknown, supplementaryGid?: number) {
+	if (!Value.Check(Identity, actual) || !Value.Check(Identity, expected)) throw new Error("Invalid runner identity.");
+	assert.ok(expected.uid > 0 && expected.euid === expected.uid && expected.gid > 0 && expected.egid === expected.gid);
+	assert.ok(
+		expected.savedUid === expected.uid && expected.fsuid === expected.uid,
+		"Runner saved and filesystem UIDs must be ordinary.",
+	);
+	assert.ok(
+		expected.savedGid === expected.gid && expected.fsgid === expected.gid,
+		"Runner saved and filesystem GIDs must match its primary group.",
+	);
+	for (const key of ["uid", "euid", "savedUid", "fsuid", "gid", "egid", "savedGid", "fsgid"] as const)
+		assert.equal(actual[key], expected[key], `Runner ${key} changed.`);
+	for (const key of ["inherited", "permitted", "effective", "ambient"] as const)
+		assert.match(actual.capabilities[key], /^0+$/, `Runner ${key} capabilities must be empty.`);
+	if (supplementaryGid !== undefined)
+		assert.ok(supplementaryGid > 0 && actual.groups.includes(supplementaryGid), "KVM supplementary group is inactive.");
+}
+
+export function diagnosticAcl(path: string): Static<typeof BoundedObservation> {
+	try {
+		const bytes = execFileSync("/usr/bin/getfacl", ["--numeric", "--absolute-names", "--", path], {
+			timeout: 5_000,
+			killSignal: "SIGKILL",
+			maxBuffer: fileLimit,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+		});
+		return {
+			state: bytes.length > fileLimit ? "truncated" : "read",
+			text: bytes.subarray(0, fileLimit).toString("utf8"),
+		};
+	} catch (error) {
+		return unavailable(error);
+	}
+}
+
+export async function kvmDiagnostics(roots = { proc: "/proc", dev: "/dev" }): Promise<Static<typeof KvmObservation>> {
+	const status = await diagnosticFile(resolve(roots.proc, "self/status"));
+	const identity = (() => {
+		try {
+			if (status.state !== "read") throw new Error("Process status is unavailable or truncated.");
+			return { state: "read", value: parseDiagnosticIdentity(status.text) } as const;
+		} catch (error) {
+			return unavailable(error);
+		}
+	})();
+	const path = resolve(roots.dev, "kvm");
+	const device = await (async () => {
+		try {
+			const stat = await lstat(path);
+			const kind = stat.isSymbolicLink() ? "symlink" : stat.isCharacterDevice() ? "character" : "other";
+			return {
+				state: "read",
+				kind,
+				uid: stat.uid,
+				gid: stat.gid,
+				mode: stat.mode,
+				inode: stat.ino,
+				dev: stat.dev,
+				rdev: stat.rdev,
+			} as const;
+		} catch (error) {
+			return unavailable(error);
+		}
+	})();
+	const safe = device.state === "read" && device.kind === "character";
+	const acl = safe
+		? diagnosticAcl(path)
+		: unavailable("Refusing ACL inspection of a missing or non-character KVM device.");
+	const access = await (async (): Promise<Static<typeof KvmObservation>["open"]> => {
+		if (!safe) return unavailable("Refusing to open a missing, symlink, or non-character KVM device.");
+		let file: Awaited<ReturnType<typeof open>>;
+		try {
+			file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+		} catch (error) {
+			return {
+				state: "failed",
+				code: error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : null,
+				error: String(error).slice(0, 4000),
+			};
+		}
+		try {
+			try {
+				const opened = await file.stat();
+				assert.ok(
+					opened.isCharacterDevice() &&
+						opened.ino === device.inode &&
+						opened.dev === device.dev &&
+						opened.rdev === device.rdev,
+					"KVM device changed before open.",
+				);
+			} finally {
+				await file.close();
+			}
+			return { state: "opened-and-closed" };
+		} catch (error) {
+			return unavailable(error);
+		}
+	})();
+	return { at: new Date().toISOString(), status, identity, device, acl, open: access };
+}
+
+export function assertKvmGroup(observation: unknown, group: string) {
+	if (!Value.Check(KvmObservation, observation)) throw new Error("Invalid KVM observation.");
+	const { device, acl } = observation;
+	assert.ok(
+		device.state === "read" && device.kind === "character" && device.uid === 0,
+		"KVM must be a root-owned character device.",
+	);
+	assert.match(group.trim(), /^kvm:[^:\n]*:[1-9]\d*:[^:\n]*$/);
+	const gid = Number(group.trim().split(":")[2]);
+	assert.ok(
+		Number.isSafeInteger(gid) && gid === device.gid && (device.mode & 0o060) === 0o060 && (device.mode & 0o007) === 0,
+		"KVM requires its canonical nonzero group, group read/write, and no world access.",
+	);
+	assert.equal(acl.state, "read", "KVM ACL must be complete.");
+	assert.ok(acl.state === "read");
+	const entries = acl.text.split("\n").map((line) => line.split("\t")[0]?.trim());
+	assert.equal(entries.filter((line) => line === "group::rw-").length, 1, "KVM owning group requires read/write.");
+	assert.equal(entries.filter((line) => line === "other::---").length, 1, "KVM world access must be empty.");
+	assert.ok(
+		entries.filter((line) => line?.startsWith("mask::")).every((line) => line === "mask::rw-"),
+		"KVM ACL mask must retain group read/write.",
+	);
+	return gid;
+}
+
+const HostObservation = Type.Object({ at: Type.String(), kvm: KvmObservation });
+const Probe = Type.Union([
+	Type.Object({ state: Type.Literal("not-triggered") }),
+	Type.Object({ state: Type.Literal("refused-or-failed"), error: Type.String() }),
+	Type.Object({ state: Type.Literal("owned-before-probe"), hostAtFailure: HostObservation }),
+	Type.Object({
+		state: Type.Literal("captured"),
+		hostAtFailure: HostObservation,
+		capture: Type.Object({
+			closed: Type.Boolean(),
+			reason: Type.String(),
+			bytesObserved: Type.Integer({ minimum: 0 }),
+			bytesRetained: Type.Integer({ minimum: 0 }),
+			code: Type.Union([Type.Integer(), Type.Null()]),
+			signal: Type.Union([Type.String(), Type.Null()]),
+			stderr: Type.String(),
+			controlError: Type.Optional(Type.String()),
+		}),
+	}),
+]);
+const DiagnosticResult = Type.Object({
+	qualification: Type.Literal(false),
+	sourceCommit: Type.String({ pattern: "^[a-f0-9]{40}$" }),
+	runtimeManifestSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+	home: Type.String(),
+	cache: Type.String(),
+	owner: Type.Object({
+		binary: Type.String(),
+		home: Type.String(),
+		cache: Type.String(),
+		name: Type.String(),
+		generation: Type.String(),
+		imageRef: Type.String(),
+		configDigest: Type.String(),
+	}),
+	hostBefore: HostObservation,
+	hostAfter: HostObservation,
+	probe: Probe,
+	originalFailure: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+	cleanup: Type.Object({
+		verified: Type.Literal(true),
+		inventory: Type.Tuple([]),
+		remaining: Type.Tuple([]),
+		children: Type.Array(
+			Type.Object({ pid: Type.Optional(Type.Integer({ minimum: 1 })), closed: Type.Literal(true) }),
+			{ minItems: 1 },
+		),
+	}),
+});
+
+export function parseDiagnosticResult(
+	value: unknown,
+	expected: { sourceCommit: string; runtimeManifestSha256: string },
+) {
+	if (!Value.Check(DiagnosticResult, value))
+		throw new Error("Invalid or incomplete diagnostic result or unverified cleanup.");
+	assert.equal(value.sourceCommit, expected.sourceCommit, "Diagnostic source differs.");
+	assert.equal(value.runtimeManifestSha256, expected.runtimeManifestSha256, "Diagnostic manifest differs.");
+	assert.equal(value.owner.home, value.home);
+	assert.equal(value.owner.cache, value.cache);
+	const startup =
+		value.originalFailure !== null ? "failed" : value.probe.state === "not-triggered" ? "started" : "unknown";
+	const hosts = [value.hostBefore, value.hostAfter];
+	if ("hostAtFailure" in value.probe) hosts.push(value.probe.hostAtFailure);
+	const complete = hosts.every(
+		({ kvm }) =>
+			kvm.status.state === "read" &&
+			kvm.identity.state === "read" &&
+			kvm.device.state === "read" &&
+			kvm.device.kind === "character" &&
+			kvm.acl.state === "read" &&
+			kvm.open.state !== "unavailable",
+	);
+	const probeComplete =
+		value.probe.state === "not-triggered"
+			? startup === "started"
+			: value.probe.state === "captured" &&
+				value.probe.capture.closed &&
+				value.probe.capture.reason === "closed" &&
+				value.probe.capture.controlError === undefined &&
+				value.probe.capture.bytesObserved === value.probe.capture.bytesRetained &&
+				value.probe.capture.bytesRetained <= 1 << 20;
+	return { result: value, startup, evidenceComplete: complete && probeComplete && startup !== "unknown" };
+}
+
+export async function diagnosticFile(path: string): Promise<Static<typeof BoundedObservation>> {
 	try {
 		const file = await open(path, "r");
 		try {
@@ -23,14 +332,14 @@ export async function diagnosticFile(path: string) {
 	}
 }
 
-export async function hostDiagnostics(roots = { proc: "/proc", cgroup: "/sys/fs/cgroup" }) {
+export async function hostDiagnostics(roots = { proc: "/proc", cgroup: "/sys/fs/cgroup", dev: "/dev" }) {
 	const membership = await diagnosticFile(resolve(roots.proc, "self/cgroup"));
 	const files = {
 		meminfo: await diagnosticFile(resolve(roots.proc, "meminfo")),
 		limits: await diagnosticFile(resolve(roots.proc, "self/limits")),
 		membership,
 	};
-	const path = membership.text
+	const path = (membership.state === "unavailable" ? undefined : membership.text)
 		?.split("\n")
 		.find((line) => line.startsWith("0::/"))
 		?.slice(3);
@@ -53,7 +362,13 @@ export async function hostDiagnostics(roots = { proc: "/proc", cgroup: "/sys/fs/
 			return { state: "unavailable", error: error instanceof Error ? error.message : String(error) };
 		}
 	})();
-	return { at: new Date().toISOString(), cpus: availableParallelism(), files, memory };
+	return {
+		at: new Date().toISOString(),
+		cpus: availableParallelism(),
+		files,
+		memory,
+		kvm: await kvmDiagnostics(roots),
+	};
 }
 
 export type StartupOwner = {
