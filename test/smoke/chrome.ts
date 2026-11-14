@@ -157,6 +157,7 @@ export async function withPage<T>(
 									const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
 									const state = {error: undefined, clicks: 0, remove: () => events.forEach(type => window.removeEventListener(type, guard, true))};
 									const guard = event => {
+										if (!event.isTrusted) return;
 										const current = find();
 										const problem = inspect(current, event.clientX, event.clientY);
 										if (state.error || problem || !current.contains(event.target)) {
