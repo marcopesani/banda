@@ -356,6 +356,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 				: openBrowsers({
 						setup: (agent) => setupOf.forAgent(agent),
 						ensure: () => agentBox.ensure(),
+						...(agentBox.recover === undefined ? {} : { recover: agentBox.recover }),
 						// a chat drives the browser of the agent it runs, never another's
 						agentOf: async (chat) => {
 							if (harness === undefined) throw new Error("the store is not open");

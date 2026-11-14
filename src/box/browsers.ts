@@ -26,6 +26,8 @@ export type BrowsersOptions = {
 	/** How agent `agent`'s browser starts: its command, its proxy login and its tabs' stamps. */
 	readonly setup: (agent: string) => BrowserSetup;
 	readonly ensure: () => Promise<void>;
+	/** Repair the computer before a new effect on an open browser (`BrowserOptions.recover`). */
+	readonly recover?: () => Promise<void>;
 	/** The agent chat `chat` runs; throws when it runs none. */
 	readonly agentOf: (chat: number) => Promise<string>;
 	/** The tabs changed: push them to the proxy; resolves once it knows. */
@@ -145,6 +147,7 @@ export function openBrowsers(options: BrowsersOptions): Browsers {
 		const browser = openBrowser({
 			setup: options.setup(agent),
 			ensure: options.ensure,
+			...(options.recover === undefined ? {} : { recover: options.recover }),
 			process: (signal) => processOf(agent, signal),
 			tell: async (holder) => {
 				if (holder === undefined) holders.delete(key);
