@@ -27,13 +27,13 @@ import {
 	type Tx,
 } from "@earendil-works/pi-durable";
 import { log } from "./activity.ts";
-import { AgentChats, agentWords, ChatAgent, LEAD } from "./agents.ts";
+import { AgentChats, acceptedAgent, agentWords, ChatAgent, LEAD } from "./agents.ts";
 import { Companion } from "./companion.ts";
 import { connectionTool } from "./connections.ts";
 
 import { FLOOR_WORDS, type Floor } from "./floor.ts";
 import { allowedHost, hostCovers } from "./hosts.ts";
-import { WAKE, type WakeData } from "./routines.ts";
+import { RoutineRuns, WAKE, type WakeData } from "./routines.ts";
 import { context } from "./store.ts";
 
 export { FLOOR_WORDS, FLOORS, type Floor } from "./floor.ts";
@@ -121,11 +121,24 @@ export const Permissions = defineDoc<PermissionsValue>({
 });
 
 /**
- * The agent `chat` runs, as the store records it for every chat it starts (`AgentChats`); undefined for a chat it
- * records none for, which no permission covers. The daemon tells the proxy the same mapping. Reads only.
+ * A routine retains its principal after leaving the active chat set. Its parent must still run that accepted agent.
+ * Other chats use their active registration. Reads only.
  */
 export async function agentOfChat(tx: Tx, chat: number): Promise<string | undefined> {
-	return (await tx.doc(AgentChats)).chats[chat];
+	const chats = (await tx.doc(AgentChats)).chats;
+	const runs = (await tx.doc(RoutineRuns)).runs;
+	const run = runs[chat];
+	if (run === undefined) return chats[chat];
+	if (
+		(chats[chat] !== undefined && chats[chat] !== run.agent) ||
+		runs[run.chat] !== undefined ||
+		chats[run.chat] !== run.agent ||
+		(await tx.conversation(chat as ConversationId)) === undefined ||
+		(await tx.conversation(run.chat as ConversationId)) === undefined ||
+		(await acceptedAgent(tx, run.agent)) === undefined
+	)
+		return undefined;
+	return run.agent;
 }
 
 /** The agent `chat` runs, as the owner calls it: the lead by the companion's name. Reads only. */

@@ -13,12 +13,23 @@ import {
 import { createRegistry, type Harness, SessionFailed } from "@earendil-works/pi-durable";
 import { Value } from "typebox/value";
 import { ActivityLog } from "../../src/core/activity.ts";
-import { acceptedAgent, LEAD, startAs } from "../../src/core/agents.ts";
+import {
+	Accepted,
+	AgentChats,
+	acceptedAgent,
+	agentPath,
+	isArchived,
+	LEAD,
+	shaOf,
+	startAs,
+} from "../../src/core/agents.ts";
+import { stopArchived } from "../../src/core/archive.ts";
 import { BlobStore } from "../../src/core/blobs.ts";
 import { type EgressControl, routeOf, sweepReceipts, TICKET_KEPT_MS, Tickets } from "../../src/core/egress.ts";
 import { type Gateway, OWNER, routeKey } from "../../src/core/gateway.ts";
 import { Permissions } from "../../src/core/permissions.ts";
 import { RELEASED } from "../../src/core/release.ts";
+import { RoutineRuns } from "../../src/core/routines.ts";
 import { openWaits, status } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes } from "../../src/core/turn.ts";
@@ -36,6 +47,7 @@ export const RECEIPT_POINTS = [
 	"replay:sent",
 	"release:ran",
 	"release:told",
+	"release:submitted",
 	"answer",
 	"send:before",
 	"send:after",
@@ -53,6 +65,8 @@ const Schedule = Type.Array(
 export const ReceiptScenario = Type.Object({
 	body: Type.String({ maxLength: 128 }),
 	old: Type.Boolean(),
+	routine: Type.Boolean(),
+	archive: Type.Union([Type.Literal("never"), Type.Literal("waiting"), Type.Literal("sent")]),
 	answer: Type.Union([Type.Literal("approve"), Type.Literal("deny")]),
 });
 const Request = Type.Object({
@@ -96,6 +110,8 @@ export const ReceiptSummary = Type.Object({
 	permissions: Type.Integer({ minimum: 0 }),
 	activity: Type.Array(Type.String()),
 	commands: Type.Integer({ minimum: 0 }),
+	modelRequests: Type.Integer({ minimum: 0 }),
+	archived: Type.Boolean(),
 	ownerInputs: Type.Integer({ minimum: 0 }),
 	live: Type.Integer({ minimum: 0 }),
 	open: Type.Integer({ minimum: 0 }),
@@ -112,11 +128,19 @@ async function main() {
 	assert.ok(Value.Check(ReceiptScenario, scenario));
 	assert.ok(Value.Check(Schedule, schedule));
 	const faults = new Faults(schedule);
+	const archiveIntent = join(home, "receipt-archive-requested");
+	let archiving: Promise<void> | undefined;
 	const fault = (point: string) => {
 		assert.ok(
 			POINTS.some((known) => known === point),
 			`Unexpected fault seam: ${point}`,
 		);
+		if (scenario.archive === "sent" && point === "replay") {
+			assert.ok(harness !== undefined);
+			// The owner's archive races the admitted effect; after a kill the worker repeats that pending owner action.
+			writeFileSync(archiveIntent, "archive\n");
+			archiving = archive(harness).catch(() => undefined);
+		}
 		faults.hit(point as (typeof POINTS)[number]);
 	};
 	const statePath = join(home, "receipt-proxy.json");
@@ -131,6 +155,18 @@ async function main() {
 		renameSync(temporary, statePath);
 	};
 	let harness: Harness | undefined;
+	const sendsPath = join(home, "receipt-sends.jsonl");
+	const archive = async (opened: Harness) => {
+		await opened.commit(async (tx) => {
+			if (await isArchived(tx, LEAD)) return;
+			const files = (await tx.doc(Accepted)).files;
+			const file = files[agentPath(LEAD)];
+			assert.ok(file !== undefined);
+			const text = file.text.replace("---\n", "---\nstate: archived\n");
+			files[agentPath(LEAD)] = { text, sha: shaOf(text), at: Date.now() };
+			await core.agentChanged(tx, LEAD);
+		}, context);
+	};
 	const proxy: EgressControl & { receiptChats(): Promise<readonly number[]> } = {
 		async receiptChats() {
 			const state = read();
@@ -160,7 +196,11 @@ async function main() {
 			const state = read();
 			for (const key of Object.keys(state.request) as (keyof typeof state.request)[])
 				assert.deepEqual(request[key], state.request[key], `Replay changed ${key}.`);
-			appendFileSync(join(home, "receipt-sends.jsonl"), `${JSON.stringify(request)}\n`);
+			appendFileSync(sendsPath, `${JSON.stringify(request)}\n`);
+			if (scenario.archive === "sent") {
+				assert.ok(harness !== undefined);
+				await archiving;
+			}
 			return { status: 200, reason: "OK", headers: [], body: Buffer.from("retained response").toString("base64") };
 		},
 	};
@@ -188,6 +228,7 @@ async function main() {
 	models.setProvider(faux.provider);
 	faux.setResponses(
 		Array.from({ length: 200 }, () => (request) => {
+			appendFileSync(join(home, "receipt-models.jsonl"), "request\n");
 			faults.hit("model");
 			const last = request.messages.at(-1);
 			return last?.role === "toolResult" && last.toolName === "message_user"
@@ -214,7 +255,7 @@ async function main() {
 			try {
 				harness = await openStore(home, { models, registry, wrapStorage: (storage) => faults.storage(storage) });
 				const opened = harness;
-				const chat = await opened.commit(async (tx) => {
+				const parent = await opened.commit(async (tx) => {
 					const routes = await tx.doc(Routes);
 					const found = routes.routes[routeKey(origin)];
 					if (found !== undefined) return found.chat;
@@ -233,6 +274,32 @@ async function main() {
 					routes.routes[routeKey(origin)] = { chat: id };
 					return id;
 				}, context);
+				const chat: number = scenario.routine
+					? await opened.commit(async (tx) => {
+							const runs = (await tx.doc(RoutineRuns)).runs;
+							const found = Object.entries(runs).find(([, run]) => run.chat === parent);
+							if (found !== undefined) return Number(found[0]);
+							const agent = await acceptedAgent(tx, LEAD);
+							assert.ok(agent !== undefined);
+							const created = await tx.createConversation({ ownership: { kind: "ownerless" } });
+							await startAs(tx, created.id, agent, {
+								model: FAUX_MODEL,
+								tools: registry
+									.snapshot()
+									.tools()
+									.map(({ tool }) => tool.name),
+							});
+							const id = Number(created.id);
+							runs[id] = {
+								agent: LEAD,
+								routine: "receipt",
+								chat: parent,
+								wake: { routine: "receipt", description: "Receipt recovery", due: 1 },
+							};
+							delete (await tx.doc(AgentChats)).chats[id];
+							return id;
+						}, context)
+					: parent;
 				if (!existsSync(statePath))
 					write({
 						request: {
@@ -253,6 +320,7 @@ async function main() {
 				const seed = read();
 				assert.equal(seed.request.chat, chat);
 				await opened.commit(async (tx) => {
+					if (await isArchived(tx, LEAD)) return;
 					const permissions = await tx.doc(Permissions);
 					permissions.permissions["receipt-standing"] ??= {
 						tool: "propose_send",
@@ -264,16 +332,23 @@ async function main() {
 						wait: 0,
 					};
 				}, context);
+				if (scenario.archive === "sent" && existsSync(archiveIntent)) await archive(opened);
+				await stopArchived(opened);
 				await revive(opened);
 				opened.resume();
 				const deadline = Date.now() + 30_000;
 				for (;;) {
+					if (await opened.commit((tx) => isArchived(tx, LEAD), context)) await stopArchived(opened);
 					await sweepReceipts(holding, opened, Date.now, "recover", context, fault);
 					for (const wait of await openWaits(opened)) {
 						if (wait.ask.type !== "approval") continue;
 						assert.equal(wait.ask.args._ticket, seed.request.ticket);
 						assert.equal(wait.ask.permission, undefined);
 						assert.equal(wait.ask.host, undefined);
+						if (scenario.archive === "waiting") {
+							await archive(opened);
+							await stopArchived(opened);
+						}
 						faults.hit("answer");
 						await ownerAnswer(opened, wait.key, scenario.answer, web, "bearer");
 					}
@@ -321,6 +396,10 @@ async function main() {
 					commands: page.items.filter(
 						(entry) => entry.model?.[0]?.role === "toolResult" && entry.model[0].toolName === "bash",
 					).length,
+					modelRequests: readFileSync(join(home, "receipt-models.jsonl"), { encoding: "utf8", flag: "a+" })
+						.split("\n")
+						.filter(Boolean).length,
+					archived: await opened.commit((tx) => isArchived(tx, LEAD), context),
 					ownerInputs: page.items.filter((entry) => entry.kind === "banda.inbound").length,
 					live: await live(opened),
 					open: (await openWaits(opened)).length,

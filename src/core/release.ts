@@ -342,6 +342,7 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 					fault("release:told");
 					if (checkpoint.batch === undefined) {
 						await runtime.commit(async (tx) => {
+							if ((await core.receiptHome(tx, chat)).kind !== "active") return ended;
 							// reads first: a transaction reads tables only until its first write
 							const others = await goingNext(tx, chat);
 							const homed = await core.hasHome(tx, chat);
@@ -360,6 +361,12 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 						return;
 					}
 					// a chat with no home: its submission, found again by its request id after a restart
+					let active = false;
+					await runtime.commit(async (tx) => {
+						active = (await core.receiptHome(tx, chat)).kind === "active";
+						return active ? undefined : ended;
+					}, ctx);
+					if (!active) return;
 					const handle = await runtime.conversation(chat as ConversationId, ctx);
 					if (handle === undefined) {
 						runtime.report(new Error(`chat ${chat} is gone`));
@@ -515,7 +522,17 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 				await (api as ReleaseApi).asked(ctx);
 				return id;
 			};
-			running = effectRun(releaseAsking, tool, (api: ReleaseApi, ctx) => api.inTurn(ctx));
+			running = effectRun<typeof tool.parameters, ReleaseApi>(
+				releaseAsking,
+				{
+					...tool,
+					allowed: async (tx, _draft, chat) =>
+						(await core.receiptHome(tx, chat)).kind === "active"
+							? undefined
+							: "The request was not sent: its chat or agent is no longer active.",
+				},
+				(api: ReleaseApi, ctx) => api.inTurn(ctx),
+			);
 			fault = onFault;
 			return Object.create(egress, { retain: { value: retain } }) as E & HoldingEgress;
 		},
