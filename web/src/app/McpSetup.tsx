@@ -588,7 +588,7 @@ export function McpSetupView({ state, actions }: { state: McpSetupState; actions
 					<div className="flex flex-wrap gap-2">
 						{!anonymous ? (
 							<Button variant="ghost" size="sm" disabled={busy} onClick={actions.signInAnother}>
-								Sign in another account
+								Add account
 							</Button>
 						) : null}
 						<Confirm
@@ -596,10 +596,12 @@ export function McpSetupView({ state, actions }: { state: McpSetupState; actions
 							body={
 								anonymous
 									? "Agents lose access to it. You can add it again later."
-									: "Agents lose access to this sign-in. You can reconnect later."
+									: active.length === 0
+										? "Its sign-in is forgotten. You can sign in again any time."
+										: `${active.map((id) => agents.find((each) => each.id === id)?.name ?? id).join(", ")} will lose it. You can sign in again any time.`
 							}
 							action={anonymous ? "Remove" : "Sign out"}
-							keep={anonymous ? "Keep it" : "Stay connected"}
+							keep={anonymous ? "Keep it" : "Stay signed in"}
 							onConfirm={actions.signOut}
 						>
 							<Button variant="destructive" size="sm" disabled={busy || (!anonymous && account === "")}>

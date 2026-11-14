@@ -4,12 +4,18 @@
  * same component is the review when a connection is added, where nothing changes until Save, and the place to check and
  * change it afterwards, where each change is at once.
  */
-import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { type ReactNode, useId, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import { FLOOR_WORDS } from "../../../src/core/floor.ts";
@@ -434,15 +440,36 @@ export function ConnectionDetailsView({
 									) : null}
 								</span>
 								<span className="flex items-center gap-1.5">
-									{onChangeAccess === undefined ? null : (
+									{/* a sign-in that lapsed is the row's one visible action; the rest is its menu */}
+									{onChangeAccess === undefined || !account.stale ? null : (
 										<Button variant="outline" size="xs" disabled={busy} onClick={() => onChangeAccess(account)}>
-											{account.stale ? "Sign in again" : "Change access"}
+											Sign in again
 										</Button>
 									)}
-									{onSignOut === undefined ? null : (
-										<Button variant="destructive" size="xs" disabled={busy} onClick={() => onSignOut(account)}>
-											Sign out
-										</Button>
+									{(onChangeAccess === undefined || account.stale) && onSignOut === undefined ? null : (
+										<DropdownMenu>
+											<DropdownMenuTrigger asChild>
+												<Button
+													variant="ghost"
+													size="icon-xs"
+													className="pointer-coarse:size-11"
+													disabled={busy}
+													aria-label={`More for ${account.label}`}
+												>
+													<EllipsisIcon />
+												</Button>
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="end">
+												{onChangeAccess === undefined || account.stale ? null : (
+													<DropdownMenuItem onSelect={() => onChangeAccess(account)}>Change access</DropdownMenuItem>
+												)}
+												{onSignOut === undefined ? null : (
+													<DropdownMenuItem variant="destructive" onSelect={() => onSignOut(account)}>
+														Sign out
+													</DropdownMenuItem>
+												)}
+											</DropdownMenuContent>
+										</DropdownMenu>
 									)}
 								</span>
 							</li>

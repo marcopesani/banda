@@ -152,7 +152,7 @@ for (const width of [390, 1440])
 					connected = (await view()).connections.find((each) => each.name === connection.name)!;
 					expect(connected.accounts?.[0]?.agents).toEqual([]);
 					// another sign-in: the name asked for next is the new account's, never the one that was selected
-					await click(page, button("Sign in another account"));
+					await click(page, button("Add account"));
 					await phase(page, "auth");
 					await click(page, button("Continue to sign in"));
 					await phase(page, "review");

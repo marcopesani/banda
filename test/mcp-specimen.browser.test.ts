@@ -130,7 +130,7 @@ for (const width of [390, 1440])
 					expect(await page.run(`getComputedStyle(document.querySelector('[role="alertdialog"]')).colorScheme`)).toBe(
 						theme.toLowerCase(),
 					);
-					await click(page, button("Stay connected"));
+					await click(page, button("Stay signed in"));
 					await page.until(`!document.querySelector('[role="alertdialog"]')`);
 					await phase(page, "done");
 					await click(page, button("Sign out"));
@@ -182,7 +182,7 @@ it.skipIf(!hasChrome())(
 			await scenario(page, "Ernesto · OAuth");
 			await click(page, tab("Review"));
 			await phase(page, "review");
-			await click(page, button("Sign in another account"));
+			await click(page, button("Add account"));
 			await phase(page, "auth");
 			expect(await page.run(`Boolean(${button("Use a connected account")})`)).toBe(false);
 			await click(page, button("Back to review"));

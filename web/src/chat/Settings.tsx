@@ -1162,7 +1162,7 @@ export function ModelProviders({
 	onAdd?: ((provider: string, label: string, key?: string) => void) | undefined;
 	/** A new name for an account, in the owner's words. */
 	onRename?: ((id: string, label: string) => void) | undefined;
-	/** The provider whose "Add another account" form shows at first. */
+	/** The provider whose "Add account" form shows at first. */
 	adding?: string | undefined;
 	/** The account whose rename form shows at first. */
 	renaming?: string | undefined;
@@ -1220,7 +1220,6 @@ export function ModelProviders({
 					const last = shown[n + 1] === undefined || backend(shown[n + 1] as ProviderRow) !== backend(provider);
 					// another account of the provider is offered from each of its rows' menu, its form under the last
 					const addable = actions.includes("another");
-					const another = provider.by === "sign-in" ? "Sign in to another account" : "Add another account";
 					/** Rename, another account and sign out: one menu, the same on a phone and a desktop. */
 					const menu =
 						actions.length > 0 ? (
@@ -1237,7 +1236,7 @@ export function ModelProviders({
 									{addable ? (
 										<DropdownMenuItem onSelect={() => setAdding(backend(provider))}>
 											<PlusIcon />
-											{another}
+											Add account
 										</DropdownMenuItem>
 									) : null}
 									{actions.includes("sign out") ? (

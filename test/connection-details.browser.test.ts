@@ -256,9 +256,16 @@ it.skipIf(!hasChrome())(
 					};
 					location.hash = '#/connections?connection=cal'`);
 				await page.until(`document.querySelector('[data-account="bob"]')`);
-				const change = (who: string) =>
-					`[...document.querySelector('[data-account="${who}"]').querySelectorAll('button')].find(el => el.textContent.trim() === 'Change access')`;
-				await page.run(`${change("ana")}.click()`);
+				// what acts on an account is in its row's menu, which opens on the pointer going down
+				const more = (who: string) => `document.querySelector('[data-account="${who}"] button[aria-haspopup="menu"]')`;
+				await page.run(
+					`${more("ana")}.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, pointerType: 'mouse'}))`,
+				);
+				const item = (text: string) =>
+					`[...document.querySelectorAll('[role="menuitem"]')].find(el => el.textContent.trim() === ${JSON.stringify(text)})`;
+				await page.until(item("Sign out"));
+				await page.until(item("Change access"));
+				await page.run(`${item("Change access")}.click()`);
 				await page.until(`document.querySelector('[role="dialog"]')?.textContent.includes('as @ana')`);
 				await page.run(
 					`[...document.querySelector('[role="dialog"]').querySelectorAll('button')].find(el => /sign in/i.test(el.textContent)).click()`,

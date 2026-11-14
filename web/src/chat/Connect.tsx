@@ -154,7 +154,7 @@ export function ConnectDialog({
 	scopesReadonly?: boolean | undefined;
 	/** The account signing in again to change its access, as the owner reads it. */
 	account?: string | undefined;
-	/** Start signing in: Sign in, Save and sign in, Try again, Sign in another. */
+	/** Start signing in: Sign in, Save and sign in, Try again, Add account. */
 	onSignIn?: (() => void) | undefined;
 	/** Back to the access to grant; none for a connection without choices. */
 	onPermissions?: (() => void) | undefined;
@@ -202,7 +202,7 @@ export function ConnectDialog({
 	const again = onPermissions ?? onSignIn;
 	const signInAnother = (
 		<Button variant="ghost" disabled={busy} onClick={again}>
-			Sign in another
+			Add account
 		</Button>
 	);
 	return (
