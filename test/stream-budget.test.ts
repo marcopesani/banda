@@ -29,7 +29,7 @@ import { MAIN_THREAD } from "../src/core/gateway.ts";
 import { MESSAGE_USER } from "../src/core/toolsets.ts";
 import { startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
-import type { ChatRow, Item, ItemPage, ShellEvent } from "../src/server/api.ts";
+import type { ChatRow, ControlView, Item, ItemPage, ShellEvent } from "../src/server/api.ts";
 import { PAGE, PAGE_MESSAGES, PAGE_SCAN } from "../src/server/transcript.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { until } from "./helpers.ts";
@@ -184,6 +184,8 @@ describe("what the daemon sends a client", () => {
 			// a run is apart from the chat (DESIGN.md "Routines"): it leaves its line and, after it, what it said
 			const chat = routine;
 			fedChat = await until(async () => {
+				const view = (await get<ControlView>("/control")).routines.find((each) => each.name === name);
+				if (view === undefined || view.running === true) return false;
 				const items = await all(chat);
 				const said = items.filter((item) => item.role === "assistant" && (item.calls?.length ?? 0) > 0).length;
 				return items.filter((item) => item.role === "wake").length === n && said === n && items;
