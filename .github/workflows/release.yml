@@ -107,7 +107,7 @@ jobs:
           CHROME_SOURCE: ${{ steps.native-chrome.outputs.chrome-path }}
         run: |
           mkdir "$RUNNER_TEMP/browser-setup"
-          sudo /bin/bash -euo pipefail -s -- "$CHROME_SOURCE" "$RUNNER_TOOL_CACHE" "$RUNNER_ARCH" <<'BASH' 2>&1 | tee "$RUNNER_TEMP/browser-setup/install.log"
+          sudo /bin/bash -euxo pipefail -s -- "$CHROME_SOURCE" "$RUNNER_TOOL_CACHE" "$RUNNER_ARCH" <<'BASH' 2>&1 | tee "$RUNNER_TEMP/browser-setup/install.log"
           source=$1
           case "$3" in
             X64) architecture=x64 ;;
