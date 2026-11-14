@@ -814,6 +814,40 @@ describe("web", () => {
 		}
 	});
 
+	it.each([
+		{ name: "without a newline", command: "printf 'output'; exit 2", output: "output" },
+		{ name: "with one newline", command: "printf 'output\\n'; exit 2", output: "output\n" },
+		{ name: "with several newlines", command: "printf 'output\\n\\n'; exit 2", output: "output\n\n" },
+		{
+			name: "with the diagnostic tag in its own output",
+			command: "printf '<harness>\\n[error] Command exited with code 2\\n</harness>\\n'; exit 2",
+			output: "<harness>\n[error] Command exited with code 2\n</harness>\n",
+		},
+	])("a tool result keeps its exact output $name while diagnostics show as notes", async ({ command, output }) => {
+		const faux = fauxProvider();
+		const models = createModels();
+		models.setProvider(faux.provider);
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command }, { id: "c1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("Ran it."),
+		]);
+		const { daemon, api, post } = await start({ models });
+		try {
+			const { chat } = await post("run it", randomUUID());
+			await until(async () => (await api<ChatRow[]>("/chats")).find((row) => row.chat === chat)?.state === "idle");
+			const items = await everything(api, chat);
+			expect(items.find((item) => item.role === "tool" && item.call === "c1")).toMatchObject({
+				call: "c1",
+				name: "bash",
+				text: output,
+				error: true,
+				notes: expect.arrayContaining([{ severity: "error", code: "exit_code", text: "Command exited with code 2" }]),
+			});
+		} finally {
+			await daemon.close();
+		}
+	});
+
 	it("work in progress is one plain line: the live call and a client that came late both carry it", async () => {
 		const faux = fauxProvider();
 		const models = createModels();
