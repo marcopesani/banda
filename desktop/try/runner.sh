@@ -10,12 +10,23 @@ out=$1
 shift
 here=$(cd "$(dirname "$0")" && pwd -P)
 user=$(id -un)
-test "$(id -u)" -ne 0
-test -x /opt/banda/banda-desktop
-test -c /dev/kvm
-sudo -n usermod -aG kvm "$user"
-sudo -n -u "$user" -- test -r /dev/kvm
-sudo -n -u "$user" -- test -w /dev/kvm
+# each requirement says so when it is not met: a bare `test` under `set -e` ends the run without a word
+need() {
+	local what=$1
+	shift
+	"$@" || {
+		echo "runner.sh: $what" >&2
+		ls -l /dev/kvm >&2 || true
+		id >&2
+		exit 1
+	}
+}
+need "this runs as an ordinary user, not root" test "$(id -u)" -ne 0
+need "the package is not installed at /opt/banda" test -x /opt/banda/banda-desktop
+need "this machine has no /dev/kvm" test -c /dev/kvm
+need "the user could not be added to the kvm group" sudo -n usermod -aG kvm "$user"
+need "the user cannot read /dev/kvm after joining the kvm group" sudo -n -u "$user" -- test -r /dev/kvm
+need "the user cannot write /dev/kvm after joining the kvm group" sudo -n -u "$user" -- test -w /dev/kvm
 mkdir -p "$out"
 # drive.mjs waits for display :99's socket: one left by a server that is gone would answer before the new one is up
 if ! pgrep -x Xvfb >/dev/null; then
