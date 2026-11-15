@@ -41,8 +41,8 @@ export function ScanCode({
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		void (async () => {
 			try {
-				const [opened, read] = await Promise.all([camera(), reader()]);
-				stream = opened;
+				// the camera is this view's to stop from the moment it opens, whatever else then fails
+				const [opened, read] = await Promise.all([camera().then((given) => (stream = given)), reader()]);
 				const view = video.current;
 				if (over || view === null) return;
 				view.srcObject = opened;
@@ -59,6 +59,7 @@ export function ScanCode({
 				void look();
 			} catch {
 				// the owner said no, the browser has no camera to give, or another page holds it
+				for (const track of stream?.getTracks() ?? []) track.stop();
 				if (!over) setState("refused");
 			} finally {
 				if (over) for (const track of stream?.getTracks() ?? []) track.stop();

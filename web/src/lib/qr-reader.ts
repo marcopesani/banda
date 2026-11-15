@@ -53,18 +53,35 @@ async function carried(): Promise<ReadCode> {
 	const canvas = document.createElement("canvas");
 	const context = canvas.getContext("2d", { willReadFrequently: true });
 	return async (video) => {
-		const scale = Math.min(1, SIDE / Math.max(video.videoWidth, video.videoHeight, 1));
-		const width = Math.round(video.videoWidth * scale);
-		const height = Math.round(video.videoHeight * scale);
-		if (context === null || width === 0 || height === 0) return undefined;
-		canvas.width = width;
-		canvas.height = height;
-		context.drawImage(video, 0, 0, width, height);
-		const picture = context.getImageData(0, 0, width, height);
-		return decode(picture.data, width, height, { inversionAttempts: "dontInvert" })?.data || undefined;
+		// the code is held in the middle of the picture, where the screen draws its frame: that square is read at the
+		// camera's own grain, where the whole picture scaled down would run a dense code's modules together
+		const side = Math.min(video.videoWidth, video.videoHeight);
+		const size = Math.round(side * Math.min(1, SIDE / Math.max(side, 1)));
+		if (context === null || size === 0) return undefined;
+		canvas.width = size;
+		canvas.height = size;
+		context.drawImage(
+			video,
+			(video.videoWidth - side) / 2,
+			(video.videoHeight - side) / 2,
+			side,
+			side,
+			0,
+			0,
+			size,
+			size,
+		);
+		const picture = context.getImageData(0, 0, size, size);
+		return decode(picture.data, size, size, { inversionAttempts: "dontInvert" })?.data || undefined;
 	};
 }
 
-/** The camera that faces away from the owner, where the device has one. */
+/**
+ * The camera that faces away from the owner, where the device has one, at a grain fine enough for the code a
+ * computer shows: a camera asked for nothing gives a small picture, in which that code's modules are a pixel or two.
+ */
 export const openCamera = () =>
-	navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+	navigator.mediaDevices.getUserMedia({
+		video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+		audio: false,
+	});

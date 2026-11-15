@@ -140,6 +140,8 @@ function Scan({ step, act }: { step: Extract<PairingStep, { step: "scan" }>; act
 		event.preventDefault();
 		if (trimmed === "") return;
 		if (linked) act.onPairLink?.(trimmed);
+		// Return in the link's field pairs with the link that was just pasted, not with the camera
+		else if (pastes && pasted.trim() !== "") paste();
 		else if (scans) act.onScan?.(trimmed);
 		else paste();
 	};
