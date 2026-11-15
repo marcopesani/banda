@@ -40,13 +40,13 @@ export function Row({
 	const group = row.faces.length > 1;
 	const unread = (row.unread ?? 0) > 0;
 	const loud = unread || row.ask !== undefined;
-	const state: FaceState = row.ask !== undefined ? "waiting" : (row.state ?? "idle");
+	const { state, waiting } = faceOf(row);
 	const face = (
 		<Flies id={row.id}>
 			{group || first === undefined ? (
-				<FaceStack faces={row.faces} name={row.name} waiting={state === "waiting"} />
+				<FaceStack faces={row.faces} name={row.name} waiting={waiting} />
 			) : (
-				<Face face={first.face} name={row.name} state={state} paused={row.paused ?? false} />
+				<Face face={first.face} name={row.name} state={state} waiting={waiting} paused={row.paused ?? false} />
 			)}
 		</Flies>
 	);
@@ -146,6 +146,16 @@ export function Row({
 	);
 }
 
+/**
+ * What a row's face says: whether its agent works, and whether something of its waits on the owner. The two are told
+ * apart, so neither hides the other: an agent at work with an ask open, or a change of its own waiting to be allowed,
+ * keeps moving and carries the dot.
+ */
+function faceOf(row: Pick<RowView, "ask" | "state">): { readonly state: FaceState; readonly waiting: boolean } {
+	const waiting = row.ask !== undefined || row.state === "waiting";
+	return { state: row.state === "working" ? "working" : waiting ? "waiting" : (row.state ?? "idle"), waiting };
+}
+
 /** A face that flies between the row and the tile of the same agent or group, growing or shrinking on the way. */
 function Flies({ id, children }: { id: string; children: ReactNode }) {
 	return (
@@ -211,7 +221,7 @@ export function PinnedTile({
 }) {
 	const [first] = row.faces;
 	const unread = (row.unread ?? 0) > 0;
-	const state: FaceState = row.ask !== undefined ? "waiting" : (row.state ?? "idle");
+	const { state, waiting } = faceOf(row);
 	const label = [
 		row.name,
 		"pinned",
@@ -255,7 +265,7 @@ export function PinnedTile({
 						>
 							{row.unread}
 						</span>
-					) : state === "waiting" ? (
+					) : waiting ? (
 						<span
 							aria-hidden="true"
 							className="absolute right-0.5 bottom-0.5 z-20 size-3 rounded-full bg-ink ring-2 ring-paper-2"

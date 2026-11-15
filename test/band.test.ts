@@ -1,7 +1,7 @@
 /** The band's rows from the daemon's chats and groups: one per agent and group, newest first; the tab counts asks first. */
 import { describe, expect, it } from "vitest";
 import { defaultAvatarFace } from "../src/core/avatar-face.ts";
-import type { ChatRow, GroupRow } from "../src/server/api.ts";
+import type { ChatRow, GroupRow, HarnessSessionView } from "../src/server/api.ts";
 import { attentionOf, bandRows, titleOf } from "../web/src/app/band.ts";
 
 const NOW = Date.parse("2026-11-03T12:00:00");
@@ -126,5 +126,49 @@ describe("band rows", () => {
 		expect(bandRows(agents, [], [{ ...group, archived: NOW }], false, NOW).some((each) => each.id === "g:7")).toBe(
 			false,
 		);
+	});
+
+	it("says what the agent's own turn does: a coding session at work is not the agent working", () => {
+		const session: HarnessSessionView = {
+			task: 1,
+			chat: 2,
+			agent: "mara",
+			harness: "claude-code",
+			service: "Claude Code",
+			folder: "~/code/app",
+			state: "working",
+			at: 1,
+			steps: [],
+			dropped: 0,
+		};
+		const asking: HarnessSessionView = {
+			...session,
+			state: "waiting",
+			asks: [{ id: "a", kind: "execute", command: "npm test" }],
+		};
+		const mara = (state: ChatRow["state"], sessions: readonly HarnessSessionView[], more: Partial<ChatRow> = {}) =>
+			bandRows(agents, [chat("mara", NOW, { state, ...more })], [], false, NOW, [], [], sessions).find(
+				(row) => row.name === "Mara",
+			);
+		// the session works and the agent's turn ended: the face rests
+		expect(mara("idle", [session])).toMatchObject({ state: "idle" });
+		expect(mara("idle", [session])?.ask).toBeUndefined();
+		// the agent's own turn works: its face does, whatever its sessions do
+		expect(mara("running", [session])).toMatchObject({ state: "working" });
+		expect(mara("running", [])).toMatchObject({ state: "working" });
+		// a session asks: that waits on the owner, and the row says so, while the agent's own work still shows
+		expect(mara("idle", [asking])).toMatchObject({ state: "waiting", ask: "1 coding session" });
+		expect(mara("running", [asking])).toMatchObject({ state: "working", ask: "1 coding session" });
+		// the agent's own ask: waiting, or working when something else of its goes on beside the ask
+		expect(mara("waiting", [], { ask: "Book the 9:15?" })).toMatchObject({ state: "waiting", ask: "Book the 9:15?" });
+		expect(mara("running", [], { ask: "Book the 9:15?" })).toMatchObject({ state: "working", ask: "Book the 9:15?" });
+	});
+
+	it("a change waiting to be allowed is said on the row, and never hides that its agent works", () => {
+		const change = [{ agent: "mara", words: "a change to its routines" }];
+		const mara = (state: ChatRow["state"]) =>
+			bandRows(agents, [chat("mara", NOW, { state })], [], false, NOW, change).find((row) => row.name === "Mara");
+		expect(mara("idle")).toMatchObject({ state: "idle", ask: "a change to its routines" });
+		expect(mara("running")).toMatchObject({ state: "working", ask: "a change to its routines" });
 	});
 });
