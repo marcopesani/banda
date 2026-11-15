@@ -387,7 +387,7 @@ footer .wrap { padding-block: 48px 32px; }
 					<p>The app, with banda inside.</p>
 					<ul>
 						<li><a data-file="desktop/mac/arm64/dmg" href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.12/banda-0.1.0-alpha.12-mac-arm64.dmg">macOS, Apple silicon</a><span>.dmg</span></li>
-						<li><span data-file="desktop/linux/x64/deb" title="Not in the latest release">Linux (Debian, x64)</span><span>.deb</span></li>
+						<li><span data-file="desktop/linux/x64/deb" title="Not in the latest release">Linux (Debian, Ubuntu, x64)</span><span>.deb</span></li>
 					</ul>
 				</div>
 				<div>
@@ -482,7 +482,7 @@ footer .wrap { padding-block: 48px 32px; }
 			return;
 		}
 		button.href = link.href;
-		label.textContent = `Download for ${{ mac: "macOS (Apple silicon)", linux: "Linux (Debian, x64)", android: "Android" }[os]}`;
+		label.textContent = `Download for ${{ mac: "macOS (Apple silicon)", linux: "Linux (Debian, Ubuntu, x64)", android: "Android" }[os]}`;
 	};
 	choose();
 	try {

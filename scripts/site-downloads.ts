@@ -54,7 +54,7 @@ export function updateDownloads(html: string, releases: Release[]) {
 			const file = files.get(key);
 			const linux = key.startsWith("desktop/linux/");
 			// the hero's shortcut names the platform alone; the downloads list says which package it is
-			const name = /Linux \(/.test(content) ? "Linux (Debian, x64)" : "Linux";
+			const name = /Linux \(/.test(content) ? "Linux (Debian, Ubuntu, x64)" : "Linux";
 			const label = linux ? content.replace(/Linux[^<]*$/, name) : content;
 			if (!file) {
 				// what the latest release lacks stays in its place, disabled: the page dims a span that names a file

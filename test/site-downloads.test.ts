@@ -100,7 +100,7 @@ for (const arch of ["x64", "amd64"]) {
 it("removes a previously published Debian link when the latest release has no suitable Linux desktop", () => {
 	const old = release("old", "2026-11-01", ["banda-1-linux-amd64.deb", "banda-1-mac-arm64.dmg", "banda-1-win-x64.exe"]);
 	const html =
-		'<span data-file="desktop/linux/x64/deb" title="Not in the latest release"><i aria-hidden="true"></i>Linux (Debian, x64)</span><a data-file="desktop/mac/arm64/dmg" href="old">macOS</a>';
+		'<span data-file="desktop/linux/x64/deb" title="Not in the latest release"><i aria-hidden="true"></i>Linux (Debian, Ubuntu, x64)</span><a data-file="desktop/mac/arm64/dmg" href="old">macOS</a>';
 	const available = updateDownloads(html, [old]);
 	expect(available).toContain(
 		'<a data-file="desktop/linux/x64/deb" href="https://github.com/purrgrammer/banda/releases/download/old/banda-1-linux-amd64.deb">',
@@ -115,7 +115,7 @@ it("removes a previously published Debian link when the latest release has no su
 		const current = [old, release("new", "2026-11-02", names)];
 		const unavailable = updateDownloads(available, current);
 		expect(unavailable).toContain(
-			'<span data-file="desktop/linux/x64/deb" title="Not in the latest release"><i aria-hidden="true"></i>Linux (Debian, x64)</span>',
+			'<span data-file="desktop/linux/x64/deb" title="Not in the latest release"><i aria-hidden="true"></i>Linux (Debian, Ubuntu, x64)</span>',
 		);
 		expect(unavailable).not.toContain(".deb");
 		expect(unavailable).not.toContain(".AppImage");
