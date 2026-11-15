@@ -363,10 +363,35 @@ function unansweredAfter(items: readonly Item[], segments: readonly Segment[], l
 const undeliveredResult = (result: Extract<Item, { role: "tool" }> | undefined) =>
 	result?.error === true && /^(Not sent|Not delivered|The message was cancelled)/.test(result.text);
 
-/** The line for work in progress: the running call's own, else thinking, else working; none while it waits on the owner. */
-export function workingLine(live: Live, waiting: boolean): string | undefined {
-	if (!live.busy || waiting) return undefined;
-	const doing = [...live.running].reverse().find((tool) => tool.doing !== undefined)?.doing;
+/**
+ * The line for work in progress: the running call's own, else thinking, else working. None while the run waits on the
+ * owner: a call of its own opened an ask still open, and no call the model made beside it is at work. An ask no call
+ * of this run opened holds none of its work back (a held request's, or a routine's run's, shown here), and a call at
+ * work beside the one that asks is work: the ask's card says what waits, and the line that the agent goes on.
+ *
+ * `requests` says which of the model's requests made each call. Only a call of the same request as the one that asks
+ * is beside it: a run asks the model again only once every call of a request ended, so a running call of any other
+ * request is one whose end the page has not heard yet, and an ask whose own request is not read yet waits like any.
+ */
+export function workingLine(
+	live: Live,
+	waits: readonly Pick<ShownWait, "call" | "displayChat">[],
+	requests: ReadonlyMap<string, number> = new Map(),
+): string | undefined {
+	if (!live.busy) return undefined;
+	const asking = waits.flatMap((wait) =>
+		wait.call === undefined || wait.displayChat !== undefined ? [] : [wait.call],
+	);
+	const asked = new Set(asking.map((call) => requests.get(call)));
+	const atWork =
+		asking.length === 0
+			? live.running
+			: live.running.filter((tool) => {
+					const request = requests.get(tool.call);
+					return !asking.includes(tool.call) && request !== undefined && asked.has(request);
+				});
+	if (asking.length > 0 && atWork.length === 0) return undefined;
+	const doing = [...atWork].reverse().find((tool) => tool.doing !== undefined)?.doing;
 	if (doing !== undefined) return `${doing}…`;
 	return live.thinking ? "thinking…" : "working…";
 }
@@ -389,6 +414,8 @@ export function view(
 	const candidates = new Map<string, Extract<Item, { role: "tool" }>>();
 	const endedByCall = new Map<string, Extract<Item, { role: "wait" }>[]>();
 	const calls = new Set<string>();
+	/** Each call's request: the assistant entry that made it, the newest when a provider used the id again. */
+	const requests = new Map<string, number>();
 	for (const item of items) {
 		if (item.role === "tool") {
 			results.set(item.call, item);
@@ -397,7 +424,11 @@ export function view(
 		}
 		if (item.role === "wait" && item.call !== undefined)
 			endedByCall.set(item.call, [...(endedByCall.get(item.call) ?? []), item]);
-		if (item.role === "assistant") for (const call of item.calls ?? []) calls.add(call.id);
+		if (item.role === "assistant")
+			for (const call of item.calls ?? []) {
+				calls.add(call.id);
+				requests.set(call.id, item.id);
+			}
 	}
 	const openByCall = new Map<string, ShownWait[]>();
 	for (const wait of waits)
@@ -609,7 +640,7 @@ export function view(
 	for (const wait of waits)
 		if (wait.call === undefined || !calls.has(wait.call))
 			segments.push(askSegment(`open:${wait.key}`, { ask: wait.ask, wait, label: wait.label }));
-	const line = workingLine(live, waits.length > 0);
+	const line = workingLine(live, waits, requests);
 	if (line !== undefined) segments.push({ kind: "working", key: "working", text: line });
 	const unanswered = unansweredAfter(items, segments, live, waits.length > 0);
 	if (unanswered !== undefined)
