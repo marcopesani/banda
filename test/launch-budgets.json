@@ -1,0 +1,21 @@
+{
+	"rule": "A ceiling on the 90th percentile, about twice what was measured, rounded. A line needs 30 samples to be judged.",
+	"own": {
+		"messageToFirstRequestMs": 150,
+		"responseEndToFirstToolMs": 25,
+		"lastToolResultToNextRequestMs": 120,
+		"answerToNextRequestMs": 150,
+		"approvalToEffectResultMs": 8000,
+		"firstWordsOutsideRequestsMs": 300
+	},
+	"workflows": {
+		"answer": { "requests": 3, "costUsd": 0.5, "firstWordsS": 25 },
+		"research, work": { "requests": 20, "costUsd": 1, "firstWordsS": 180 },
+		"coding agent, return": { "requests": 10, "costUsd": 1, "firstWordsS": 130 },
+		"connection": { "requests": 14, "costUsd": 0.8, "firstWordsS": 100 },
+		"routine": { "requests": 20, "costUsd": 1.7 }
+	},
+	"cache": { "warmRequestsReadingUnderHalfPercent": 5, "hitRatePercent": 85, "hitRateFromRequests": 100 },
+	"measuredPaths": ["anthropic small tier by API key", "openai large tier"],
+	"unmeasured": ["artifacts", "browser", "a first answer on a fresh home"]
+}

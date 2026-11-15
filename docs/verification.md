@@ -111,45 +111,20 @@ from provider/network latency and assess answer usefulness alongside speed.
 
 ### Launch budgets
 
-A budget is a ceiling on the 90th percentile, set at about twice what was measured and rounded; its evidence is in
-the commit that set or changed it. `npm run turn:audit -- --home <fork>` measures a home's history against the tables
-below, `npm run cache:audit` its cache use, and neither opens the live home. A line needs 30 samples to be judged;
-with fewer it is unmeasured, not passing. Release remains blocked while a supported provider/model path or a launch
-workflow has no measured budget, unless the owner accepts the gap by name.
+A budget is a ceiling on the 90th percentile of what a launch workflow ([Product scope](scope.md)) takes per run:
+model requests, money at the model catalog's prices, and the wait for first words. banda's own time around the model
+is budgeted apart from the model's, and holds on every provider path; the cache has ceilings of its own, because a
+run's cost is mostly what it reads. The ceilings are data, in `test/launch-budgets.json`, set at about twice what was
+measured, with the evidence in the commit that set or changed them; no number lives in these docs.
 
-banda's own time is separate from the model's, and holds on every provider path:
-
-| Step | p90 ceiling |
-|---|---|
-| The owner's message to the first request | 150 ms |
-| A response's end to its first tool's start | 25 ms |
-| The last tool's result to the next request | 120 ms |
-| A question's answer to the next request | 150 ms |
-| An approval's answer to its effect's result, the service's time included | 8 s |
-| The part of an answer's first words no request accounts for | 300 ms |
-
-`test/turn-budget.test.ts` holds the first and third steps' medians under 100 ms on the faux provider, on every run of
-the ordinary suites; the table is checked on real history before a release.
-
-Per run of each launch workflow ([Product scope](scope.md)), by the kind `turn:audit` gives it. Money is at the
-model catalog's prices, on the two paths measured so far: Anthropic's small tier by API key and OpenAI's large tier.
-
-| Workflow | Kind | Requests, p90 | Cost, p90 | First words, p90 (the model's time; reviewed, not gated) |
-|---|---|---|---|---|
-| 1. A first answer | answer | 3 | $0.50 | 25 s |
-| 2. Delegated research and work | research, work | 20 | $1.00 | 180 s |
-| 2. A coding agent started, and its return | coding agent, return | 10 | $1.00 | 130 s |
-| 3. Artifacts | none of its own | unmeasured | unmeasured | unmeasured |
-| 4. A send through a connection, approval included | connection | 14 | $0.80 | 100 s |
-| 5. A routine's run | routine | 20 | $1.70 | not the owner's wait |
-| 6. A browser task | browser | unmeasured | unmeasured | unmeasured |
-
-The cache has its own ceilings, because a run's cost is mostly what it reads: of the warm requests `turn:audit` counts,
-at most 5% read under half of what they send; and `cache:audit` shows a hit rate of at least 85% for the `first` and
-`later` requests of every model with 100 or more of them.
+`npm run turn:audit -- --home <fork>` measures a home's history by workflow, `npm run cache:audit` its cache use, and
+neither opens the live home. A line needs 30 samples to be judged; with fewer it is unmeasured, not passing.
+`test/turn-budget.test.ts` holds banda's own time on the faux provider on every run of the ordinary suites; the rest
+is checked on real history before a release. Every provider is supported; the file names the paths that were
+measured, and a workflow or path without a measurement is named there as unmeasured, never passed by default.
 
 What a provider is slow to do is not a banda defect: a path over the first-words ceiling is reviewed with its
-usefulness, and may be dropped from the supported set rather than optimized.
+usefulness.
 
 ## Installation and release
 
