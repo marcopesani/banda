@@ -19,6 +19,13 @@ const env = { ...process.env, BANDA_HOME: home };
 const pinned = execFileSync(node, ["--version"], { encoding: "utf8" }).trim();
 console.log(`bundled node ${pinned}`);
 
+// the notices' index names files of this tree: each one is there
+const index = await readFile(join(root, "app", "licenses", "README.txt"), "utf8");
+const named = [...index.matchAll(/(?<![\w/.-])(?:app|node)\/[A-Za-z0-9_./-]+(?<![.,:])/g)].map(([path]) => path);
+const absent = named.filter((path) => !existsSync(join(root, path)));
+if (named.length < 4 || absent.length > 0) throw new Error(`the notices' index names missing files: ${absent}`);
+console.log(`third-party notices: ${named.length} files named by app/licenses/README.txt`);
+
 // the launcher itself: the same tree a person runs from PATH
 const launcher = join(root, "bin", windows ? "banda.cmd" : "banda");
 const help = execFileSync(launcher, ["--help"], { encoding: "utf8", env, shell: windows });
