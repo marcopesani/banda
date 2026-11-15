@@ -1,12 +1,15 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	expectedSum,
 	keepsPiEnv,
 	NODE_VERSION,
+	neverLoaded,
 	nodeArchive,
 	POSIX_LAUNCHER,
+	prune,
 	STAGED,
 	targetName,
 	WINDOWS_LAUNCHER,
@@ -69,6 +72,70 @@ describe("staging a release", () => {
 			"pi-env-linux-x64",
 			"pi-env-windows-x64",
 		]);
+	});
+
+	it("drops source maps and TypeScript from the dependencies, and nothing else", async () => {
+		const kept = [
+			"pkg/index.js",
+			"pkg/index.mjs",
+			"pkg/index.cjs",
+			"pkg/package.json",
+			"pkg/LICENSE",
+			"pkg/LICENSE.md",
+			"pkg/README.md",
+			"pkg/addon.darwin-arm64.node",
+			"pkg/code.wasm",
+			"pkg/bin/tool",
+			"@scope/pkg/dist/parts.js",
+			"@scope/pkg/dist/roadmap",
+		];
+		const dropped = [
+			"pkg/index.js.map",
+			"pkg/index.d.ts",
+			"pkg/index.d.ts.map",
+			"pkg/index.d.mts",
+			"pkg/index.d.cts",
+			"pkg/src/index.ts",
+			"pkg/src/index.mts",
+			"pkg/src/index.cts",
+			"pkg/src/view.tsx",
+			"@scope/pkg/dist/parts.mjs.map",
+		];
+		expect(kept.filter(neverLoaded)).toEqual([]);
+		expect(dropped.filter((file) => !neverLoaded(file))).toEqual([]);
+		const modules = await mkdtemp(join(tmpdir(), "banda-stage-"));
+		try {
+			for (const file of [...kept, ...dropped]) {
+				await mkdir(dirname(join(modules, file)), { recursive: true });
+				await writeFile(join(modules, file), "");
+			}
+			// a folder is never judged by its name
+			await mkdir(join(modules, "pkg", "types.ts"));
+			await writeFile(join(modules, "pkg", "types.ts", "index.js"), "");
+			expect(await prune(modules)).toBe(dropped.length);
+			const left = (await readdir(modules, { recursive: true, withFileTypes: true }))
+				.filter((entry) => entry.isFile())
+				.map((entry) => join(entry.parentPath, entry.name).slice(modules.length + 1));
+			expect(left.sort()).toEqual([...kept, "pkg/types.ts/index.js"].sort());
+		} finally {
+			await rm(modules, { recursive: true, force: true });
+		}
+	});
+
+	it("gives a release no package the daemon never imports", async () => {
+		const { dependencies } = (await import("../package.json", { with: { type: "json" } })).default as {
+			dependencies: Record<string, string>;
+		};
+		const files = (await readdir("src", { recursive: true })).filter((file) => file.endsWith(".ts"));
+		const imported = new Set<string>();
+		for (const file of files) {
+			const text = await readFile(join("src", file), "utf8");
+			for (const [, name] of text.matchAll(
+				/(?:from|import\(|resolve\()\s*"(@[\w.-]+\/[\w.-]+|[a-z][\w.-]*)(?:\/[^"]*)?"/g,
+			))
+				imported.add(name ?? "");
+		}
+		expect(Object.keys(dependencies).filter((name) => !imported.has(name))).toEqual([]);
 	});
 
 	it("launches the bundled CLI with the bundled Node, passing every argument", () => {
