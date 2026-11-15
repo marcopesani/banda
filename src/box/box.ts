@@ -33,7 +33,8 @@ export type EgressConfig = {
 	}[];
 	/**
 	 * The hosts the owner allowed, by chat, for the agent each chat runs (`permittedHosts`): a chat's writes there go
-	 * straight through; none carrying a credential of its own, and never the browser's.
+	 * straight through, a credential its command set included; none carrying one of its own to a host `credentials`
+	 * sets the owner's for, and never the browser's.
 	 */
 	readonly permitted?: { readonly [chat: string]: readonly string[] };
 	/** The generation of this config, which the proxy never goes back from (set by the push). */

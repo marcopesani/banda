@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Static, type TSchema, Type } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
+import { setsCredential } from "../core/egress.ts";
 import type { BoxEgress, EgressConfig } from "./box.ts";
 import { configPusher } from "./egress-config.ts";
 
@@ -178,6 +179,7 @@ export function guardedProxy({
 			await control(transport, Empty, ["ack", String(chat), String(readBytes), ...tickets]);
 		},
 		replay: (request) => control(transport, Replayed, ["replay"], request, 120_000),
+		swaps: async (request) => setsCredential((await source?.())?.credentials ?? [], request),
 	};
 	return {
 		egress,

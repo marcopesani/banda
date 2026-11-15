@@ -927,9 +927,12 @@ long as it runs.
   through as it happens (a `git push` run again succeeds); the proxy records each, durably, before sending it, and the
   daemon logs it with its outcome and its bytes' hash. A WebSocket opened there (a relay, a live API) is such a write:
   its opening is what is recorded, its frames then pass unrecorded, and what its server sends is scrubbed of
-  credentials; every other WebSocket is cut. A request carrying its own credential, and the browser's, are still held.
+  credentials; every other WebSocket is cut. A credential a command set on its request goes with it there: it acts
+  as whoever that credential is, never as the owner. The browser's requests are still held, its cookies being the
+  owner's sessions, and so is one carrying a credential of its own to a host the proxy sets the owner's for.
 - **Credentials** for a host are swapped in at the proxy, from the daemon's `auth/`, so the box holds no secrets; a
-  response that echoes one has it scrubbed. A request the box sends carrying a credential of its own is on the floor.
+  response that echoes one has it scrubbed. A request the box sends carrying a credential of its own to such a host
+  is on the floor: the owner's never goes beside a command's, or in its place, unasked.
   A request that acts as nobody (`web_fetch`'s) gets none: the box can only ever give one up that way.
 
 **The browser.** Each agent has its own browser: Chromium, headless in a machine beside the box, started when first needed and closed

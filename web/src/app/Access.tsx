@@ -180,7 +180,8 @@ export function AccessTab({
 
 /**
  * Allow this agent a host as the owner, not answering an ask: anything it sends there goes straight through,
- * WebSockets included (a relay, a live API). `*.example.com` covers every name under it, `*` every host.
+ * WebSockets included (a relay, a live API), a credential its command set with it; but for one carrying its own to a
+ * host banda sets the owner's for. `*.example.com` covers every name under it, `*` every host.
  */
 function AllowHost({
 	agent,
@@ -196,7 +197,7 @@ function AllowHost({
 	return (
 		<Block
 			title="Hosts"
-			note={`Anything ${agent.name} sends there goes straight through, without asking you, WebSockets included. Use *.example.com for every name under it, or * for every host.`}
+			note={`Anything ${agent.name} sends there goes straight through, without asking you, WebSockets included, with any key or cookie its commands set themselves. Where banda keeps a key of yours for the host, a request carrying its own still asks you. Use *.example.com for every name under it, or * for every host.`}
 		>
 			{hosts.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">

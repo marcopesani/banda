@@ -12,7 +12,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync, zstdCompressSync } from "node:zlib";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, type Harness, LiveDoc, type TaskId } from "@earendil-works/pi-durable";
 import fc from "fast-check";
@@ -31,6 +31,8 @@ import {
 	addressOf,
 	draftArgs,
 	type EgressControl,
+	FROM_HEADER,
+	fromBrowser,
 	type HeldRequest,
 	hostOf,
 	intake,
@@ -47,6 +49,7 @@ import {
 	SENT_PENDING_MS,
 	Sent,
 	type SentRequest,
+	setsCredential,
 	sweepReceipts,
 	type Taken,
 	TICKET_KEPT_MS,
@@ -104,6 +107,8 @@ class FakeProxy implements EgressControl {
 	/** What each chat's next command will have sent straight through, under a host permission. */
 	readonly sentOut = new Map<number, SentRequest[]>();
 	readonly acked: string[] = [];
+	/** Whether it sets a credential of the owner's for a request's host; unset, it cannot say, as a proxy that never could. */
+	swaps?: EgressControl["swaps"];
 	async receiptChats(): Promise<readonly number[]> {
 		return [...new Set([...this.pending.keys(), ...this.sentOut.keys()])];
 	}
@@ -2011,6 +2016,43 @@ describe("a held write's release", () => {
 		}
 	});
 
+	it("a JSON answer is told as its text; one a proxy gave back still compressed is said to be so, never shown", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const json = Buffer.from('{"playabilityStatus":{"status":"OK"},"title":"café"}');
+			const answers: Replayed[] = [
+				{ status: 200, reason: "OK", headers: [["Content-Type", "application/json"]], body: json.toString("base64") },
+				{
+					status: 200,
+					reason: "OK",
+					headers: [
+						["Content-Type", "application/json"],
+						["Content-Encoding", "gzip"],
+					],
+					body: gzipSync(json).toString("base64"),
+				},
+			];
+			const first = await s.say(harness);
+			const requests = [held(first.chat, { path: "/plain" }), held(first.chat, { path: "/gzip" })];
+			s.proxy.replay = async (request) =>
+				answers[requests.findIndex((one) => one.ticket === request.ticket)] as Replayed;
+			s.proxy.pending.set(first.chat, requests);
+			await until(async () => (await openWaits(harness)).length === 2);
+			for (const wait of await openWaits(harness)) await approve(harness, wait.key);
+			const told = await until(async () => {
+				const all = (await released(harness, first.chat)).join("\n");
+				return all.includes("/plain") && all.includes("/gzip") ? all : undefined;
+			});
+			expect(told).toContain("playabilityStatus");
+			expect(told).toContain("café");
+			expect(told).toContain("(not shown: it came encoded as gzip, which could not be undone)");
+			expect(told).not.toContain("binary data");
+		} finally {
+			await close();
+		}
+	});
+
 	it("a WebSocket is kept and asks nothing; past the limit of open asks the rest ask nothing and the agent is told", async () => {
 		const s = setup();
 		const { harness, close } = await s.open(await tempHome());
@@ -2290,6 +2332,84 @@ describe("a held write's release", () => {
 		} finally {
 			await close();
 		}
+	});
+
+	it("a credential a command set is no floor where the proxy sets none: its host allowed, it is sent; the owner's and the browser's still ask", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			// the owner's credential is set for forge.example.com alone
+			s.proxy.swaps = async (request) => request.host === "forge.example.com";
+			const first = await s.say(harness);
+			const cookie: [string, string] = ["Cookie", "VISITOR=abc"];
+			const own = held(first.chat, { path: "/own", headers: [cookie] });
+			const keyed = held(first.chat, { path: "/keyed?access_token=abc" });
+			const swapped = held(first.chat, { host: "forge.example.com", path: "/swapped", headers: [cookie] });
+			const page = held(first.chat, { path: "/page", headers: [cookie, [FROM_HEADER, "browser"]] });
+			s.proxy.pending.set(first.chat, [own, keyed, swapped, page]);
+			await until(async () => (await openWaits(harness)).length === 4);
+			const asks = new Map(
+				(await openWaits(harness)).map((wait) => [
+					wait.ask.type === "approval" ? String(wait.ask.args._ticket) : "",
+					wait.ask as Extract<typeof wait.ask, { type: "approval" }>,
+				]),
+			);
+			// the command's own: a write like any other, which offers its host; never its cookie's value
+			for (const one of [own, keyed]) {
+				expect(asks.get(one.ticket)?.floor).toBeUndefined();
+				expect(asks.get(one.ticket)?.scopes?.map((scope) => scope.scope)).toContain("host");
+			}
+			expect(JSON.stringify(asks.get(own.ticket))).not.toContain("VISITOR=abc");
+			// with the owner's credential, or the owner's session: every time, and no scope
+			for (const one of [swapped, page]) {
+				expect(asks.get(one.ticket)?.floor).toBe("credentials");
+				expect(asks.get(one.ticket)?.scopes).toEqual([]);
+			}
+			const [said] = await results(harness, first.chat);
+			expect(said).toContain("you can ask the owner to allow api.example.com with ask_hosts");
+			expect(said).toContain(
+				"It carries a credential of its own to a host banda sets the owner's credential for, so they are asked every time.",
+			);
+			expect(said).toContain("It carries the browser's session, so they are asked every time.");
+			// both hosts allowed: what was the command's own goes, once; the floor's cards stay
+			await allowHost(harness, LEAD, "api.example.com", Date.now());
+			await allowHost(harness, LEAD, "forge.example.com", Date.now());
+			await until(() => s.proxy.sent.length === 2);
+			await until(async () => (await openWaits(harness)).length === 2);
+			expect(s.proxy.sent.map((one) => one.ticket).sort()).toEqual([own.ticket, keyed.ticket].sort());
+			const left = (await openWaits(harness)).map((wait) => wait.ask.type === "approval" && wait.ask.args._ticket);
+			expect(left.sort()).toEqual([swapped.ticket, page.ticket].sort());
+			// a later one of the command's own is covered as it is taken: no card; the floor's still open one each
+			const second = await s.say(harness);
+			const again = held(second.chat, { path: "/own/2", headers: [cookie] });
+			const pageAgain = held(second.chat, { path: "/page/2", headers: [cookie, [FROM_HEADER, "browser"]] });
+			s.proxy.pending.set(second.chat, [again, pageAgain]);
+			await until(() => s.proxy.sent.length === 3);
+			await until(async () => (await openWaits(harness)).length === 3);
+			expect(s.proxy.sent.at(-1)?.ticket).toBe(again.ticket);
+			for (const wait of await openWaits(harness)) await answer(harness, wait.key, "deny", web, "bearer");
+			await until(() => done(harness, second.turn));
+			expect(s.proxy.sent).toHaveLength(3);
+		} finally {
+			await close();
+		}
+	});
+
+	it("a proxy that cannot say what it sets keeps every credential of a command's on the floor", () => {
+		const cookie = held(1, { headers: [["Cookie", "a=1"]] });
+		const floor = proposeSendTool(new FakeProxy()).floor as (args: unknown) => string | undefined;
+		expect(floor(draftArgs(cookie))).toBe("credentials");
+		expect(floor(draftArgs(cookie, true))).toBe("credentials");
+		expect(floor(draftArgs(cookie, false))).toBeUndefined();
+		// the browser's cookie is the owner's session, whatever the proxy sets
+		expect(floor(draftArgs(held(1, { headers: [...cookie.headers, [FROM_HEADER, "browser"]] }), false))).toBe(
+			"credentials",
+		);
+		// a draft from before this rule, which says nothing of whose credential it is, stays on the floor
+		const { _own, ...before } = draftArgs(cookie, false);
+		expect(_own).toBe(true);
+		expect(floor(before)).toBe("credentials");
+		expect(floor(draftArgs(held(1), false))).toBeUndefined();
 	});
 
 	it("a WebSocket with a credential of its own is told it will not be sent, not to ask for its host", async () => {
@@ -2597,6 +2717,17 @@ describe("routes", () => {
 		expect(permittedHost({ scheme: "https", host: "GitHub.com", port: 443 })).toBe("github.com");
 		expect(permittedHost({ scheme: "http", host: "github.com", port: 80 })).toBe("http://github.com");
 		expect(draftArgs(held(1, { scheme: "http", port: 80 }))._host).toMatch(/^http:\/\//);
+	});
+
+	it("a draft names a cookie by whose it is, never its value: one a command set is not the browser's session", () => {
+		// a command against a site that sets a visitor cookie: the command's own, no session of the owner's
+		const cookie: [string, string] = ["Cookie", "VISITOR_INFO1_LIVE=abcdef0123456789"];
+		const command = draftArgs(held(1, { headers: [["User-Agent", "curl/8.7.1"], cookie] }));
+		expect(command.headers).toBe("User-Agent: curl/8.7.1\nCookie: (set by the command, hidden)");
+		// a page's write that reached the proxy: the proxy said whose it is, and its words leave that header out
+		const page = draftArgs(held(1, { headers: [cookie, [FROM_HEADER, "browser"]] }));
+		expect(page.headers).toBe("Cookie: (the browser's session, hidden)");
+		for (const args of [command, page]) expect(JSON.stringify(args)).not.toContain("abcdef0123456789");
 	});
 
 	it("a draft names a binary body by its size, never its bytes, and a credential the box sent puts it on the floor", () => {
@@ -3020,6 +3151,123 @@ function admit(config: object, cases: readonly object[]) {
 	}
 }
 
+type ReplayCase = {
+	credentials?: { host: string; header: string; value: string }[];
+	headers?: [string, string][];
+	limit?: number;
+	response: { headers: [string, string][]; body: string };
+};
+
+/** proxy/ctl.py's replay on the host, against a server of the test's (test/fixtures/proxy-replay.py). */
+function replayed(cases: readonly ReplayCase[]) {
+	const dir = fileURLToPath(new URL("../proxy/", import.meta.url));
+	const harness = fileURLToPath(new URL("./fixtures/proxy-replay.py", import.meta.url));
+	const [limit, ...results] = JSON.parse(runPython(["-I", "-B", harness, dir], cases)) as [
+		number,
+		...({ replayed: Extract<Replayed, { status: number }>; sent: [string, string][] } | { missing: string })[],
+	];
+	return { limit, results };
+}
+
+describe.skipIf(!python)("a held request sent, at the proxy", () => {
+	const credential = "Bearer owner-token-12345";
+	const credentials = [{ host: "forge.example", header: "Authorization", value: credential }];
+	const json = Buffer.from(JSON.stringify({ ok: true, echo: credential, name: "café" }));
+	const scrubbed = JSON.stringify({ ok: true, echo: "[removed by banda]", name: "café" });
+	const answer = (encoding: string, body: Buffer): ReplayCase => ({
+		credentials,
+		headers: [["Accept-Encoding", "gzip, deflate, br, zstd"]],
+		response: {
+			headers: [
+				["Content-Type", "application/json"],
+				["Content-Encoding", encoding],
+			],
+			body: body.toString("base64"),
+		},
+	});
+
+	it("undoes the response's encoding before it scrubs it: a credential a compressed body echoes is removed", () => {
+		const cases = [
+			answer("gzip", gzipSync(json)),
+			answer("deflate", deflateSync(json)),
+			answer("deflate", deflateRawSync(json)),
+			answer("x-gzip", Buffer.concat([gzipSync(json.subarray(0, 20)), gzipSync(json.subarray(20))])),
+			answer("br", brotliCompressSync(json)),
+			answer("zstd", zstdCompressSync(json)),
+		];
+		const { results } = replayed(cases);
+		// the host's python may lack the modules the proxy's image undoes br and zstd with; gzip and deflate are its own
+		expect(results.slice(0, 4).every((one) => "replayed" in one)).toBe(true);
+		for (const one of results) {
+			if ("missing" in one) continue;
+			// sent as held: what it said it accepts is what its command said
+			expect(one.sent).toContainEqual(["Accept-Encoding", "gzip, deflate, br, zstd"]);
+			expect(Buffer.from(one.replayed.body, "base64").toString()).toBe(scrubbed);
+			expect(one.replayed.truncated).toBe(false);
+			const names = one.replayed.headers.map(([name]) => name.toLowerCase());
+			// what came back is no longer encoded, nor of the length it arrived with
+			expect(names).not.toContain("content-encoding");
+			expect(names).not.toContain("content-length");
+			expect(names).toContain("content-type");
+		}
+	});
+
+	it("never inflates past its limit, however far a body would: a few kilobytes that spell 64 MB are cut there", () => {
+		const bomb = Buffer.alloc(64 * 1024 * 1024, "a");
+		// the limit it runs with is a megabyte; a smaller one here, so the answer fits a pipe
+		const small = (one: ReplayCase) => ({ ...one, limit: 64 * 1024 });
+		const { limit, results } = replayed([
+			small(answer("gzip", gzipSync(bomb))),
+			small(answer("deflate", deflateSync(bomb))),
+			small(answer("br", brotliCompressSync(bomb))),
+			small(answer("zstd", zstdCompressSync(bomb))),
+		]);
+		expect(limit).toBe(1024 * 1024);
+		expect(results.slice(0, 2).every((one) => "replayed" in one)).toBe(true);
+		for (const one of results) {
+			if ("missing" in one) continue;
+			expect(Buffer.from(one.replayed.body, "base64")).toHaveLength(64 * 1024);
+			expect(one.replayed.truncated).toBe(true);
+		}
+	});
+
+	it("sends a browser's held request without the header that said whose it was", () => {
+		const { results } = replayed([
+			{
+				headers: [
+					["Cookie", "sid=1"],
+					[FROM_HEADER, "browser"],
+				],
+				response: { headers: [], body: "" },
+			},
+		]);
+		const [one] = results as { sent: [string, string][] }[];
+		expect(one?.sent).toContainEqual(["Cookie", "sid=1"]);
+		expect(one?.sent.map(([name]) => name.toLowerCase())).not.toContain(FROM_HEADER);
+	});
+
+	it("gives back no body it could not undo, so none it could not scrub; a credential the cut broke goes too", () => {
+		const plain = Buffer.from(`0123456789 ${credential} and the rest`);
+		const { results } = replayed([
+			answer("compress", json),
+			answer("gzip", json),
+			// cut inside the credential: its first half is no credential `scrub` knows, and is not left there
+			{ credentials, limit: 11 + 12, response: { headers: [], body: plain.toString("base64") } },
+			{ credentials, response: { headers: [["Content-Encoding", "identity"]], body: plain.toString("base64") } },
+		]);
+		const [unknown, wrong, cut, identity] = results as { replayed: Extract<Replayed, { status: number }> }[];
+		for (const one of [unknown, wrong]) {
+			expect(one?.replayed.body).toBe("");
+			expect(one?.replayed.headers.map(([name]) => name.toLowerCase())).toContain("content-encoding");
+		}
+		expect(Buffer.from(cut?.replayed.body ?? "", "base64").toString()).toBe("0123456789 ");
+		expect(cut?.replayed.truncated).toBe(true);
+		expect(Buffer.from(identity?.replayed.body ?? "", "base64").toString()).toBe(
+			"0123456789 [removed by banda] and the rest",
+		);
+	});
+});
+
 describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 	it("frames scrubbed identity and decoded bodies with their unknown streamed length", () => {
 		const credential = `Bearer ${"a".repeat(53)}`;
@@ -3094,15 +3342,38 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 		expect(policy("policy.permitted_host(x[0], x[1], x[2])", requests)).toEqual(
 			requests.map(([scheme, host, port]) => permittedHost({ scheme: scheme as "http" | "https", host, port })),
 		);
-		// a WebSocket carrying its own credential can be neither asked about nor let through, and is told so
-		const [socket] = policy(
-			'policy.held_words("t1", "https", "a.example", 443, [["Upgrade", "websocket"], ["Authorization", "x"]])',
-			[null],
-		) as string[];
+		// a WebSocket carrying its own credential to a host the owner's is set for can be neither asked about nor let
+		// through, and is told so; where none is set it is a WebSocket like any other, opened once its host is allowed
+		const words =
+			'policy.held_words("t1", "https", "a.example", 443, [["Upgrade", "websocket"], ["Authorization", "x"]], "/", x)';
+		const [socket, plain] = policy(words, [
+			[{ host: "a.example", header: "Authorization", value: "Bearer owner-token-12345" }],
+			[{ host: "b.example", header: "Authorization", value: "Bearer owner-token-12345" }],
+		]) as string[];
 		expect(socket).toContain("it will not be sent");
 		expect(socket).not.toContain("ask_hosts");
+		expect(plain).toContain("ask the owner to allow a.example with ask_hosts");
 		expect(policy("sorted(policy.SECRET_HEADERS)", [null])).toEqual([[...SECRET_HEADERS].sort()]);
 		expect(policy("sorted(policy.SECRET_QUERY)", [null])).toEqual([[...SECRET_QUERY].sort()]);
+		// the daemon knows where the proxy sets a credential as the proxy's own lookup does: by name, over its scheme
+		const set = [
+			{ host: "Forge.Example.", header: "Authorization", value: "Bearer owner-token-12345" },
+			{ host: "plain.example", header: "X-Key", value: "owner-key-12345", scheme: "http" as const },
+			{ host: "[2001:db8::1]", header: "X-Key", value: "owner-key-12345" },
+		];
+		const to: ["http" | "https", string][] = [
+			["https", "forge.example"],
+			["http", "forge.example"],
+			["https", "FORGE.example."],
+			["https", "sub.forge.example"],
+			["http", "plain.example"],
+			["https", "plain.example"],
+			["https", "2001:db8::1"],
+			["https", "other.example"],
+		];
+		const sets = policy(`bool(policy.credential_for(x[1], ${JSON.stringify(set)}, x[0]))`, to);
+		expect(sets).toEqual([true, false, true, false, true, false, true, false]);
+		expect(to.map(([scheme, host]) => setsCredential(set, { scheme, host }))).toEqual(sets);
 		// the proxy reads a path's query as the daemon does
 		const paths = ["/a?access_token=1", "/a?x=1&Token=2", "/a?tokens=1", "/a", "/a?api_key=", "/a#token=1"];
 		expect(policy("policy.own_credentials([], x)", paths)).toEqual(paths.map((path) => ownCredential([], path)));
@@ -3161,7 +3432,11 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 		expect(body(0)).toMatch(
 			/ticket t[0-9a-f]{10}\. It has not been sent\. When this command ends you are told what happens to it\. Before writing more there, ask the owner to allow other\.example with ask_hosts/,
 		);
-		expect(body(1)).toContain("It carries a credential of its own, so the owner is asked every time.");
+		// forge.example is a host the owner's credential is set for: one of the command's own never goes with it unasked
+		expect(body(1)).toContain(
+			"It carries a credential of its own to a host banda sets the owner's credential for, so the owner is asked every time.",
+		);
+		expect(body(1)).not.toContain("ask_hosts");
 		expect(body(5)).toContain("to allow http://forge.example with ask_hosts");
 		expect(body(6)).toContain("to allow forge.example:8443 with ask_hosts");
 		expect(body(8)).toContain("nobody's chat only reads");
@@ -3186,17 +3461,53 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 		expect(Object.keys(result.held).sort()).toEqual(["11", "7", "8"]);
 	});
 
+	it("says a held request is a browser's in a header only the proxy sets, never sent on", () => {
+		const forged = [FROM_HEADER, "browser"];
+		const result = admit(config(["forge.example"]), [
+			// chat 8's tab in sancho's browser, whose page forged nothing, and one whose page tried to
+			{
+				...push,
+				login: "b-sancho",
+				headers: [
+					["x-banda-tab", tabStamp(key, "sancho", 8)],
+					["Cookie", "sid=1"],
+				],
+			},
+			// a command saying it is a browser is not believed: held as a command's, and what it sends on has no such header
+			{ ...push, host: "other.example", headers: [forged, ["Cookie", "sid=1"]] },
+			{ ...push, headers: [forged] },
+			{ login: "c7", method: "GET", host: "other.example", headers: [forged] },
+		]);
+		const from = (chat: string) =>
+			(result.held[chat] ?? []).map((one) => one.headers.filter(([name]) => name.toLowerCase() === FROM_HEADER));
+		expect(from("8")).toEqual([[[FROM_HEADER, "browser"]]]);
+		expect(from("7")).toEqual([[]]);
+		expect(result.held["8"]?.every(fromBrowser)).toBe(true);
+		expect(result.held["7"]?.some(fromBrowser)).toBe(false);
+		for (const one of result.cases.slice(2))
+			expect((one as { headers: [string, string][] }).headers.map(([name]) => name.toLowerCase())).not.toContain(
+				FROM_HEADER,
+			);
+	});
+
 	it("streams a WebSocket to a permitted host, recorded as it opens and scrubbed; cuts every other", () => {
 		const relay = { login: "c7", method: "GET", host: "relay.example", path: "/", headers: [["Upgrade", "websocket"]] };
 		const result = admit(config(["*.example", "forge.example"]), [
 			{ ...relay, answer: 101, frames: ['["EVENT",{}]', "echo Bearer owner-token-12345"] },
 			{ ...relay, host: "forge.example", answer: 101, frames: ["ok"] },
-			// held, so never opened: another host, nobody's chat, a credential of its own, the browser
+			// held, so never opened: another host, nobody's chat, a credential of its own where the owner's is set
 			{ ...relay, host: "relay.other", frames: ["no"] },
 			{ ...relay, login: "c11", frames: ["no"] },
-			{ ...relay, headers: [...relay.headers, ["Authorization", "Bearer mine"]], frames: ["no"] },
+			{
+				...relay,
+				host: "forge.example",
+				headers: [...relay.headers, ["Authorization", "Bearer mine"]],
+				frames: ["no"],
+			},
 			// a plain read that becomes a WebSocket without asking (no Upgrade it said) is cut
 			{ login: "c7", method: "GET", host: "relay.example", path: "/", frames: ["no"] },
+			// a relay signed in to with the command's own key, where the proxy sets none: a WebSocket like any other
+			{ ...relay, headers: [...relay.headers, ["Authorization", "Bearer mine"]], answer: 101, frames: ["ok"] },
 		]);
 		expect(result.cases.map((one) => ("status" in one ? one.status : (one as { streams: boolean }).streams))).toEqual([
 			true,
@@ -3205,7 +3516,9 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 			403,
 			403,
 			false,
+			true,
 		]);
+		expect((result.cases[4] as { body: string }).body).toContain("it will not be sent");
 		// a held WebSocket points at ask_hosts: a stream is never replayed as one request
 		expect((result.cases[2] as { body: string }).body).toContain("ask the owner to allow relay.other with ask_hosts");
 		// what the server sends is scrubbed of the owner's credentials
@@ -3215,7 +3528,57 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 		expect(result.sent["7"]?.map((one) => [one.host, one.status]).sort()).toEqual([
 			["forge.example", 101],
 			["relay.example", 101],
+			["relay.example", 101],
 		]);
+	});
+
+	it("sends a write carrying its command's own credential straight to an allowed host no credential is set for", () => {
+		// allowed for chats 7, 8 and 9: api.example, where the proxy sets nothing, and forge.example, where it sets the owner's
+		const post = { login: "c7", method: "POST", host: "api.example", path: "/v1/player", body: "{}" };
+		const cookie = ["Cookie", "VISITOR=abc"];
+		const cases = [
+			{ ...post, headers: [cookie] },
+			{ ...post, headers: [["Authorization", "Bearer mine-own-token"]] },
+			{ ...post, headers: [["X-Api-Key", "k"]] },
+			{ ...post, path: "/v1/player?access_token=abc" },
+			// a host that is not allowed, the same host in the clear or on another port, another agent's chat, nobody's
+			{ ...post, host: "other.example", headers: [cookie] },
+			{ ...post, scheme: "http", port: 80, headers: [cookie] },
+			{ ...post, port: 8443, headers: [cookie] },
+			{ ...post, login: "c11", headers: [cookie] },
+			{ ...post, login: "c0", headers: [cookie] },
+			// the browser's cookie is the owner's session: chat 8's tab is held there, allowed host or not
+			{ ...post, login: "b-sancho", headers: [["x-banda-tab", tabStamp(key, "sancho", 8)], cookie] },
+			// where the owner's credential is set, one of the command's own still waits, whatever header carries it
+			{ ...post, host: "forge.example", headers: [cookie] },
+			{ ...post, host: "forge.example", path: "/v1/player?token=abc" },
+		];
+		const result = admit(config(["api.example", "forge.example"]), cases);
+		expect(result.cases.map((one) => ("status" in one ? one.status : 200))).toEqual([
+			200, 200, 200, 200, 403, 403, 403, 403, 403, 403, 403, 403,
+		]);
+		// each goes as its command made it: its own credential, and none of the owner's beside it
+		const went = result.cases.slice(0, 4) as { headers: [string, string][] }[];
+		expect(went[0]?.headers).toEqual([cookie]);
+		expect(went[1]?.headers).toEqual([["Authorization", "Bearer mine-own-token"]]);
+		expect(JSON.stringify(went)).not.toContain("owner-token");
+		// and each is recorded before it went, as every write sent under a host permission is
+		expect(result.sent["7"]?.map((one) => one.path).sort()).toEqual([
+			"/v1/player",
+			"/v1/player",
+			"/v1/player",
+			"/v1/player?access_token=abc",
+		]);
+		expect(Object.keys(result.sent)).toEqual(["7"]);
+		const body = (n: number) => (result.cases[n] as { body: string }).body;
+		// held for its host alone: once the owner allows it, it goes
+		expect(body(4)).toContain("ask the owner to allow other.example with ask_hosts");
+		expect(body(5)).toContain("to allow http://api.example with ask_hosts");
+		expect(body(10)).toContain("to a host banda sets the owner's credential for");
+		expect(body(11)).toContain("to a host banda sets the owner's credential for");
+		// what was held is its own chat's; the browser's says whose it is
+		expect(Object.keys(result.held).sort()).toEqual(["11", "7", "8"]);
+		expect(result.held["8"]?.every(fromBrowser)).toBe(true);
 	});
 
 	it("reads a pattern as the daemon does: a name under it, or every host, at its scheme and port", () => {
@@ -3266,6 +3629,11 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 		expect(result.cases.map((one) => ("status" in one ? one.status : 200))).toEqual([403, 403, 403, 403, 403]);
 		for (const one of result.cases) expect((one as { body: string }).body).toContain("a credential of its own");
 		expect(result.sent).toEqual({});
+		// the credential set for the host is for https: over plain http none is set, but the host is not allowed there
+		const clear = admit(config(["forge.example"]), [
+			{ ...push, scheme: "http", port: 80, headers: [["Cookie", "a=1"]] },
+		]);
+		expect(clear.cases.map((one) => ("status" in one ? one.status : 200))).toEqual([403]);
 	});
 
 	it("holds the write again once the host is taken back; another chat of the agent's goes through", () => {

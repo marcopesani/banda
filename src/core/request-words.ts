@@ -39,15 +39,19 @@ export function isSecret(name: string, value: string): boolean {
 	return SECRET_NAME.test(name) || secretLooking(value);
 }
 
-/** A header line as shown: a session cookie named only, any other credential masked. */
-export function headerWords(name: string, value: string): string {
-	if (name.trim().toLowerCase() === "cookie") return `${name}: (the browser's session, hidden)`;
+/** What sent a request: the agent's browser, whose cookies are its sessions, or a command, which set its own. */
+export type Sender = "browser" | "command";
+
+/** A header line as shown: a cookie by whose it is and never its value, any other credential masked. */
+export function headerWords(name: string, value: string, from: Sender): string {
+	if (name.trim().toLowerCase() === "cookie")
+		return `${name}: (${from === "browser" ? "the browser's session" : "set by the command"}, hidden)`;
 	return `${name}: ${isSecret(name, value) ? masked(value) : value}`;
 }
 
 /** Headers as shown, one a line. */
-export const headersWords = (headers: readonly (readonly [string, string])[]): string =>
-	headers.map(([name, value]) => headerWords(name, value)).join("\n");
+export const headersWords = (headers: readonly (readonly [string, string])[], from: Sender): string =>
+	headers.map(([name, value]) => headerWords(name, value, from)).join("\n");
 
 /** An address as shown: each query parameter that is a credential masked, the rest as it is. */
 export function addressWords(address: string): string {
@@ -88,6 +92,43 @@ function bodyText(body: string): string | { readonly what: string } {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what marks a body as binary
 	if (text.includes("�") || /[\x00-\x08\x0e-\x1f]/.test(text))
 		return { what: `(${bytes.length} bytes of binary data)` };
+	return text;
+}
+
+/** A type whose body is text whatever bytes it holds: text/*, and a subtype or suffix that names a text format. */
+const TEXT_TYPE = /^text\/|[/+](json|xml|javascript|ecmascript|x-www-form-urlencoded|yaml|x-yaml)$/i;
+
+/**
+ * A response's body (base64, as the proxy gave it back: undone from its encoding, scrubbed, cut) as its reader gets
+ * it: text when its type says so or its bytes read as text, in the charset its type names; else what it is. A body
+ * still encoded (a proxy that could not undo it) is never shown: its bytes say nothing, and nothing in them was
+ * scrubbed. `cut`: it was longer, so a character the cut broke is dropped rather than read as not text.
+ */
+export function responseWords(body: string, headers: readonly (readonly [string, string])[], cut = false): string {
+	const header = (name: string) =>
+		headers
+			.filter(([key]) => key.trim().toLowerCase() === name)
+			.map(([, value]) => value.trim())
+			.join(", ");
+	const encoding = header("content-encoding").toLowerCase();
+	if (encoding !== "" && encoding !== "identity")
+		return `(not shown: it came encoded as ${encoding.slice(0, 40)}, which could not be undone)`;
+	const bytes = Buffer.from(body, "base64");
+	if (bytes.length === 0) return "(empty)";
+	const type = header("content-type");
+	const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(type)?.[1] ?? "utf-8";
+	const decoder = () => {
+		try {
+			return new TextDecoder(charset, { fatal: false });
+		} catch {
+			// a charset nobody knows: read as most text is
+			return new TextDecoder("utf-8", { fatal: false });
+		}
+	};
+	const text = decoder().decode(bytes, { stream: cut });
+	if (TEXT_TYPE.test((type.split(";")[0] ?? "").trim())) return text;
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what marks a body as binary
+	if (text.includes("�") || /[\x00-\x08\x0e-\x1f]/.test(text)) return `(${bytes.length} bytes of binary data)`;
 	return text;
 }
 

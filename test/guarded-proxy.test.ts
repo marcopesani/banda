@@ -70,6 +70,10 @@ describe("the shared guarded proxy", () => {
 		const credentials = [{ host: "example.com", header: "Authorization", value: "Bearer owner-secret" }];
 		proxy.egress.source(async () => ({ credentials, daemonPort: 7788, permitted: { 7: ["example.com"] } }));
 		expect(await proxy.egress.configure()).toBe("told");
+		// where it sets the owner's credential, the daemon can ask: a command's own never goes with it unasked
+		expect(await proxy.egress.swaps?.({ scheme: "https", host: "example.com" }, context)).toBe(true);
+		expect(await proxy.egress.swaps?.({ scheme: "http", host: "example.com" }, context)).toBe(false);
+		expect(await proxy.egress.swaps?.({ scheme: "https", host: "api.example.com" }, context)).toBe(false);
 		const sent: unknown = JSON.parse(calls[0]?.input ?? "null");
 		expect(calls[0]?.args).toEqual(["python3", "/banda/ctl.py", "config"]);
 		expect(sent).toMatchObject({ key, credentials, daemonPort: 7788, generation: expect.any(Number) });

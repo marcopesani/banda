@@ -403,7 +403,7 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 	});
 
 	/** Retain held bytes and their single disposition before the proxy may forget them. */
-	const retain: Retain = async (tx, chat, held, now, source) => {
+	const retain: Retain = async (tx, chat, held, now, source, swapped) => {
 		const own = [...new Map(held.filter((one) => one.chat === chat).map((one) => [one.ticket, one])).values()];
 		if (own.length === 0) return { ids: [], notSent: {} };
 		if (tool === undefined) throw new Error("this home has no egress proxy to send through");
@@ -472,7 +472,7 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 				prepared.push({ kind: "notSent", held: one, reason: "repeat" });
 				continue;
 			}
-			const draft = draftOf(tool, draftArgs(one));
+			const draft = draftOf(tool, draftArgs(one, swapped?.has(one.ticket) ?? true));
 			const covered = source === "tool" && (await covering(tx, draft, chat, now)) !== undefined;
 			// a script that writes in a loop must not bury the owner in cards: the rest stay stored, and the agent is told
 			if (!covered && open >= MAX_OPEN_ASKS) {

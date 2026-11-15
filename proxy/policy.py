@@ -5,6 +5,7 @@ the caller hands in, so its rules are tested without a proxy.
 """
 
 import hmac
+import io
 import ipaddress
 import re
 import zlib
@@ -252,9 +253,10 @@ def is_write(method, headers, url=""):
 
 
 DEFAULT_PORTS = {"http": 80, "https": 443}
-# Headers that carry a credential, as the daemon's floor names them (egress.ts SECRET_HEADERS), and query parameters
-# that do (SECRET_QUERY): a request the box sends with one is on the floor, never covered by a permission. A credential
-# inside a body is not looked for: what a body carries is its own format's.
+# Headers that carry a credential, as the daemon names them (egress.ts SECRET_HEADERS), and query parameters that do
+# (SECRET_QUERY): a request the box sends with one carries a credential of its own, and is on the floor, never covered
+# by a permission, where the proxy sets one of the owner's (`on_floor`). A credential inside a body is not looked for:
+# what a body carries is its own format's.
 SECRET_HEADERS = {
     "authorization",
     "cookie",
@@ -266,6 +268,12 @@ SECRET_HEADERS = {
     "x-access-token",
 }
 SECRET_QUERY = {"access_token", "token", "api_key", "apikey", "private_token"}
+
+
+# What a held request of a browser's carries among its headers, so the daemon knows whose it is: set by the proxy
+# alone, taken from whatever the box sends, and never sent on.
+FROM_HEADER = "x-banda-from"
+FROM_BROWSER = "browser"
 
 
 def permitted_host(scheme, host, port):
@@ -281,11 +289,21 @@ def permitted_host(scheme, host, port):
 
 
 def own_credentials(headers, path=""):
-    """Whether a request carries a credential of its own, in a header or its query: then it is on the floor."""
+    """Whether a request carries a credential of its own, in a header or its query."""
     if any(key.strip().lower() in SECRET_HEADERS for key, _ in headers):
         return True
     query = urlsplit(path).query
     return any(key.strip().lower() in SECRET_QUERY for key in parse_qs(query, keep_blank_values=True))
+
+
+def on_floor(scheme, host, headers, path, credentials):
+    """
+    Whether a write of a command's is on the floor, held whatever host the owner allowed: it carries a credential of its
+    own to a host the proxy sets one of the owner's for (`credential_for`, the same lookup that sets it), so the two
+    would go together, or the owner's in the other's place, with nobody asked. A credential the command set, where the
+    proxy sets none, acts as whoever it is and never as the owner: that write is as any other.
+    """
+    return own_credentials(headers, path) and bool(credential_for(host, credentials, scheme))
 
 
 def host_covers(allowed, spelled):
@@ -316,17 +334,17 @@ def host_covers(allowed, spelled):
     return named == "*" or (named.startswith("*.") and other_name.endswith(named[1:]))
 
 
-def direct_write(scheme, host, port, headers, path, permitted):
+def direct_write(scheme, host, port, headers, path, permitted, credentials):
     """
     Whether a write goes straight through, as it happens: its host is one the owner allowed for its chat's agent
     (`permitted`, which the daemon's config names for that chat, exactly or by a pattern `host_covers` reads), and it
-    carries no credential of its own (the floor). A WebSocket upgrade there opens a stream, recorded as it opens.
-    Anything else is held.
+    is not on the floor (`on_floor`, by the `credentials` the daemon gave). A WebSocket upgrade there opens a stream,
+    recorded as it opens. Anything else is held.
     """
     spelled = permitted_host(scheme, host, port)
     if not any(host_covers(allowed, spelled) for allowed in permitted):
         return False
-    return not own_credentials(headers, path)
+    return not on_floor(scheme, host, headers, path, credentials)
 
 
 def is_websocket(headers):
@@ -335,16 +353,21 @@ def is_websocket(headers):
     return "websocket" in upgrade.lower()
 
 
-def held_words(ticket, scheme, host, port, headers, path=""):
+def held_words(ticket, scheme, host, port, headers, path, credentials):
     """What the box hears of a write held as `ticket`: that it waits, and how the next one goes straight through."""
     said = f"this request writes, so it waits for the owner: ticket {ticket}. It has not been sent."
-    if is_websocket(headers) and own_credentials(headers, path):
+    floor = on_floor(scheme, host, headers, path, credentials)
+    if is_websocket(headers) and floor:
         return (
-            f"{said} A WebSocket is a stream, never sent as one request, and one carrying a credential of its own is "
-            "never let through: it will not be sent. Open it without that credential."
+            f"{said} A WebSocket is a stream, never sent as one request, and one carrying a credential of its own to "
+            "a host banda sets the owner's for is never let through: it will not be sent. Open it without that "
+            "credential."
         )
-    if own_credentials(headers, path):
-        return f"{said} It carries a credential of its own, so the owner is asked every time."
+    if floor:
+        return (
+            f"{said} It carries a credential of its own to a host banda sets the owner's credential for, so the "
+            "owner is asked every time. Leave yours out and banda sets the owner's."
+        )
     allowed = permitted_host(scheme, host, port)
     if is_websocket(headers):
         return (
@@ -468,6 +491,96 @@ def decoder(encoding):
         inflate = zstandard.ZstdDecompressor().decompressobj()
         return lambda chunk: inflate.decompress(chunk) if chunk else b""
     return None
+
+
+def _inflated(raw, wbits, limit):
+    """One zlib stream at the start of `raw`, never past `limit` bytes: what it held, whether it ended, what follows."""
+    inflate = zlib.decompressobj(wbits)
+    body = inflate.decompress(raw, limit)
+    return body, inflate.eof, inflate.unused_data
+
+
+def undone(raw, encoding, limit):
+    """
+    A whole body's `Content-Encoding` undone, never past `limit` bytes however far it would inflate (a few bytes can
+    spell gigabytes): `(body, more)`, `more` when there was more than `limit` or its encoding did not end. None for
+    an encoding it cannot undo (as `decoder`: several, or one it does not know) and for bytes that are not what
+    their encoding says.
+    """
+    encoding = encoding.strip().lower()
+    if encoding in ("", "identity"):
+        return raw[:limit], len(raw) > limit
+    if encoding not in ("gzip", "x-gzip", "deflate", "br", "zstd"):
+        return None
+    if raw == b"":
+        return b"", False
+    room = limit + 1
+    if encoding == "deflate":
+        # zlib's framing as the standard says, or none, as some servers send it
+        for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+            try:
+                body, ended, _ = _inflated(raw, wbits, room)
+            except zlib.error:
+                continue
+            return body[:limit], len(body) > limit or not ended
+        return None
+    if encoding in ("gzip", "x-gzip"):
+        # one member after another, as gzip allows
+        body, rest, ended = b"", raw, False
+        try:
+            while rest and len(body) < room:
+                part, ended, rest = _inflated(rest, 16 + zlib.MAX_WBITS, room - len(body))
+                body += part
+                if not ended:
+                    break
+        except zlib.error:
+            return None
+        return body[:limit], len(body) > limit or not ended
+    if encoding == "br":
+        import brotli  # in the proxy's image, as mitmproxy's own
+
+        inflate = brotli.Decompressor()
+        try:
+            try:
+                body = inflate.process(raw, output_buffer_limit=room)
+            except TypeError:
+                # a brotli that takes no limit: a little at a time, stopped once past it
+                body = b""
+                for at in range(0, len(raw), 16):
+                    body += inflate.process(raw[at : at + 16])
+                    if len(body) > limit:
+                        break
+        except brotli.error:
+            return None
+        return body[:limit], len(body) > limit or not inflate.is_finished()
+    import zstandard  # in the proxy's image, as mitmproxy's own
+
+    body = b""
+    try:
+        # the window HTTP allows a frame (RFC 9659), so its header cannot ask for more memory than that
+        reader = zstandard.ZstdDecompressor(max_window_size=8 * 1024 * 1024).stream_reader(io.BytesIO(raw))
+        while len(body) < room:
+            part = reader.read(room - len(body))
+            if not part:
+                break
+            body += part
+    except zstandard.ZstdError:
+        return None
+    return body[:limit], len(body) > limit
+
+
+def cut(data, limit, credentials):
+    """
+    The first `limit` bytes of `data`, which had more, scrubbed. A credential the cut broke in two is not one `scrub`
+    finds, so the start of one left at the end (four bytes or more) goes too.
+    """
+    out = scrub(data, credentials)[:limit]
+    for secret in _secrets(credentials):
+        for size in range(min(len(secret) - 1, len(out)), 3, -1):
+            if out.endswith(secret[:size]):
+                out = out[:-size]
+                break
+    return out
 
 
 def scrubber(credentials):
