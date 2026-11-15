@@ -5,7 +5,7 @@
  * the shell crashes, the daemon lives on and the next launch attaches to it.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { closeSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -37,11 +37,14 @@ function release() {
 				node: join(root, "node", windows ? "node.exe" : "node"),
 				cli: join(root, "app", "dist", "cli", "index.js"),
 				icon: join(root, "app", "web", "dist", "icon-192.png"),
+				notices: join(root, "app", "licenses", "README.txt"),
 			}
 		: {
 				node: process.env.BANDA_NODE ?? "node",
 				cli: join(root, "dist", "cli", "index.js"),
 				icon: join(root, "web", "public", "icon-192.png"),
+				// staging writes it (scripts/notices.ts): a checkout has none
+				notices: join(root, "licenses", "README.txt"),
 			};
 }
 
@@ -358,6 +361,8 @@ function makeTray(icon: string): void {
 	tray = new Tray(image);
 	tray.setToolTip(tooltipOf(NOTHING));
 	const loginItem = process.platform !== "linux";
+	// the index of the third-party notices the release carries, shown in its folder beside the files it names
+	const notices = release().notices;
 	const menu = () =>
 		Menu.buildFromTemplate([
 			{ label: "Open banda", click: show },
@@ -373,6 +378,7 @@ function makeTray(icon: string): void {
 						},
 					]
 				: []),
+			...(existsSync(notices) ? [{ label: "Third-party licenses", click: () => shell.showItemInFolder(notices) }] : []),
 			{ type: "separator" },
 			{ label: "Quit banda", click: () => app.quit() },
 		]);
