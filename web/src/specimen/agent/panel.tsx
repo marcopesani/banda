@@ -348,7 +348,7 @@ export function PanelSections() {
 				note="Saved changes stay in effect while competing workspace versions remain recoverable."
 			>
 				<div className="flex max-w-md flex-col gap-4" inert>
-					{(["pending", "conflict", "retained"] as const).map((state) => (
+					{(["pending", "conflict"] as const).map((state) => (
 						<AgentPublication
 							key={state}
 							agent={{
@@ -359,9 +359,7 @@ export function PanelSections() {
 									message:
 										state === "pending"
 											? "Your change is saved. Its workspace file is still being updated."
-											: state === "conflict"
-												? "Your change is saved. Another version is also kept for review."
-												: "Earlier versions are kept so you can recover their text.",
+											: "Your change is saved. Another version is also kept for review.",
 									retained: [],
 								},
 							}}

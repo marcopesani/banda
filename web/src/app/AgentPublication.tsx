@@ -64,7 +64,9 @@ export function AgentPublication({
 	const [acting, setActing] = useState(false);
 	const [error, setError] = useState<string>();
 	const publication = agent.publication;
-	if (publication === undefined) return null;
+	// only what needs the owner is said here: a change still being written, or two versions to choose between. Earlier
+	// versions that are merely kept are no news, and the panel says nothing of them
+	if (publication === undefined || publication.state === "retained") return null;
 	const change = agent.change;
 	const reviewedSha = change === undefined ? agent.accepted?.sha : change.kind === "removed" ? null : change.sha;
 	const load = async (before?: number) => {
@@ -90,14 +92,8 @@ export function AgentPublication({
 		}
 	};
 	return (
-		<Alert role={publication.state === "retained" ? "status" : "alert"}>
-			<AlertTitle>
-				{publication.state === "pending"
-					? "Your change is saved"
-					: publication.state === "conflict"
-						? "Two versions were kept"
-						: "Earlier versions are available"}
-			</AlertTitle>
+		<Alert role="alert">
+			<AlertTitle>{publication.state === "pending" ? "Your change is saved" : "Two versions were kept"}</AlertTitle>
 			<AlertDescription className="min-w-0">
 				<p>{publication.message}</p>
 				<details
@@ -113,7 +109,7 @@ export function AgentPublication({
 						) : change?.kind === "removed" ? (
 							<p>The workspace file was removed. Your saved version is still in effect.</p>
 						) : null}
-						{publication.state === "retained" ? null : (
+						{
 							<div className="flex flex-wrap gap-2">
 								<Button
 									type="button"
@@ -141,7 +137,7 @@ export function AgentPublication({
 									</Button>
 								) : null}
 							</div>
-						)}
+						}
 						{error === undefined ? null : <p role="alert">{error}</p>}
 						{history.kind === "loading" ? <p role="status">Loading earlier versions…</p> : null}
 						{history.kind === "failed" ? (

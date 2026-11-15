@@ -144,13 +144,9 @@ for (const width of [390, 1440])
 							.flatMap((item) => item.retained)
 							.some((version) => version.kind === "text" && version.text === REMOTE),
 					).toBe(true);
-					await click(page, "[...document.querySelectorAll('summary')].find(el=>el.textContent==='Review versions')");
-					await page.until(shows("Earlier workspace version"));
-					await click(
-						page,
-						"[...document.querySelectorAll('summary')].find(el=>el.textContent==='Earlier workspace version')",
-					);
-					await page.until(shows("The other device's personality."));
+					// the other version is kept, and the panel says nothing of it: there is nothing left for the owner to decide
+					await page.until("![...document.querySelectorAll('summary')].some(el=>el.textContent==='Review versions')");
+					expect(await page.run(`document.body.textContent.includes("Earlier versions")`)).toBe(false);
 					expect(await page.run("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
 					if (shots !== undefined) await page.shoot(join(shots, `${width}-recovered.png`));
 					expect(page.errors()).toEqual([]);
