@@ -31,6 +31,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { log } from "./activity.ts";
 import { Accepted, AGENT_NAME, agentWords, ChatAgent, frontmatter, isArchived, LEAD, shaOf } from "./agents.ts";
+import { toolWords } from "./ask.ts";
 import {
 	acceptedConnection,
 	acceptedNames,
@@ -63,7 +64,7 @@ import {
 	withLastAnswers,
 } from "./follow.ts";
 import { fileNameFor } from "./names.ts";
-import { type OffRead, objectAccess, objectStanding, offWords } from "./object-access.ts";
+import { type OffRead, objectAccess, objectStanding, offWords, unlistedReads } from "./object-access.ts";
 import {
 	cardOf,
 	keepReading,
@@ -920,8 +921,16 @@ export function defineWatches(options: WatchesOptions) {
 		const picked = await accountFor(tx, agent, connection, watch.account);
 		if ("refused" in picked) return { why: picked.refused };
 		const access = await objectStanding(tx, chat, ref, picked.account);
-		if (access === undefined)
-			return { why: `${connection.service} is not connected for ${await agentWords(tx, agent)}` };
+		if (access === undefined) {
+			// connected, but its server lists none of a tool the kind must read with: said so, not "not connected"
+			const unlisted = await unlistedReads(tx, connection, kind);
+			return {
+				why:
+					unlisted.length > 0
+						? `${connection.service} here has no ${unlisted.map((tool) => `"${toolWords(tool)}"`).join(" or ")} tool, so a ${ref.kind.replaceAll("_", " ")} cannot be followed through it`
+						: `${connection.service} is not connected for ${await agentWords(tx, agent)}`,
+			};
+		}
 		if (access.off !== undefined) return { off: access.off };
 		if (access.stopped !== undefined) return { off: access.stopped };
 		// which optional reads are off shapes the reading: when that moved, a diff would be of the shape, not the object
