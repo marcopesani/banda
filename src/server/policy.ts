@@ -26,3 +26,17 @@ export const APP_POLICY = [
 
 /** What the daemon sends: the app's policy, and that no other page may frame the app. */
 export const SERVED_POLICY = `${APP_POLICY}; frame-ancestors 'none'`;
+
+/**
+ * The app's policy on an origin of its own (web/vercel.json), where it is a device through a browser's Iroh endpoint
+ * (`web/src/lib/browser-shell.ts`): the app's policy, and no more than that endpoint needs. It is WebAssembly, so the
+ * page may compile it; and it reaches n0's relays, and n0's lookup of where an endpoint is, which the page may connect
+ * to. A daemon reached through a relay of the owner's own needs a build whose policy names that relay.
+ */
+export const HOSTED_POLICY = APP_POLICY.replace(
+	"default-src 'self'",
+	"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'",
+).replace("connect-src 'self' blob:", "connect-src 'self' blob: https://*.iroh.link wss://*.iroh.link");
+
+/** What the app's own origin sends: that policy, and that no other page may frame the app. */
+export const HOSTED_SERVED_POLICY = `${HOSTED_POLICY}; frame-ancestors 'none'`;

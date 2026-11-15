@@ -1,0 +1,28 @@
+[package]
+name = "banda-iroh-web"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bytes = "1"
+console_error_panic_hook = "0.1.7"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+iroh = { version = "=1.4.1", default-features = false, features = ["tls-ring"] }
+iroh-tickets = "1"
+js-sys = "0.3"
+n0-future = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+wasm-streams = "0.5"
+
+[profile.release]
+codegen-units = 1
+strip = "symbols"
+debug = false
+lto = true
+opt-level = "z"
+panic = "abort"

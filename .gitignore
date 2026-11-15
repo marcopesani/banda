@@ -19,3 +19,6 @@ release/
 
 # a kept home (test/home-upgrade.test.ts) is its store
 !/test/fixtures/homes/*/durable.db
+
+# the build tree of the browser endpoint (its built pkg/ is committed)
+web/iroh/target/

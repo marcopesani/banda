@@ -2,7 +2,7 @@
 	"$schema": "https://openapi.vercel.sh/vercel.json",
 	"framework": null,
 	"installCommand": "npm ci --prefix ..",
-	"buildCommand": "npm run build:web --prefix ..",
+	"buildCommand": "BANDA_HOSTED=1 npm run build:web --prefix ..",
 	"outputDirectory": "dist",
 	"ignoreCommand": "sh ../scripts/vercel-ignore-app.sh",
 	"headers": [
@@ -11,15 +11,26 @@
 			"headers": [
 				{
 					"key": "content-security-policy",
-					"value": "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"
+					"value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' blob: https://*.iroh.link wss://*.iroh.link; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"
 				},
-				{ "key": "x-content-type-options", "value": "nosniff" },
-				{ "key": "referrer-policy", "value": "no-referrer" }
+				{
+					"key": "x-content-type-options",
+					"value": "nosniff"
+				},
+				{
+					"key": "referrer-policy",
+					"value": "no-referrer"
+				}
 			]
 		},
 		{
 			"source": "/assets/(.*)",
-			"headers": [{ "key": "cache-control", "value": "public, max-age=31536000, immutable" }]
+			"headers": [
+				{
+					"key": "cache-control",
+					"value": "public, max-age=31536000, immutable"
+				}
+			]
 		}
 	]
 }

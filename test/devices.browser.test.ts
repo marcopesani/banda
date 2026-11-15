@@ -11,6 +11,7 @@ import { INVITE_MS } from "../src/core/devices.ts";
 import { startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
 import type { DevicesView } from "../src/server/api.ts";
+import { carriedLink } from "../web/src/lib/browser-shell.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { testDevice } from "./fixtures/iroh-client.ts";
 import { echoModels, skipShippedSkills, tempHome, webServer } from "./helpers.ts";
@@ -107,6 +108,21 @@ for (const width of [390, 1280])
 					expect(await page.run<string>(text)).not.toContain(pairing);
 					expect(await page.run<string>(text)).toContain(`${endpoint.slice(0, 8)}…${endpoint.slice(-8)}`);
 					expect(await page.run<boolean>(`!!document.querySelector('[data-copy="${endpoint}"]')`)).toBe(true);
+					// the same pairing for a phone with no app: a link its browser opens, the ticket and invite after the #
+					const browser = await page.run<string>(
+						`[...document.querySelectorAll('dt')].find(el => el.textContent === 'Link for a browser').nextElementSibling.querySelector('[data-copy]').dataset.copy`,
+					);
+					expect(await page.run<string>(text)).not.toContain(browser);
+					const opened = new URL(browser);
+					expect(`${opened.origin}${opened.pathname}${opened.search}`).toBe("https://app.banda.rocks/");
+					expect(carriedLink(opened.hash)).toBe(pairing);
+					// the code turns into that link when the owner says the phone has no app, and back
+					await click(page, button("No app? Use its browser"));
+					await page.until(labelled("Code to scan with your phone’s camera"));
+					expect(await page.run<string>(text)).toContain("in the phone’s browser");
+					expect(await page.run(labelled("Code to scan with banda on your phone"))).toBeNull();
+					await click(page, button("Use the banda app"));
+					await page.until(labelled("Code to scan with banda on your phone"));
 					const link = new URL(pairing);
 					await phone.dial(link.searchParams.get("ticket")!);
 					expect(

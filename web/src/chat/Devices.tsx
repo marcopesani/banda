@@ -18,8 +18,11 @@ import { fingerprint } from "../lib/pairing.ts";
 import { Confirm } from "./Confirm.tsx";
 import { Block, RowOf, Rows } from "./Settings.tsx";
 
-/** The invite on screen: what its code carries, and when it stops working. */
-export type ShownInvite = { readonly pairing: string; readonly expires: number };
+/**
+ * The invite on screen: what its code carries for the banda app on a phone, the same pairing as a link a phone's
+ * browser opens when it has no app, and when it stops working.
+ */
+export type ShownInvite = { readonly pairing: string; readonly browser: string; readonly expires: number };
 
 export type DevicesActions = {
 	readonly onPair?: (() => void) | undefined;
@@ -153,13 +156,15 @@ function Pairing({
 	computer: string | undefined;
 	act: DevicesActions;
 }) {
+	// the code is the banda app's unless the owner says the phone has none: then it is one any camera opens in a browser
+	const [browser, setBrowser] = useState(false);
 	return (
 		<div className="@container rounded-tile border border-line-soft p-4">
 			<div className="flex flex-col items-center gap-4 @md:flex-row @md:items-start">
 				<div className="relative shrink-0">
 					<QrCode
-						value={invite.pairing}
-						label="Code to scan with banda on your phone"
+						value={browser ? invite.browser : invite.pairing}
+						label={browser ? "Code to scan with your phone’s camera" : "Code to scan with banda on your phone"}
 						className={cn("size-44 p-1.5", expired && "opacity-15")}
 					/>
 					{expired ? (
@@ -170,11 +175,15 @@ function Pairing({
 				</div>
 				<div className="flex min-w-0 flex-1 flex-col gap-3 self-stretch">
 					<div className="flex flex-col gap-1">
-						<p className="text-body font-semibold text-ink">{expired ? "This code expired" : "Scan with your phone"}</p>
+						<p className="text-body font-semibold text-ink">
+							{expired ? "This code expired" : browser ? "Scan with your phone’s camera" : "Scan with your phone"}
+						</p>
 						<p className="text-ui text-ink-2">
 							{expired
 								? "Codes last ten minutes. Make a new one when your phone is ready."
-								: "Open banda on your phone and scan this code. It asks to pair here, and you approve it."}
+								: browser
+									? "It opens banda in the phone’s browser, with no app to install. It asks to pair here, and you approve it."
+									: "Open banda on your phone and scan this code. It asks to pair here, and you approve it."}
 						</p>
 					</div>
 					{expired || computer === undefined ? null : (
@@ -200,6 +209,11 @@ function Pairing({
 						<Button variant="ghost" size="sm" onClick={act.onCancel}>
 							{expired ? "Close" : "Cancel"}
 						</Button>
+						{expired ? null : (
+							<Button variant="ghost" size="sm" aria-pressed={browser} onClick={() => setBrowser(!browser)}>
+								{browser ? "Use the banda app" : "No app? Use its browser"}
+							</Button>
+						)}
 					</div>
 				</div>
 			</div>
@@ -408,6 +422,9 @@ function Details({
 						</>
 					)}
 					{invite === undefined ? null : line("Pairing link", <CopyText text={invite.pairing} label="Copy link" />)}
+					{invite === undefined
+						? null
+						: line("Link for a browser", <CopyText text={invite.browser} label="Copy link" />)}
 					{devices.devices.map((device) => id(device.name, device.id, device.id))}
 					{devices.requests.map((request) => id(`${request.name} (asking)`, request.id, `asking ${request.id}`))}
 				</dl>

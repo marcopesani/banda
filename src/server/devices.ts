@@ -50,6 +50,16 @@ const HERE = "devices are paired, renamed and revoked on the computer banda runs
 export const pairingLink = (ticket: string, secret: string) =>
 	`banda://pair?ticket=${encodeURIComponent(ticket)}&invite=${encodeURIComponent(secret)}`;
 
+/** The app's own origin, where a phone with no banda app opens it in its browser (web/vercel.json). */
+export const APP_ORIGIN = "https://app.banda.rocks";
+
+/**
+ * The same pairing as a link any browser opens: the app's origin, with the ticket and the invite after its `#`, the
+ * part of an address no server is sent. The app there takes them out of the address as it reads them.
+ */
+export const browserLink = (ticket: string, secret: string) =>
+	`${APP_ORIGIN}/#pair?ticket=${encodeURIComponent(ticket)}&invite=${encodeURIComponent(secret)}`;
+
 export function openDevices({
 	harness,
 	remote,
@@ -126,7 +136,7 @@ export function openDevices({
 		const ticket = await reach.ticket();
 		const secret = newSecret();
 		const expires = await harness.commit((tx) => makeInvite(tx, hashOf(secret), now()), context);
-		return { secret, ticket, expires, pairing: pairingLink(ticket, secret) };
+		return { secret, ticket, expires, pairing: pairingLink(ticket, secret), browser: browserLink(ticket, secret) };
 	};
 
 	const endpointId = (id: string | undefined) => {

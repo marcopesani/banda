@@ -11,7 +11,7 @@
  * approves the phone whose fingerprint they read on it, not the name it asked under.
  */
 import type { PairingState } from "../../../src/server/api.ts";
-import type { BandaPlugin, ScannerPlugin } from "./transport.ts";
+import type { BandaPlugin, ScannerPlugin } from "./device-shell.ts";
 
 /** An endpoint id as people compare it: its first 16 hex digits, in fours. */
 export const fingerprint = (id: string) => (id.slice(0, 16).match(/.{1,4}/g) ?? []).join(" ");
@@ -220,17 +220,24 @@ export function pairing({ shell, scanner, ask, check, every = 2000 }: PairingDep
 			go({ step: "checking" });
 			let linked: PairingLink | undefined;
 			let known = false;
-			await withShell(at, async () => {
-				await untry();
-				const state = await shell.state();
-				if (!active(at)) return;
-				name = name === "" ? state.name : name;
-				device = state.device;
-				computer = state.daemon;
-				linked = state.link === undefined ? undefined : readPairingLink(state.link);
-				known = state.daemon !== undefined;
-				if (!known) toScan(undefined, linked);
-			});
+			try {
+				await withShell(at, async () => {
+					await untry();
+					const state = await shell.state();
+					if (!active(at)) return;
+					name = name === "" ? state.name : name;
+					device = state.device;
+					computer = state.daemon;
+					linked = state.link === undefined ? undefined : readPairingLink(state.link);
+					known = state.daemon !== undefined;
+					if (!known) toScan(undefined, linked);
+				});
+			} catch {
+				// the shell could not say where it stands (a browser whose endpoint did not load): the screen offers to
+				// try again, where a step left at "checking" would offer nothing
+				if (active(at)) go({ step: "unreachable" });
+				return;
+			}
 			if (!active(at) || !known) return;
 			try {
 				await settle(await check(), false, at);

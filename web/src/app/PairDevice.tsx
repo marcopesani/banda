@@ -1,6 +1,6 @@
 /**
- * The native shell's first screen until this phone is a paired device (`lib/pairing.ts`): it reads where the shell
- * stands, pairs when it must, and opens the app once the owner approved this phone. In a browser it is never shown.
+ * A shell's first screen until this phone is a paired device (`lib/pairing.ts`): it reads where the shell stands, pairs
+ * when it must, and opens the app once the owner approved this phone. The page the daemon serves never shows it.
  */
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import { PairPhone } from "../chat/PairPhone.tsx";

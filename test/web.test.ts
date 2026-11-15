@@ -37,6 +37,7 @@ import type {
 	Posted,
 	ShellEvent,
 } from "../src/server/api.ts";
+import { APP_POLICY, HOSTED_POLICY, HOSTED_SERVED_POLICY } from "../src/server/policy.ts";
 import { plain } from "../src/server/transcript.ts";
 import { demoEffects, type Ran } from "./fixtures/effects.ts";
 import { hostBox } from "./fixtures/host-box.ts";
@@ -1310,12 +1311,12 @@ describe("web", () => {
 		}
 	});
 
-	it("the hosted app's files carry the headers the daemon sends them with", async () => {
+	it("the hosted app's files carry the headers the daemon sends them with, and its own policy", async () => {
 		const { daemon, url } = await start();
 		try {
-			const { headers: rules } = JSON.parse(await readFile(new URL("../web/vercel.json", import.meta.url), "utf8")) as {
-				headers: { source: string; headers: { key: string; value: string }[] }[];
-			};
+			const { headers: rules, buildCommand: build } = JSON.parse(
+				await readFile(new URL("../web/vercel.json", import.meta.url), "utf8"),
+			) as { buildCommand: string; headers: { source: string; headers: { key: string; value: string }[] }[] };
 			// a source matches a whole path; the two written there mean the same as patterns and as regular expressions.
 			// No two rules that match one path name the same header: which would win is not Vercel's to say
 			const hosted = (path: string) =>
@@ -1332,8 +1333,19 @@ describe("web", () => {
 				const served = await fetch(`${url}${path}`);
 				const sent = hosted(path);
 				expect(sent.map(([key]) => key).sort(), path).toEqual(keys);
-				for (const [key, value] of sent) expect(value, `${key} of ${path}`).toBe(served.headers.get(key));
+				// its policy is the app's with what a browser's endpoint needs (src/server/policy.ts); the rest is the daemon's
+				for (const [key, value] of sent)
+					expect(value, `${key} of ${path}`).toBe(
+						key === "content-security-policy" ? HOSTED_SERVED_POLICY : served.headers.get(key),
+					);
 			}
+			// the build it serves is the one made as a device: no other build is
+			expect(build).toMatch(/^BANDA_HOSTED=1 /);
+			// what the hosted policy adds to the app's is said in full here, so a wider one is a change someone reads
+			expect(HOSTED_POLICY.split("; ").filter((part) => !APP_POLICY.split("; ").includes(part))).toEqual([
+				"script-src 'self' 'wasm-unsafe-eval'",
+				"connect-src 'self' blob: https://*.iroh.link wss://*.iroh.link",
+			]);
 		} finally {
 			await daemon.close();
 		}

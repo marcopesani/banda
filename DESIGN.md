@@ -1066,6 +1066,15 @@ never from a device, so no device can mint access that outlives its own revocati
 the daemon's answer to the pairing route, never from how a connection closed: a restart or a dropped connection is
 only dialed again.
 
+A phone with no banda app is a device through its browser: the app on an origin of its own, with an Iroh endpoint of
+the browser's own, in WebAssembly. A browser sends no UDP, so that endpoint reaches the daemon through a relay alone.
+The rest is the phone's: the same pairing, the same API, a key that is the device. That key is kept in the browser's
+storage for the origin, unsealed, since nothing a page can do seals a key from the page's own origin or from a copy of
+the browser's files: it is as safe as those two are. Its code is a link, whose ticket and invite come after the
+address's `#`, which no server is sent, and the app takes them out of the address bar as it reads them. Whoever serves
+that origin's files is trusted as the app is, since they are what the device runs: they are a release's build, they
+load nothing from anywhere else, and no other build carries the endpoint.
+
 ## Home
 `~/.banda` (`--home <dir>` or `BANDA_HOME`): `config.json`, `durable.db`, `search.db`, `blobs/`, `auth/`, `format`. The
 workspace lives in the box.

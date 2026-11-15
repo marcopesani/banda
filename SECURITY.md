@@ -23,6 +23,14 @@ of them. `serve --box host` has no computer at all: commands run on your own mac
 The Mac app is not signed with an Apple Developer ID and not notarized, and banda does not update itself: check a
 download against the release's `SHA256SUMS`, and install updates by hand.
 
+A browser you pair at app.banda.rocks runs the files that address serves, each time it opens. Whoever controls that
+address, its host or its domain's records, can serve other files, and a paired browser acts as you. The phone's app
+is installed once and does not change under you; pair a browser only if you accept that difference. The key that
+makes the browser your device sits in that browser's storage unsealed: a script that address serves has it, and so
+does a copy of the browser's profile, where the phone's app keeps its key in the phone's keystore. The link you pair
+with may stay in the browser's history; its code works once, for ten minutes. Everything a paired browser sends
+passes n0's relay, encrypted end to end, where the phone's app also reaches your computer directly.
+
 ## Reporting
 
 Please report a vulnerability privately through GitHub's
