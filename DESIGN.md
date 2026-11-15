@@ -1066,6 +1066,20 @@ only dialed again.
 `~/.banda` (`--home <dir>` or `BANDA_HOME`): `config.json`, `durable.db`, `search.db`, `blobs/`, `auth/`. The
 workspace lives in the box.
 
+**A backup** is a folder that holds a home whole: the store as one consistent snapshot, taken while the daemon runs or
+not, every blob that snapshot refers to, the configuration, `auth/` and the computer's files, with a manifest that
+names and measures what is there. It holds nothing a home rebuilds (search, caches) and nothing of a running daemon.
+It is written beside its place and renamed into it, so a backup that exists is whole. The owner may leave out the
+browser's signed-in sites, or the computer's files altogether, and the manifest says so.
+
+**A restore** makes a home only where there is none, and no daemon: it never writes over one. It copies the backup
+beside the home, checks that copy against the manifest, and only then gives it the home's name in one step, so a
+damaged or incomplete backup, or a process killed on the way, leaves no home. A backup of a newer format than the
+build reads is refused. The backup is only read.
+
+A backup holds the home's secrets as the home does, unencrypted, for the owner alone to read; its manifest detects
+damage, not a forgery by someone who can rewrite it.
+
 ## Open
 - A monitor: a command in the box whose output a watch-like file follows, waking when it changes; it needs its own
   design, apart from watches.

@@ -30,4 +30,13 @@ Recheck these items against current code before implementation; an unchecked ite
 defect. Remove it only when its fix and acceptance evidence are recorded in a commit.
 
 - [ ] Prove blob file and directory persistence ordering on the supported filesystem (recovery.md)
-- [ ] Provide consistent backup and validated restore of the store, blobs, workspace, auth and browser state (recovery.md)
+- [ ] Back up and restore from the app, with progress and failures; today only `banda backup` and `banda restore` do
+- [ ] Back up a container box's volumes (workspace, work, tools, browser): a backup carries the native computer's
+  folders only
+- [ ] Protect the secrets in a backup that leaves the computer: encryption, key custody, and what a lost key costs
+- [ ] Take backups on a schedule and before an update, and decide how many are kept
+- [ ] Qualify a restored home (R1, R2, R4): pending asks, routines and write-backs resume, completed sends are not
+  replayed, requests the proxy held at the backup are settled, and a sign-in renewed after the backup asks again
+- [ ] Hash the large computer folders (work, tools, browser), which a manifest only counts, where that is cheap
+- [ ] Make a backup hold through power loss, not only a kill: only the store and the manifest are synced before the
+  rename

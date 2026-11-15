@@ -11,6 +11,8 @@ import type { Storage } from "@earendil-works/pi-durable";
 export type FaultPoint =
 	| import("../../src/server/remote.ts").KeyPoint
 	| import("../../src/server/agent-publication.ts").AgentPublicationPoint
+	/** A home's backup and its restore: each stage filled, checked and renamed into place. */
+	| import("../../src/core/backup.ts").BackupPoint
 	| "commit:before"
 	| "commit:after"
 	| "send:before"
