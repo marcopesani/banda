@@ -153,8 +153,9 @@ for (const { width, delayed } of [
 						classed: { kind: "read", from: "you" },
 						setting: "allow",
 					});
+					// the group says Allow: nothing more can be allowed from it, as its other tool is one nobody spoke for
 					expect(await page.run(`document.querySelector('[aria-label="Every tool in Events"]').textContent`)).toBe(
-						"Mixed",
+						"Allow",
 					);
 					// Ask on it, at once
 					await choosePermission(page, "list_events", "Ask");

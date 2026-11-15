@@ -89,12 +89,51 @@ export function inGroup(setting: Setting, options: readonly Setting[]): Setting 
 }
 
 /**
- * What a group's control sets one of its tools to, as `inGroup` says, but Allow never where it would say the tool
- * reads when nobody has: that is the owner's word on the tool alone, in the tool's own control.
+ * What a group's control sets one of its tools to, as `inGroup` says, but Allow never on a tool nobody spoke for: saying
+ * that one reads is the owner's word on the tool alone, in the tool's own control. A read its server proposes is taken
+ * by the group's Allow: the owner accepts, for the group, what each row already says.
  */
 export function groupValue(setting: Setting, classed: Classed, options: readonly Setting[]): Setting | undefined {
-	if (setting === "allow" && (classed.kind === "unknown" || classed.from === "server")) return undefined;
+	if (setting === "allow" && classed.kind === "unknown") return undefined;
 	return inGroup(setting, options);
+}
+
+/** A tool as a group's control sees it: what it does, what it may be set to, what it is set to. */
+export type Grouped = { readonly classed: Classed; readonly options: readonly Setting[]; readonly setting: Setting };
+
+/** What picking `setting` on a group's control sets each of `tools` to, in their order; undefined where a tool keeps its own. */
+const groupSets = (tools: readonly Grouped[], setting: Setting) =>
+	tools.map((tool) => groupValue(setting, tool.classed, tool.options));
+
+/**
+ * The settings a group's control offers: each one that changes what some tool is set to, and none that sets every tool
+ * to what a setting before it does (Always ask over tools that have only one way to ask is Ask again).
+ */
+export function groupOffers(tools: readonly Grouped[]): Setting[] {
+	const seen = new Set<string>();
+	return SETTINGS.filter((setting) => {
+		const sets = groupSets(tools, setting);
+		const key = JSON.stringify(sets.map((each) => each ?? null));
+		if (sets.every((each) => each === undefined) || seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+}
+
+/**
+ * The setting a group's control is at: the first it offers that every tool is at, as the group would set it. A tool the
+ * group's Allow leaves alone (a write, the floor, a tool nobody spoke for) is at Allow while it asks the plainest way it
+ * has, never while it is off or the owner narrowed it: the control says Allow when nothing more can be allowed from
+ * it. Undefined when the tools differ.
+ */
+export function groupAt(tools: readonly Grouped[]): Setting | undefined {
+	return groupOffers(tools).find((setting) => {
+		const sets = groupSets(tools, setting);
+		return (
+			sets.some((each) => each !== undefined) &&
+			tools.every((tool, index) => (sets[index] ?? inGroup("ask", tool.options)) === tool.setting)
+		);
+	});
 }
 
 /** Words that say what an action does rather than what it acts on, left out of a group's name. */

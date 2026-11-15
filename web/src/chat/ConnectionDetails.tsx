@@ -22,10 +22,11 @@ import { FLOOR_WORDS } from "../../../src/core/floor.ts";
 import {
 	type Classed,
 	type From,
+	groupAt,
+	groupOffers,
 	groupValue,
 	type Kind,
 	SETTING_WORDS,
-	SETTINGS,
 	type Setting,
 } from "../../../src/core/tool-kinds.ts";
 import type { AccountView, ConnectionToolView, ConnectionView, KindView } from "../../../src/server/api.ts";
@@ -106,7 +107,7 @@ function PermissionSelect({
 
 /**
  * Each of `tools` set to `setting` as a group sets it: the setting, or the nearest it has; the rest as they were. A group
- * never says a tool reads when nobody has: Allow leaves such a tool alone.
+ * never says a tool reads when nobody has: Allow leaves such a tool alone, and takes a read its server proposes.
  */
 const groupSet = (tools: readonly Settable[], setting: Setting): { [tool: string]: Setting } =>
 	Object.fromEntries(
@@ -115,23 +116,6 @@ const groupSet = (tools: readonly Settable[], setting: Setting): { [tool: string
 			return near === undefined ? [] : [[tool.title, near]];
 		}),
 	);
-
-/** The settings a group's control offers: each one some tool in it takes. */
-const groupOptions = (tools: readonly Settable[]) =>
-	SETTINGS.filter((setting) => tools.some((tool) => groupValue(setting, tool.classed, tool.options) !== undefined));
-
-/**
- * The setting the group's control is at: one every tool in it is at. Undefined when the tools differ, or when one
- * cannot take it (a write in a group of reads), so the control never says Allow over a tool that asks.
- */
-const groupCommon = (tools: readonly Settable[], settingOf: (tool: Settable) => Setting) =>
-	SETTINGS.find((setting) => {
-		const applied = tools.map((tool) => ({
-			near: groupValue(setting, tool.classed, tool.options),
-			now: settingOf(tool),
-		}));
-		return applied.every(({ near, now }) => near !== undefined && near === now);
-	});
 
 /** A connection's tools in their groups, each set as `settingOf` says; a tool with no settings is shown as it is. */
 export function ToolList({
@@ -235,7 +219,8 @@ function ToolGroup({
 	const waiting = tools.filter((tool) => tool.waiting === true).length;
 	const [open, setOpen] = useState(expanded || waiting > 0);
 	const id = useId();
-	const common = groupCommon(tools, settingOf);
+	const now = tools.map((tool) => ({ classed: tool.classed, options: tool.options, setting: settingOf(tool) }));
+	const common = groupAt(now);
 	return (
 		<Collapsible open={open} onOpenChange={setOpen} data-group={group}>
 			<div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3.5 py-2.5">
@@ -254,7 +239,7 @@ function ToolGroup({
 				</CollapsibleTrigger>
 				<PermissionSelect
 					label={`Every tool in ${group}`}
-					options={groupOptions(tools)}
+					options={groupOffers(now)}
 					value={common}
 					disabled={disabled}
 					waiting={waiting > 0}

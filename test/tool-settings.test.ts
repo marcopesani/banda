@@ -19,6 +19,8 @@ import {
 	type Classed,
 	classOf,
 	defaultOf,
+	groupAt,
+	groupOffers,
 	groupValue,
 	inGroup,
 	type Kind,
@@ -225,19 +227,52 @@ describe("a tool's kind, as said", () => {
 		expect(Object.keys(nameGroups(["list_issues", "get_issue", "whoami"]))).toHaveLength(3);
 	});
 
-	it("a group's Allow says nothing of a tool nobody spoke for or a server only proposed: only the tool's own control does", () => {
+	it("a group's Allow takes a read its server proposes, and says nothing of a tool nobody spoke for: only the tool's own control does", () => {
 		const options = (classed: Classed) => optionsOf(classed, undefined);
 		const unknown: Classed = { kind: "unknown", from: "nobody" };
 		const proposed: Classed = { kind: "read", from: "server" };
 		const known: Classed = { kind: "read", from: "definition" };
 		const theirs: Classed = { kind: "read", from: "you" };
 		expect(groupValue("allow", unknown, options(unknown))).toBeUndefined();
-		expect(groupValue("allow", proposed, options(proposed))).toBeUndefined();
+		expect(groupValue("allow", proposed, options(proposed))).toBe("allow");
 		expect(groupValue("allow", known, options(known))).toBe("allow");
 		expect(groupValue("allow", theirs, options(theirs))).toBe("allow");
 		// the other settings narrow as ever
 		expect(groupValue("ask", unknown, options(unknown))).toBe("ask");
 		expect(groupValue("off", proposed, options(proposed))).toBe("off");
+	});
+
+	it("a group's control offers only what changes something, and says the setting its tools are at", () => {
+		const of = (classed: Classed, setting: Setting, ask?: "always") => ({
+			classed,
+			options: optionsOf(classed, ask),
+			setting,
+		});
+		const read: Classed = { kind: "read", from: "server" };
+		const write: Classed = { kind: "write", from: "server" };
+		const unknown: Classed = { kind: "unknown", from: "nobody" };
+		// reads alone have one way to ask: Always ask would be Ask again
+		expect(groupOffers([of(read, "ask"), of(read, "ask")])).toEqual(["allow", "ask", "off"]);
+		expect(groupAt([of(read, "ask"), of(read, "ask")])).toBe("ask");
+		expect(groupAt([of(read, "allow"), of(read, "ask")])).toBeUndefined();
+		expect(groupAt([of(read, "allow"), of(read, "allow")])).toBe("allow");
+		// on a server the owner added, a write only ever asks every time: one Ask for the group, and Allow for its reads
+		const mixed = (reads: Setting, writes: Setting) => [of(read, reads, "always"), of(write, writes, "always")];
+		expect(groupOffers(mixed("ask", "always"))).toEqual(["allow", "ask", "off"]);
+		expect(groupAt(mixed("ask", "always"))).toBe("ask");
+		// Allow, once nothing more can be allowed from the group; never over a tool that is off
+		expect(groupAt(mixed("allow", "always"))).toBe("allow");
+		expect(groupAt(mixed("allow", "off"))).toBeUndefined();
+		expect(groupAt(mixed("off", "off"))).toBe("off");
+		// writes that ask two ways keep both, and a write the owner narrowed is not under Allow
+		const two = (reads: Setting, writes: Setting) => [of(read, reads), of(write, writes)];
+		expect(groupOffers(two("ask", "ask"))).toEqual(["allow", "ask", "always", "off"]);
+		expect(groupAt(two("allow", "ask"))).toBe("allow");
+		expect(groupAt(two("allow", "always"))).toBeUndefined();
+		expect(groupAt(two("ask", "always"))).toBe("always");
+		// writes alone are never offered Allow, nor is a tool nobody spoke for
+		expect(groupOffers([of(write, "ask")])).toEqual(["ask", "always", "off"]);
+		expect(groupOffers([of(unknown, "ask"), of(write, "ask")])).toEqual(["ask", "always", "off"]);
 	});
 
 	it("a property: no write or floor is ever offered Allow, and a setting a tool may take keeps it", () => {
@@ -577,9 +612,6 @@ describe("over versions, and on a server the owner added", () => {
 		expect((await s.tool("list_events"))?.classed).toEqual({ kind: "read", from: "server" });
 		expect((await s.tool("no_word"))?.classed).toEqual({ kind: "unknown", from: "nobody" });
 		const version = await s.version();
-		await expect(s.capabilities.setTools("cal", { list_events: "allow" }, version, context, true)).rejects.toThrow(
-			/group/,
-		);
 		await expect(s.capabilities.setTools("cal", { no_word: "allow" }, version, context, true)).rejects.toThrow(/group/);
 		// nothing landed, not even the setting the group could give
 		expect(await s.version()).toBe(version);
@@ -587,6 +619,9 @@ describe("over versions, and on a server the owner added", () => {
 		// the tool's own control still may
 		await s.capabilities.setTools("cal", { no_word: "allow" }, version);
 		expect((await s.tool("no_word"))?.classed).toEqual({ kind: "read", from: "you" });
+		// and a group's Allow takes the read the server proposed: it is the owner's now
+		await s.capabilities.setTools("cal", { list_events: "allow" }, await s.version(), context, true);
+		expect(await s.tool("list_events")).toMatchObject({ classed: { kind: "read", from: "you" }, setting: "allow" });
 	});
 });
 
