@@ -215,6 +215,9 @@ export type WatchSummary = {
 	looks: number;
 	commits: number;
 	models: number;
+	/** How many times the last process passed each fault point, and what each of its commits wrote, in order. */
+	reached: { [point: string]: number };
+	trace: readonly string[];
 };
 
 /** The watches on the pull request: Mara's, and, with `second`, Otto's on the same object as the same account. */
@@ -505,6 +508,8 @@ export async function watchScenario(
 			looks: faults.hits("watch:read"),
 			commits: faults.hits("commit:after"),
 			models: faults.hits("model"),
+			reached: faults.counts(),
+			trace: faults.commits(),
 		};
 	} finally {
 		await box.close();
