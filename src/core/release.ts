@@ -38,6 +38,7 @@ import {
 	proposeSendTool,
 	type Retain,
 	SendOutcome,
+	sameRequest,
 	TICKET_KEPT_MS,
 	Tickets,
 	webSocket,
@@ -436,9 +437,18 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 			| { kind: "release"; held: HeldRequest; label: string; target: Target; ask?: Ask }
 			| { kind: "notSent"; held: HeldRequest; reason: NotSent }
 		)[] = [];
-		let open = (await liveWaits(tx, chat)).filter(
+		const asks = (await liveWaits(tx, chat)).filter(
 			(wait) => wait.input.ask.type === "approval" && wait.input.ask.tool === tool?.name,
-		).length;
+		);
+		let open = asks.length;
+		// the chat's requests waiting on the owner: the stored bytes of each open ask nobody answered yet
+		const waiting: HeldRequest[] = [];
+		for (const wait of asks) {
+			const ticket = wait.input.ask.type === "approval" ? wait.input.ask.args._ticket : undefined;
+			const kept = typeof ticket === "string" ? doc.tickets[ticket] : undefined;
+			if (kept === undefined || kept.chat !== chat || kept.notSent !== undefined) continue;
+			if ((await tx.doc(Answers, wait.id as TaskId)).answer === undefined) waiting.push(kept);
+		}
 		// oldest first, as a release's id is its place in the chat's order; the proxy lists them by ticket
 		for (const one of [...fresh].sort((a, b) => a.at - b.at)) {
 			if (home.kind !== "active") {
@@ -449,6 +459,12 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 				prepared.push({ kind: "notSent", held: one, reason: "websocket" });
 				continue;
 			}
+			// one request has one card: held again while it waits on the owner (a command run again), it is not asked
+			// about again and never sent from this ticket, so one approval sends it once
+			if (waiting.some((other) => sameRequest(other, one))) {
+				prepared.push({ kind: "notSent", held: one, reason: "repeat" });
+				continue;
+			}
 			const draft = draftOf(tool, draftArgs(one));
 			const covered = source === "tool" && (await covering(tx, draft, chat, now)) !== undefined;
 			// a script that writes in a loop must not bury the owner in cards: the rest stay stored, and the agent is told
@@ -456,7 +472,10 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 				prepared.push({ kind: "notSent", held: one, reason: "limit" });
 				continue;
 			}
-			if (!covered) open += 1;
+			if (!covered) {
+				open += 1;
+				waiting.push(one);
+			}
 			const { permission: _permission, host: _host, ...once } = draft;
 			prepared.push({
 				kind: "release",
@@ -479,6 +498,7 @@ export function defineReleases<Target>(core: ReleaseCore<Target>) {
 				const why = {
 					websocket: "a WebSocket is a stream and cannot be replayed as one request",
 					limit: "too many requests already wait on the owner",
+					repeat: "the same request already waits on the owner",
 					missing: "its chat or agent no longer exists",
 					inactive: "its agent or group is no longer active",
 				}[one.reason];

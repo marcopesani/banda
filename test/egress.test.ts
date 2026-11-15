@@ -1591,7 +1591,7 @@ describe("a host the owner allowed", () => {
 			await until(() => done(harness, first.turn));
 			const socket = held(first.chat, { headers: [["Upgrade", "websocket"]] });
 			const requests = Array.from({ length: MAX_OPEN_ASKS + 1 }, (_, index) =>
-				held(first.chat, { at: socket.at + index + 1 }),
+				held(first.chat, { at: socket.at + index + 1, path: `/v1/issues/${index}/comments` }),
 			);
 			await harness.commit(async (tx) => {
 				(await tx.doc(Permissions)).permissions.standing = {
@@ -1642,7 +1642,7 @@ describe("a host the owner allowed", () => {
 				context,
 			);
 			for (const chat of [second.chat, first.chat]) {
-				s.proxy.pending.set(chat, [held(chat)]);
+				s.proxy.pending.set(chat, [held(chat, { path: "/v1/issues/43/comments" })]);
 				await intake(
 					s.holding,
 					intakeApi(harness, chat, () => at + TICKET_KEPT_MS + 1),
@@ -1762,6 +1762,198 @@ describe("a held write's release", () => {
 			await opened.close();
 		}
 	});
+
+	/** `request` as the proxy holds it when the box sends it again: the same bytes, another ticket. */
+	const again = (request: HeldRequest, over: Partial<HeldRequest> = {}): HeldRequest => ({
+		...request,
+		ticket: held(request.chat).ticket,
+		at: Date.now(),
+		...over,
+	});
+	/** Nothing of the chat's is on its way: no Turn runs, and `ticket`, if given, was told. */
+	const quiet = (harness: Harness, chat: number, ticket?: string) =>
+		until(async () => {
+			const graph = await harness.taskGraph(context);
+			try {
+				if (Object.values(graph.value.tasks).some((node) => node.kind === "banda.turn")) return false;
+			} finally {
+				graph.dispose();
+			}
+			return ticket === undefined || (await wakeUps(harness, chat)).flat().includes(ticket);
+		});
+
+	it("held again while it waits on the owner, the same request has one card and is sent once; any other is asked", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const first = await s.say(harness);
+			const original = held(first.chat);
+			s.proxy.pending.set(first.chat, [original]);
+			const { wait } = await nextAsk(harness, first.turn);
+			await until(turnOver(harness, first.turn));
+			// the command run again holds the same bytes under another ticket; beside it, requests that differ in one thing
+			const repeat = again(original);
+			const others = [
+				again(original, { body: Buffer.from('{"text":"ho"}').toString("base64") }),
+				again(original, { path: "/v1/issues/42/comments?x=2" }),
+				again(original, { headers: [...original.headers, ["Idempotency-Key", "2"]] }),
+				again(original, { headers: [...original.headers].reverse() }),
+				again(original, { method: "PUT" }),
+				again(original, { port: 8443 }),
+			];
+			s.proxy.pending.set(first.chat, [repeat, ...others]);
+			const second = await s.say(harness);
+			await until(turnOver(harness, second.turn));
+			expect(await asked(harness)).toEqual([original, ...others].map((one) => one.ticket).sort());
+			// its bytes are stored with how it ended before the proxy forgets it, as every ticket's are
+			expect((await harness.snapshot(Tickets, context))?.tickets[repeat.ticket]).toEqual({
+				...repeat,
+				kept: expect.any(Number),
+				notSent: "repeat",
+			});
+			expect(s.proxy.acked).toContain(repeat.ticket);
+			const said = (await results(harness, first.chat)).find((one) => one.includes(repeat.ticket));
+			expect(said).toContain(`(ticket ${repeat.ticket}). It is the same request as one of yours already waiting`);
+			expect(said?.match(/It is the same request/g)).toHaveLength(1);
+			expect((await harness.snapshot(ActivityLog, context))?.events.map((e) => e.what)).toContain(
+				`Did not send POST https://api.example.com/v1/issues/42/comments?x=1 (ticket ${repeat.ticket}): ` +
+					"the same request already waits on the owner",
+			);
+			// another chat's is its own request, with its own card
+			const other = await s.say(harness, "other");
+			const theirs = again(original, { chat: other.chat });
+			s.proxy.pending.set(other.chat, [theirs]);
+			await until(turnOver(harness, other.turn));
+			expect(await asked(harness)).toContain(theirs.ticket);
+			// approved, it is sent once, from the ticket the owner saw
+			await approve(harness, wait!.key);
+			await quiet(harness, first.chat, original.ticket);
+			expect(s.proxy.sent).toEqual([original]);
+			// once the owner answered, the same request held again is a new one
+			const later = again(original);
+			s.proxy.pending.set(first.chat, [later]);
+			const third = await s.say(harness);
+			await until(turnOver(harness, third.turn));
+			expect(await asked(harness)).toContain(later.ticket);
+			for (const open of await openWaits(harness)) await answer(harness, open.key, "deny", web, "bearer");
+			await until(() => done(harness, third.turn));
+			expect(s.proxy.sent).toEqual([original]);
+			// the agent is told of each request that was asked about, never of the repeat
+			const told = (await wakeUps(harness, first.chat)).flat();
+			expect(told.sort()).toEqual([original, ...others, later].map((one) => one.ticket).sort());
+		} finally {
+			await close();
+		}
+	});
+
+	it("one command that holds the same request several times opens one card; within a permission each is sent", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const first = await s.say(harness);
+			const original = held(first.chat);
+			const repeats = [again(original, { at: original.at + 1 }), again(original, { at: original.at + 2 })];
+			s.proxy.pending.set(first.chat, [original, ...repeats]);
+			await until(turnOver(harness, first.turn));
+			expect(await asked(harness)).toEqual([original.ticket]);
+			const [wait] = await openWaits(harness);
+			await approve(harness, wait!.key, { permission: { scope: "always" } });
+			await until(() => done(harness, first.turn));
+			expect(s.proxy.sent).toEqual([original]);
+			// the owner allowed the route: nothing waits on them, so each request a command makes there is sent
+			const twice = [again(original), again(original, { at: Date.now() + 1 })];
+			s.proxy.pending.set(first.chat, twice);
+			const second = await s.say(harness);
+			await until(() => done(harness, second.turn));
+			expect(await openWaits(harness)).toEqual([]);
+			expect(s.proxy.sent).toEqual([original, ...twice]);
+		} finally {
+			await close();
+		}
+	});
+
+	it("property: whatever is held again, by a command or recovered, an ACK lost or not, a request waiting on the owner has one card and one send", async () => {
+		const scenario = fc.array(
+			fc.record({
+				variant: fc.integer({ min: 0, max: 2 }),
+				via: fc.constantFrom("tool", "recovery"),
+				lostAck: fc.boolean(),
+				// what the owner answers the variant's open card with, before it is held again
+				answer: fc.constantFrom("approve", "deny", undefined),
+			}),
+			{ minLength: 2, maxLength: 6 },
+		);
+		await fc.assert(
+			fc.asyncProperty(scenario, async (steps) => {
+				const s = setup();
+				const { harness, close } = await s.open(await tempHome());
+				try {
+					const first = await s.say(harness);
+					await until(() => done(harness, first.turn));
+					const chat = first.chat;
+					const waiting = new Map<number, string>();
+					const approved: string[] = [];
+					const repeats: string[] = [];
+					const asks: string[] = [];
+					for (const step of steps) {
+						const open = waiting.get(step.variant);
+						if (open !== undefined && step.answer !== undefined) {
+							const wait = (await openWaits(harness)).find(
+								(w) => w.ask.type === "approval" && w.ask.args._ticket === open,
+							);
+							await answer(harness, wait!.key, step.answer, web, "bearer");
+							if (step.answer === "approve") approved.push(open);
+							waiting.delete(step.variant);
+							await quiet(harness, chat, open);
+						}
+						const request = held(chat, { body: Buffer.from(`variant ${step.variant}`).toString("base64") });
+						if (waiting.has(step.variant)) repeats.push(request.ticket);
+						else {
+							waiting.set(step.variant, request.ticket);
+							asks.push(request.ticket);
+						}
+						s.proxy.pending.set(chat, [...(s.proxy.pending.get(chat) ?? []), request]);
+						if (step.via === "tool") {
+							const ack = s.proxy.ack.bind(s.proxy);
+							// a kill between the commit and the ack: the proxy hands the same tickets over again, later
+							if (step.lostAck) s.proxy.ack = async () => {};
+							const turn = await s.say(harness);
+							await until(turnOver(harness, turn.turn));
+							s.proxy.ack = ack;
+						} else {
+							const sweep = sweepReceipts(s.holding, harness, Date.now, "recover", context, (point) => {
+								if (step.lostAck && point === "recovery:stored") throw new Error("lost ACK");
+							});
+							if (step.lostAck) await expect(sweep).rejects.toThrow("lost ACK");
+							else await sweep;
+						}
+						await quiet(harness, chat);
+						// one card for each request that waits on the owner, whatever was held again or taken again
+						expect(await asked(harness)).toEqual([...waiting.values()].sort());
+					}
+					const stored = (await harness.snapshot(Tickets, context))?.tickets ?? {};
+					expect(Object.keys(stored).sort()).toEqual([...asks, ...repeats].sort());
+					for (const ticket of repeats) expect(stored[ticket]?.notSent).toBe("repeat");
+					for (const ticket of asks) expect(stored[ticket]?.notSent).toBeUndefined();
+					for (const wait of await openWaits(harness)) await answer(harness, wait.key, "deny", web, "bearer");
+					await until(async () => {
+						const graph = await harness.taskGraph(context);
+						try {
+							return !Object.values(graph.value.tasks).some((n) => n.kind === RELEASE || n.kind === "banda.turn");
+						} finally {
+							graph.dispose();
+						}
+					});
+					// only what the owner approved left, once, from the ticket they saw; a repeat never leaves
+					expect(s.proxy.sent.map((h) => h.ticket).sort()).toEqual([...approved].sort());
+					expect((await wakeUps(harness, chat)).flat().sort()).toEqual([...asks].sort());
+				} finally {
+					await close();
+				}
+			}),
+			{ numRuns: pbtRuns(8) },
+		);
+	}, 180_000);
 
 	it("what the server answered cannot close the fence it is told in", async () => {
 		const s = setup();

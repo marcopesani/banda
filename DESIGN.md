@@ -902,7 +902,9 @@ long as it runs.
   request has no recorded original task, so it needs a once-only owner approval, without reusing or offering a
   permission. A WebSocket (a stream, which only an allowed
   host lets through), a request past the limit of open asks, or one whose chat or agent is no longer active is resolved
-  as not sent in activity. Approved, the proxy sends exactly the stored request,
+  as not sent in activity. So is a request held again while it waits on the owner: the same chat's, every byte the box
+  sent the same (method, address, headers, body), so one request has one card and one approval sends it once; once the
+  owner answered, the same request is a new one. Approved, the proxy sends exactly the stored request,
   once, and the agent is woken with how it ended, the response fenced as foreign data; how a send ended is stored in
   the commit that logs it, so a restart after it asks nothing again. The task doing this belongs to the chat, as the
   command that held the request has already ended. A chat's held requests that can go leave in the order they were

@@ -44,8 +44,6 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
   sends the held requests waiting for those hosts
 - [ ] Qualify the rebased routine-request recovery under CI faults at transfer, store commit, acknowledgement and send
   boundaries, including archive while waiting, archive during an admitted send and a kill before tool intake
-- [ ] A model that re-runs a held command opens a second card for the same request (a retried `git push`, a POST):
-  intake could find a live release of the same request hash and open none
 - [ ] A group member's hidden chat is woken with how its held requests ended straight in that chat, outside its group
   turn, so its reply never reaches the room
 - [ ] A release parked by the restart limit while it waits its turn holds up the younger ones of its chat; `revive()`
