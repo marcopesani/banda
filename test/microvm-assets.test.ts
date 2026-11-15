@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	archiveImageDigest,
 	microvmTarget,
+	publishedBrowser,
 	stageMicrovmBundle,
 	verifiedMicrovmImages,
 } from "../scripts/microvm-bundle.ts";
@@ -268,4 +269,86 @@ describe("installed computer assets", () => {
 			else await expect(readMicrovmAssets(root, target)).rejects.toThrow(/manifest/);
 		},
 	);
+});
+
+describe("a browser a release published", () => {
+	/** A browser archive tagged `ref`, served at a release's address; what is fetched is counted. */
+	async function published(ref: string) {
+		const root = await mkdtemp(join(tmpdir(), "banda-published-browser-"));
+		homes.push(root);
+		const context = join(root, "export");
+		await mkdir(context);
+		const config = JSON.stringify({ architecture: "arm64", os: "linux" });
+		await writeFile(join(context, `${sum(config)}.json`), config);
+		await writeFile(
+			join(context, "manifest.json"),
+			JSON.stringify([{ Config: `${sum(config)}.json`, RepoTags: [ref] }]),
+		);
+		const tar = join(root, "served.tar");
+		execFileSync("tar", ["-cf", tar, "-C", context, "manifest.json", `${sum(config)}.json`]);
+		const bytes = execFileSync("cat", [tar]);
+		const sha256 = await fileSha256(tar);
+		const url = `https://github.com/purrgrammer/banda/releases/download/v0.1.0-test/banda-browser-${sha256}.tar`;
+		let fetched = 0;
+		vi.stubGlobal("fetch", async () => {
+			fetched++;
+			return new Response(bytes);
+		});
+		const out = join(root, "out");
+		await mkdir(out);
+		return {
+			out,
+			sha256,
+			digest: `sha256:${sum(config)}`,
+			pins: { arm64: { url, sha256, bytes: bytes.length } },
+			fetched: () => fetched,
+		};
+	}
+	const tag = `banda-browser:${"c".repeat(12)}`;
+
+	it("is used while the browser's sources are the ones it was built from, and fetched once", async () => {
+		const at = await published(tag);
+		const reused = await publishedBrowser(at.out, "arm64", tag, at.pins);
+		expect(reused).toEqual({
+			archive: `banda-browser-${at.sha256}.tar`,
+			sha256: at.sha256,
+			ref: tag,
+			digest: at.digest,
+			bytes: at.pins.arm64.bytes,
+		});
+		await publishedBrowser(at.out, "arm64", tag, at.pins);
+		expect(at.fetched()).toBe(1);
+		vi.unstubAllGlobals();
+	});
+
+	it("is not used once the sources changed, and is not left behind", async () => {
+		const at = await published(tag);
+		await expect(
+			publishedBrowser(at.out, "arm64", `banda-browser:${"d".repeat(12)}`, at.pins),
+		).resolves.toBeUndefined();
+		await expect(stat(join(at.out, `banda-browser-${at.sha256}.tar`))).rejects.toThrow();
+		vi.unstubAllGlobals();
+	});
+
+	it("is none for a CPU nothing was published for, and refuses bytes that are not the ones named", async () => {
+		const at = await published(tag);
+		await expect(publishedBrowser(at.out, "x64", tag, at.pins)).resolves.toBeUndefined();
+		const wrong = { arm64: { ...at.pins.arm64, sha256: "0".repeat(64) } };
+		await expect(publishedBrowser(at.out, "arm64", tag, wrong)).rejects.toThrow(/SHA-256/);
+		vi.unstubAllGlobals();
+	});
+
+	it("names, for each CPU, an archive of a banda release", async () => {
+		const pins: { [arch: string]: { url: string; sha256: string } } = JSON.parse(
+			await import("node:fs/promises").then((fs) =>
+				fs.readFile(new URL("../scripts/browser-images.json", import.meta.url), "utf8"),
+			),
+		);
+		for (const pin of Object.values(pins))
+			expect(pin.url).toMatch(
+				new RegExp(
+					`^https://github\\.com/purrgrammer/banda/releases/download/v[^/]+/banda-browser-${pin.sha256}\\.tar$`,
+				),
+			);
+	});
 });

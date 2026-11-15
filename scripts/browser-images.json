@@ -1,0 +1,12 @@
+{
+	"arm64": {
+		"url": "https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.18/banda-browser-cd373447d97bd9dfe3873fea6c537d4d4dff9424cd9a6cab8aceb42ecb23a9d0.tar",
+		"sha256": "cd373447d97bd9dfe3873fea6c537d4d4dff9424cd9a6cab8aceb42ecb23a9d0",
+		"bytes": 965805568
+	},
+	"x64": {
+		"url": "https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.18/banda-browser-4f7a33e0194f0a6f14287d0e30bffa0668f105a145aa7c76742787c2639dc19b.tar",
+		"sha256": "4f7a33e0194f0a6f14287d0e30bffa0668f105a145aa7c76742787c2639dc19b",
+		"bytes": 408393728
+	}
+}

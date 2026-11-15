@@ -1,6 +1,7 @@
 /** Build-time preparation only. Installed banda neither needs Docker nor downloads runtime artifacts. */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -72,6 +73,51 @@ async function downloaded(path: string, url: string, sha256: string): Promise<vo
 	await rename(temporary, path);
 }
 
+/** The browser a release published, by CPU: reused while the browser's sources are the ones it was built from. */
+const PublishedBrowser = Type.Object(
+	{
+		url: Type.String(),
+		sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+		bytes: Type.Integer({ minimum: 1 }),
+	},
+	{ additionalProperties: false },
+);
+const PublishedBrowsers = Type.Partial(Type.Object({ arm64: PublishedBrowser, x64: PublishedBrowser }));
+
+/**
+ * The browser `scripts/browser-images.json` names for `arch`, when it is an image of the browser's current sources
+ * (`tag`): downloaded once and checked against its SHA-256, so every release and every local build carries the same
+ * bytes, and a computer that has it keeps it across an upgrade instead of downloading it again. Each release still
+ * publishes the archive under its own version, so its manifest's URL is its own.
+ * The browser's image is not reproducible: built again from the same sources it differs, and its digest with it.
+ * Undefined when nothing is named for `arch`, or what is named was built from other sources (the sources changed
+ * since): the caller builds a new one, and the file is pointed at it once a release has published it.
+ */
+export async function publishedBrowser(
+	out: string,
+	arch: "arm64" | "x64",
+	tag: string,
+	named: unknown = JSON.parse(readFileSync(new URL("browser-images.json", import.meta.url), "utf8")),
+): Promise<MicrovmImages["browser"] | undefined> {
+	if (!Value.Check(PublishedBrowsers, named)) throw new Error("scripts/browser-images.json is invalid.");
+	const pinned = named[arch];
+	if (pinned === undefined) return undefined;
+	const archive = `banda-browser-${pinned.sha256}.tar`;
+	const path = join(out, archive);
+	await downloaded(path, pinned.url, pinned.sha256);
+	let digest: string;
+	try {
+		digest = archiveImageDigest(path, tag, arch);
+	} catch {
+		await rm(path, { force: true });
+		console.log(`The published browser (${pinned.url}) was built from other sources than ${tag}: building a new one.`);
+		return undefined;
+	}
+	const bytes = (await stat(path)).size;
+	if (bytes !== pinned.bytes) throw new Error(`${pinned.url}: ${bytes} bytes, not ${pinned.bytes}`);
+	return { archive, sha256: pinned.sha256, ref: tag, digest, bytes };
+}
+
 /** Runs on a Linux ARM64 builder in CI, or a development Docker engine at explicit packaging time. */
 export async function buildMicrovmImages({ out, arch }: { out: string; arch: "arm64" | "x64" }): Promise<void> {
 	await mkdir(out, { recursive: true });
@@ -117,7 +163,8 @@ export async function buildMicrovmImages({ out, arch }: { out: string; arch: "ar
 	};
 	const box = await build(find(boot, "banda-box:"), "box");
 	const proxy = await build(find(boot, "banda-proxy:"), "proxy");
-	const browser = await build(find(browserSpecs, "banda-browser:"), "browser");
+	const browserSpec = find(browserSpecs, "banda-browser:");
+	const browser = (await publishedBrowser(out, arch, browserSpec.tag)) ?? (await build(browserSpec, "browser"));
 	const local = (archive: "box.tar" | "proxy.tar", data: typeof box) => ({
 		archive,
 		sha256: data.sha256,
