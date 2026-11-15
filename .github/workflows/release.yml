@@ -227,6 +227,7 @@ jobs:
           if-no-files-found: ignore
       - run: npm --prefix desktop ci
       - run: npm --prefix desktop run dist
+        id: desktop_package
         env:
           # unsigned pre-release: never pick up a certificate from the runner's keychain
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -243,6 +244,22 @@ jobs:
           name: linux-package-dependencies-${{ matrix.target }}
           path: ${{ runner.temp }}/linux-package-dependencies
           if-no-files-found: ignore
+      - name: Diagnose the installed Linux shell
+        if: always() && inputs.native_computer && matrix.target == 'linux-x64' && steps.desktop_package.outcome == 'success'
+        run: |
+          packages=("$GITHUB_WORKSPACE"/release/desktop/banda-*-linux-amd64.deb)
+          test "${#packages[@]}" -eq 1
+          test -f "${packages[0]}"
+          node scripts/diagnose-linux-desktop.ts "${packages[0]}" "$RUNNER_TEMP/linux-desktop-shell"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && inputs.native_computer && matrix.target == 'linux-x64'
+        with:
+          name: linux-desktop-shell-${{ matrix.target }}
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/linux-desktop-shell/*.json
+            ${{ runner.temp }}/linux-desktop-shell/*.png
+            ${{ runner.temp }}/linux-desktop-shell/home/.banda/daemon.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: banda-${{ matrix.target }}
