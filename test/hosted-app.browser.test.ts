@@ -342,11 +342,14 @@ const DECODERS = {
 for (const [decoder, detector] of Object.entries(DECODERS))
 	it.skipIf(!hasChrome())(
 		`a phone's browser scans the code the computer shows, read by ${decoder}`,
-		async () => {
+		async ({ skip }) => {
 			const { owner, invite, computer, server, close } = await start();
 			try {
 				await withPage(`${server.origin}/`, { width: 390, height: 844 }, async (page) => {
 					await page.until(button("Scan the code"));
+					// Chrome on Linux ships no detector: there the page's own decoder is all a browser has, as the next
+					// cases show; this one is for the browsers that bring theirs (a Mac's, a phone's)
+					if (detector === undefined && (await page.run(`typeof BarcodeDetector`)) === "undefined") return skip();
 					// the code Settings shows by default, the one the phone's app reads: a page that scans reads it too
 					await page.run(camera(invite.pairing));
 					if (detector !== undefined)
