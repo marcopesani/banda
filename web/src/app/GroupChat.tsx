@@ -131,8 +131,9 @@ export function GroupChat({
 		undefined,
 		delegated,
 	);
-	// the working line: who works and has shown nothing yet. A reaction alone draws nothing, so it is not something shown
-	const onLine = workingMembers(
+	// the working line: who works, and whether each has shown anything since. A reaction alone draws nothing, so it is
+	// not something shown
+	const atWork = workingMembers(
 		since.current,
 		group && {
 			latest: group.latest,
@@ -150,7 +151,8 @@ export function GroupChat({
 		},
 		working.flatMap((member) => (member.id === undefined ? [] : [member.id])),
 		latest,
-	).map((id) => ({ ...whoOf(known, id), id }));
+	);
+	const onLine = atWork.map(({ member }) => ({ ...whoOf(known, member), id: member }));
 	const lineTargets = onLine.flatMap((member) => {
 		const chat = executions[member.id];
 		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
@@ -344,6 +346,7 @@ export function GroupChat({
 						))}
 						<WorkingLine
 							who={onLine}
+							quiet={atWork.every((each) => each.shown)}
 							onOpen={
 								lineTargets.length === 0
 									? undefined

@@ -1,10 +1,13 @@
 /**
- * The working line: at the foot of the feed, the faces of the agents at work that have shown nothing yet, side by
- * side, and "Working…" beside them. It goes as soon as what they do shows in the feed. A tap opens their activity.
+ * The working line: at the foot of the feed, the faces of the agents at work, side by side, for as long as they work.
+ * "Working…" stands beside them until what they do shows in the feed; from then on the line is quiet, the faces
+ * alone, since what they showed says the rest. Where the owner asked for less motion a still face says nothing, so
+ * the words stay, still too. A tap opens their activity.
  */
 import { useRef } from "react";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
+import { cn } from "@/lib/cn";
 import { Face } from "./Face.tsx";
 import type { Who } from "./Row.tsx";
 
@@ -19,10 +22,13 @@ export function workingLabel(names: readonly string[]): string {
 
 export function WorkingLine({
 	who,
+	quiet = false,
 	onOpen,
 }: {
 	/** The agents at work, in the order they started. */
 	who: readonly Who[];
+	/** Every one of them has shown something since its work began: the faces alone. */
+	quiet?: boolean;
 	/** A tap opens their activity; the line is handed over, for focus to come back to. */
 	onOpen?: ((line: HTMLElement) => void) | undefined;
 }) {
@@ -41,14 +47,21 @@ export function WorkingLine({
 				))}
 				{more > 0 ? <AvatarGroupCount className="size-7 text-meta">+{more}</AvatarGroupCount> : null}
 			</AvatarGroup>
-			<Shimmer as="span" duration={2.4} className="text-meta">
+			{/* quiet, the moving faces say it; with less motion they are still, and the words say it instead */}
+			<Shimmer as="span" duration={2.4} className={cn("text-meta", quiet && "motion-safe:hidden")}>
 				Working…
 			</Shimmer>
 		</>
 	);
 	return (
 		// the line itself takes focus back when the sheet it opened closes
-		<div ref={line} tabIndex={-1} data-working-line="" className="flex rounded-full outline-none">
+		<div
+			ref={line}
+			tabIndex={-1}
+			data-working-line=""
+			data-quiet={quiet ? "" : undefined}
+			className="flex rounded-full outline-none"
+		>
 			{onOpen === undefined ? (
 				<div role="status" aria-label={label} className="flex items-center gap-2">
 					{content}

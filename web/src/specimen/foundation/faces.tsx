@@ -35,11 +35,15 @@ export function Faces() {
 					</span>
 				))}
 			</Group>
-			<Group label="States: idle · working · happy · waiting on you · routines paused" className="gap-6">
+			<Group
+				label="States: idle · working · happy · waiting on you · working with something waiting on you · routines paused"
+				className="gap-6"
+			>
 				<Face {...MARA} />
 				<Face {...MARA} state="working" />
 				<Face {...MARA} state="happy" />
 				<Face {...MARA} state="waiting" />
+				<Face {...MARA} state="working" waiting />
 				<Face {...MARA} paused />
 			</Group>
 			<Group label="The same at panel size" className="gap-6">

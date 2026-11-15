@@ -84,14 +84,9 @@ export function bandRows(
 						const change = waiting.find((each) => each.agent === agent.id);
 						return change === undefined ? {} : { ask: change.words };
 					})()),
-			state:
-				delegated.waiting || stateOf(main) === "waiting"
-					? "waiting"
-					: stateOf(main) === "working"
-						? "working"
-						: delegated.sessions.length > 0
-							? "working"
-							: stateOf(main),
+			// the face says what the agent's own turn does: a coding session at work is not the agent thinking, and one
+			// that asks waits on the owner beside whatever the agent does (the row's ask says so)
+			state: stateOf(main) === "working" ? "working" : delegated.waiting ? "waiting" : stateOf(main),
 			paused,
 		};
 	});

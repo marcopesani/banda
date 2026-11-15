@@ -20,6 +20,7 @@ export function Face({
 	name,
 	size = "row",
 	state = "idle",
+	waiting = false,
 	paused = false,
 	className,
 }: {
@@ -27,13 +28,17 @@ export function Face({
 	name: string;
 	size?: FaceSize;
 	state?: FaceState;
+	/** Something of its waits on the owner, whatever its state says: a face at work keeps moving, and carries the dot. */
+	waiting?: boolean;
 	paused?: boolean;
 	className?: string;
 }) {
 	const text = size === "text";
+	const asks = waiting || state === "waiting";
 	const words = [
 		name,
-		state === "working" ? "working" : state === "waiting" ? "waiting on you" : "",
+		state === "working" ? "working" : "",
+		asks ? "waiting on you" : "",
 		paused ? "routines paused" : "",
 	]
 		.filter(Boolean)
@@ -61,7 +66,7 @@ export function Face({
 					mood={moodOf(state)}
 				/>
 			</span>
-			{state === "waiting" && (
+			{asks && (
 				<span aria-hidden="true" className="absolute right-0 bottom-0 size-2 rounded-full bg-ink ring-2 ring-paper" />
 			)}
 		</span>

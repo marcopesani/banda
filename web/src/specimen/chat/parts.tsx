@@ -629,7 +629,7 @@ export function Parts() {
 			</Section>
 			<Section
 				id="working"
-				note="At the foot of the feed while agents work and have shown nothing yet: their faces and Working…, gone at the first thing they show. A tap opens the activity. The header says nothing of the work."
+				note="At the foot of the feed for as long as agents work: their faces and Working… until they show something, their faces alone from then on (with less motion the words stay, still). A tap opens the activity. The header says nothing of the work."
 			>
 				<Group label="A chat with one agent">
 					<div className="flex max-w-xl flex-col gap-3">
@@ -637,6 +637,17 @@ export function Parts() {
 							<Bubble mine>Which train should I take to Madrid on Saturday?</Bubble>
 						</Run>
 						<WorkingLine who={[OCTO]} onOpen={() => {}} />
+					</div>
+				</Group>
+				<Group label="Quiet: it said something and works on">
+					<div className="flex max-w-xl flex-col gap-3">
+						<Run time="10:41">
+							<Bubble mine>Which train should I take to Madrid on Saturday?</Bubble>
+						</Run>
+						<Run who={OCTO} compact time="10:42">
+							<Bubble>The 9:15 is direct. Checking the way back.</Bubble>
+						</Run>
+						<WorkingLine who={[OCTO]} quiet onOpen={() => {}} />
 					</div>
 				</Group>
 				<Group label="A group: one member at work">
@@ -650,6 +661,9 @@ export function Parts() {
 				</Group>
 				<Group label="Five members: three faces and a count">
 					<WorkingLine who={[MARA, SANCHO, OCTO, ATLAS, OTTO]} onOpen={() => {}} />
+				</Group>
+				<Group label="A group, quiet: every member at work has said something">
+					<WorkingLine who={[MARA, SANCHO]} quiet onOpen={() => {}} />
 				</Group>
 				<Group label="At phone width">
 					<div className="flex w-full max-w-[390px] flex-col gap-3 rounded-card border border-line-soft bg-paper p-4">

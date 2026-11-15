@@ -295,9 +295,74 @@ describe("the chat, derived", () => {
 		expect(line({ busy: true, running: [], thinking: false })).toMatchObject({ text: "working…" });
 		expect(line(IDLE)).toBeUndefined();
 		const ask = { type: "question" as const, question: "?" };
+		// the run's one call asks: it waits on the owner
 		expect(
-			line({ busy: true, running: [], thinking: false }, [{ key: "k", chat: 1, ask, deadline: 1 }]),
+			line({ busy: true, running: [{ call: "q" }], thinking: false }, [
+				{ key: "k", chat: 1, call: "q", ask, deadline: 1 },
+			]),
 		).toBeUndefined();
+		// so does an ask whose call the page has not heard of yet
+		expect(
+			line({ busy: true, running: [], thinking: false }, [{ key: "k", chat: 1, call: "q", ask, deadline: 1 }]),
+		).toBeUndefined();
+	});
+
+	it("the working line beside an open ask: work the ask does not hold back is said, and the ask stays to answer", () => {
+		const approval = { type: "approval" as const, tool: "send_email", args: {}, label: "send an email" };
+		const working = (items: Item[], live: Live, waits: ShownWait[]) =>
+			view(items, waits, live).find((s) => s.kind === "working");
+		const asks = (items: Item[], live: Live, waits: ShownWait[]) =>
+			view(items, waits, live).filter((s) => s.kind === "approval" && s.open !== undefined).length;
+		// one request made two calls: one asks, the other is at work
+		const round: Item[] = [
+			user(1, "send it, and run the tests"),
+			{
+				id: 2,
+				role: "assistant",
+				text: "",
+				calls: [
+					{ id: "send", name: "send_email", args: {} },
+					{ id: "sh", name: "bash", args: { command: "npm test" } },
+				],
+			},
+		];
+		const beside: Live = {
+			busy: true,
+			running: [{ call: "send" }, { call: "sh", doing: "running a command" }],
+			thinking: false,
+		};
+		const own: ShownWait = { key: "k1", chat: 1, call: "send", ask: approval, deadline: 1 };
+		expect(working(round, beside, [own])).toMatchObject({ text: "running a command…" });
+		expect(asks(round, beside, [own])).toBe(1);
+		// the call at work ended: only the ask is left, and the run waits on the owner
+		expect(working(round, { ...beside, running: [{ call: "send" }] }, [own])).toBeUndefined();
+		expect(asks(round, { ...beside, running: [{ call: "send" }] }, [own])).toBe(1);
+		// a call of an earlier request still listed as running is one whose end the page has not heard yet: no work
+		const earlier: Item[] = [
+			user(1, "send it"),
+			{ id: 2, role: "assistant", text: "", calls: [{ id: "find", name: "tool_search", args: {} }] },
+			{ id: 3, role: "assistant", text: "", calls: [{ id: "send", name: "send_email", args: {} }] },
+		];
+		const stale: Live = {
+			busy: true,
+			running: [{ call: "find", doing: "finding a tool" }, { call: "send" }],
+			thinking: false,
+		};
+		expect(working(earlier, stale, [own])).toBeUndefined();
+		// nor is anything, while the request that asked is not read yet
+		expect(working([], beside, [own])).toBeUndefined();
+		// an ask no call of this run opened (a held request's) holds none of its work back
+		const held: ShownWait = { key: "k2", chat: 1, ask: approval, deadline: 1 };
+		expect(working([], { busy: true, running: [], thinking: true }, [held])).toMatchObject({ text: "thinking…" });
+		expect(asks([], { busy: true, running: [], thinking: true }, [held])).toBe(1);
+		// nor does a routine's run's, shown here: its call is another conversation's
+		const routine: ShownWait = { key: "k3", chat: 9, displayChat: 1, call: "send", ask: approval, deadline: 1 };
+		const command: Live = { busy: true, running: [{ call: "sh", doing: "running a command" }], thinking: false };
+		expect(working([], command, [routine])).toMatchObject({ text: "running a command…" });
+		// and with nothing running here, an open ask alone says nothing of work
+		expect(working([], IDLE, [held])).toBeUndefined();
+		expect(working([], IDLE, [routine])).toBeUndefined();
+		expect(asks([], IDLE, [routine])).toBe(1);
 	});
 
 	it("the owner's queued messages come last; one the transcript already holds shows once, as its entry", () => {
