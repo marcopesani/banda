@@ -4,6 +4,7 @@
  * SHA-256. Nothing here fetches or writes; scripts/release-sources.ts collects, and both it and the publish job verify
  * through `verifyReleaseMaterials`.
  */
+import { createHash } from "node:crypto";
 import { type Static, Type } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { MICROVM_SOURCE } from "../src/box/microvm-assets.ts";
@@ -17,6 +18,29 @@ export const FIRMWARE_SOURCE = {
 		version: "linux-6.12.115",
 		url: "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.115.tar.gz",
 		sha256: "2ec6ffc2120e6892ec6cb94142aafe218054eee5ebc6b5283deda2e74bae22df",
+	},
+} as const;
+
+/**
+ * The Electron the desktop app is built on (desktop/package.json pins the same version), and the FFmpeg inside it.
+ * Electron ships FFmpeg as a shared library of its own, under the LGPL, so its source is part of a release's set:
+ * Chromium's fork at the commit the DEPS file of Electron's Chromium names, with the patches in Electron's own tree
+ * (`patches/ffmpeg`). Chromium's host serves no archive with stable bytes, so that one is pinned by a digest of its
+ * members (`treeSha256`).
+ */
+export const ELECTRON_SOURCE = {
+	version: "45.2.3",
+	commit: "d0a18d02058b21ff292e25d5f53f00bd120f2f61",
+	archiveSha256: "ad1d01af65c3596f8751091bb7a02c03c90a379cb4106229ef2c0003921dfdb1",
+	chromium: {
+		version: "156.0.8078.80",
+		depsUrl: "https://chromium.googlesource.com/chromium/src/+/refs/tags/156.0.8078.80/DEPS?format=TEXT",
+		depsSha256: "c4d60cae7b46d4ae476e3409226d89bf72c1fd61e1d97d64027ebae4356f23ae",
+	},
+	ffmpeg: {
+		commit: "9db86ce5b5b454dfc96c435f9f0723012980c37f",
+		url: "https://chromium.googlesource.com/chromium/third_party/ffmpeg/+archive/9db86ce5b5b454dfc96c435f9f0723012980c37f.tar.gz",
+		treeSha256: "cb648af4bc1ee57bc26a60016d8f9ff7a8c1a3ad26e25b7a71b166165bea2d46",
 	},
 } as const;
 
@@ -40,7 +64,8 @@ export const LIMITS = [
 	"Python source archives are checked against the SHA-256 PyPI's index gives. PyPI's attestations are not verified.",
 	"Rust crates are the registry packages of the pinned Cargo.lock, checked against its checksums. The lock names more packages than the build compiles.",
 	"The firmware binary comes from Microsandbox's release archive, pinned by hash. Its source, patches, configuration and the kernel it names are included; building them is not shown to reproduce the binary.",
-	"Not included: source for CPython in the proxy image, for pi-env and for the guest agent's C library; the Rust toolchain and the manylinux build image, which the installed manifest identifies by hash; source for Node.js, Electron and Chromium, whose license files ship inside the application.",
+	"Not included: source for CPython in the proxy image, for pi-env and for the guest agent's C library; the Rust toolchain and the manylinux build image, which the installed manifest identifies by hash; source for Node.js and Chromium, whose license files ship inside the application.",
+	"The FFmpeg library in the desktop packages is Electron's own build. Its source here is Chromium's fork at the commit the DEPS file of Electron's Chromium names, beside Electron's source, whose patches/ffmpeg Electron applies to it. Building it needs Chromium's build system, which is not included, and is not shown to reproduce the library. Chromium's host serves no archive with stable bytes, so this one is checked by a digest of its members.",
 	"Packages statically linked into a Debian binary package are covered only when the image's package database names their source.",
 	"Each computer's manifest is read from its command-line archive. The desktop packages are built in the same job from the same staged files and are bound here by their own SHA-256; their contents are not opened.",
 ] as const;
@@ -82,6 +107,8 @@ const Source = Type.Object(
 			Type.Literal("runtime-patch"),
 			Type.Literal("firmware"),
 			Type.Literal("kernel"),
+			Type.Literal("electron"),
+			Type.Literal("ffmpeg"),
 			Type.Literal("crate"),
 			Type.Literal("debian"),
 			Type.Literal("python"),
@@ -149,6 +176,26 @@ export const shardName = (version: string, index: number) =>
 	`banda-${version}-sources-${String(index + 1).padStart(2, "0")}.tar`;
 export const noticesName = (version: string) => `banda-${version}-notices.tar`;
 export const INSTRUCTIONS_FILE = "RELEASE-SOURCES.md";
+export const FFMPEG_MATERIAL = `materials/native/ffmpeg-${ELECTRON_SOURCE.ffmpeg.commit}.tar.gz`;
+
+/** Whether a file at a package's top level is a license or notice text, by its name. */
+export const noticeFile = (name: string) => /^(?:LICEN[CS]E|COPYING|COPYRIGHT|NOTICE|UNLICEN[CS]E|PATENTS)/i.test(name);
+
+/** The Chromium version an Electron source tree's DEPS file builds on. */
+export function electronChromium(deps: string): string {
+	const version = /'chromium_version':\s*'([0-9]+(?:\.[0-9]+){3})'/.exec(deps)?.[1];
+	if (version === undefined) throw new Error("Electron's DEPS names no Chromium version.");
+	return version;
+}
+
+/** The commit of its FFmpeg fork a Chromium DEPS file checks out. */
+export function chromiumFfmpeg(deps: string): string {
+	const revision = /'ffmpeg_revision':\s*'([a-f0-9]{40})'/.exec(deps)?.[1];
+	const checkout =
+		/'src\/third_party\/ffmpeg':\s*Var\('chromium_git'\) \+ '\/chromium\/third_party\/ffmpeg\.git' \+ '@' \+ Var\('ffmpeg_revision'\)/;
+	if (revision === undefined || !checkout.test(deps)) throw new Error("Chromium's DEPS names no FFmpeg revision.");
+	return revision;
+}
 
 /** The downloads that carry a computer, so each needs its sources bound: by release file name. */
 export function downloadKind(
@@ -258,6 +305,11 @@ export function verifyReleaseMaterials(value: unknown, files: ReadonlyMap<string
 	pinned("microsandbox", MICROVM_SOURCE.archiveSha256);
 	pinned("firmware", FIRMWARE_SOURCE.archiveSha256);
 	pinned("kernel", FIRMWARE_SOURCE.kernel.sha256);
+	pinned("electron", ELECTRON_SOURCE.archiveSha256);
+	const ffmpeg = value.sources.filter((source) => source.kind === "ffmpeg");
+	if (ffmpeg.length !== 1 || ffmpeg[0]?.version !== ELECTRON_SOURCE.ffmpeg.commit)
+		problems.push("The index must name exactly one ffmpeg source, at the commit Electron's Chromium pins.");
+	else if (!ffmpeg[0].files.includes(FFMPEG_MATERIAL)) problems.push(`The ffmpeg source lacks ${FFMPEG_MATERIAL}.`);
 	if (value.sources.filter((source) => source.kind === "application").length !== 1)
 		problems.push("The index must name exactly one application source.");
 	const patches = new Set(
@@ -594,4 +646,22 @@ export async function* tarEntries(stream: AsyncIterable<Buffer> | Iterable<Buffe
 		};
 		next = {};
 	}
+}
+
+/**
+ * A digest of a tar stream's regular files, by path and content, whatever the order, times and modes its host wrote.
+ * A member that is neither a file nor a folder is refused, so nothing in the archive goes unread.
+ */
+export async function treeSha256(stream: AsyncIterable<Buffer> | Iterable<Buffer>): Promise<string> {
+	const lines: string[] = [];
+	for await (const entry of tarEntries(stream)) {
+		if (entry.type === "directory") continue;
+		if (entry.type !== "file") throw new Error(`${entry.path} is not a regular file.`);
+		const digest = createHash("sha256")
+			.update(await entry.bytes())
+			.digest("hex");
+		lines.push(`${digest}  ${entry.path}\n`);
+	}
+	if (lines.length === 0) throw new Error("The archive holds no file.");
+	return createHash("sha256").update(lines.sort().join("")).digest("hex");
 }

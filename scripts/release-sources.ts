@@ -35,10 +35,14 @@ import {
 	readMicrovmAssets,
 } from "../src/box/microvm-assets.ts";
 import {
+	chromiumFfmpeg,
 	debianFolder,
 	downloadKind,
 	dpkgPackages,
 	dscFiles,
+	ELECTRON_SOURCE,
+	electronChromium,
+	FFMPEG_MATERIAL,
 	FIRMWARE_SOURCE,
 	type FileIdentity,
 	type ImageInventory,
@@ -47,6 +51,7 @@ import {
 	LIMITS,
 	lockCrates,
 	type MaterialSource,
+	noticeFile,
 	noticesName,
 	PYTHON_UPSTREAM_SOURCES,
 	planShards,
@@ -57,10 +62,11 @@ import {
 	tarEntries,
 	tarHeader,
 	tarPadding,
+	treeSha256,
 	verifyReleaseMaterials,
 } from "./release-materials.ts";
 
-type Expected = { sha256: string; bytes?: number } | { sha1: string; bytes: number };
+type Expected = { sha256: string; bytes?: number } | { sha1: string; bytes: number } | { tree: string };
 type Member = { path: string; bytes: number; sha256: string; file: string };
 
 async function identity(path: string): Promise<FileIdentity & { sha1: string }> {
@@ -75,16 +81,26 @@ async function identity(path: string): Promise<FileIdentity & { sha1: string }> 
 	return { bytes, sha256: sha256.digest("hex"), sha1: sha1.digest("hex") };
 }
 
-function matches(actual: FileIdentity & { sha1: string }, expected: Expected): boolean {
+/** Whether a file is the expected one: by its bytes, or, for a gzipped tar no host serves twice alike, by its members. */
+async function matches(path: string, expected: Expected): Promise<boolean> {
+	if ("tree" in expected)
+		return (await treeSha256(createReadStream(path).pipe(createGunzip())).catch(() => "")) === expected.tree;
+	const actual = await identity(path);
 	if (expected.bytes !== undefined && actual.bytes !== expected.bytes) return false;
 	return "sha256" in expected ? actual.sha256 === expected.sha256 : actual.sha1 === expected.sha1;
 }
 
 /** A file under `cache`, fetched from the first address that serves the expected bytes; never an unchecked file. */
-async function fetched(cache: string, key: string, urls: readonly string[], expected: Expected): Promise<string> {
+export async function fetched(
+	cache: string,
+	key: string,
+	urls: readonly string[],
+	expected: Expected,
+	decode?: (served: Buffer) => Buffer,
+): Promise<string> {
 	const path = join(cache, key);
 	if (await stat(path).catch(() => undefined)) {
-		if (matches(await identity(path), expected)) return path;
+		if (await matches(path, expected)) return path;
 		await rm(path);
 	}
 	await mkdir(dirname(path), { recursive: true });
@@ -95,8 +111,9 @@ async function fetched(cache: string, key: string, urls: readonly string[], expe
 			try {
 				const response = await fetch(url, { signal: AbortSignal.timeout(30 * 60_000) });
 				if (!response.ok || response.body === null) throw new Error(`HTTP ${response.status}`);
-				await pipeline(Readable.fromWeb(response.body), createWriteStream(partial));
-				if (!matches(await identity(partial), expected)) throw new Error("the bytes differ from the expected hash");
+				if (decode === undefined) await pipeline(Readable.fromWeb(response.body), createWriteStream(partial));
+				else await writeFile(partial, decode(Buffer.from(await response.arrayBuffer())));
+				if (!(await matches(partial, expected))) throw new Error("the bytes differ from the expected hash");
 				await rename(partial, path);
 				return path;
 			} catch (error) {
@@ -128,7 +145,7 @@ async function upstreamIndex<T extends TSchema>(url: string, schema: T): Promise
 	throw new Error(`${url}: ${failure}`);
 }
 
-async function each<T>(items: readonly T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
+export async function each<T>(items: readonly T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
 	let next = 0;
 	const worker = async () => {
 		for (let item = items[next++]; item !== undefined; item = items[next++]) await work(item);
@@ -136,7 +153,7 @@ async function each<T>(items: readonly T[], limit: number, work: (item: T) => Pr
 	await Promise.all(Array.from({ length: limit }, worker));
 }
 
-type ImageFile = { kind: "file"; data: Buffer } | { kind: "link"; target: string; hard: boolean };
+export type ImageFile = { kind: "file"; data: Buffer } | { kind: "link"; target: string; hard: boolean };
 
 function noticePath(path: string): boolean {
 	if (path === "var/lib/dpkg/status" || path.startsWith("usr/share/common-licenses/")) return true;
@@ -229,7 +246,7 @@ export async function imageNotices(
 }
 
 /** Follows the image's own links from a path to the regular file it names, if the notices hold one. */
-function resolved(files: ReadonlyMap<string, ImageFile>, start: string): string | undefined {
+export function resolved(files: ReadonlyMap<string, ImageFile>, start: string): string | undefined {
 	let path = start;
 	for (let hop = 0; hop < 20; hop++) {
 		const entry = files.get(path);
@@ -409,8 +426,9 @@ license notices for what those downloads contain, published in the same place as
 
 - \`${INDEX_FILE}\` names every download, every source archive and every installed guest package, each by SHA-256.
 - ${shards.join(", ")}: ordinary tar archives. Unpack them all into one folder; everything lands under \`materials/\`.
-- \`${noticesName(value.version)}\`: the license and copyright files of the guest images' packages and of the Rust
-  crates, with each image's package list.
+- \`${noticesName(value.version)}\`: the license and copyright files of the guest images' packages, of the Rust
+  crates, of Electron and of FFmpeg, with each image's package list. Each download also carries its notices inside
+  itself, in its \`licenses\` folder (\`banda/app/licenses\` in the command-line archive); \`README.txt\` there is the index.
 - \`SHA256SUMS\` covers every file of the release, this one and the index included.
 
 ## What is inside
@@ -419,6 +437,10 @@ license notices for what those downloads contain, published in the same place as
   that build the guest images and the recipe that builds \`msb\`.
 - \`materials/native/\`: Microsandbox at \`${MICROVM_SOURCE.commit}\` and banda's patch to it; libkrunfw at
   \`${FIRMWARE_SOURCE.commit}\` with its kernel patches and configuration; the ${FIRMWARE_SOURCE.kernel.version} source it builds.
+  For the desktop packages: FFmpeg, which Electron ${ELECTRON_SOURCE.version} ships as the shared library \`libffmpeg\` under the
+  LGPL, version 2.1 or later, as Chromium's fork at \`${ELECTRON_SOURCE.ffmpeg.commit}\`; the DEPS file of Chromium
+  ${ELECTRON_SOURCE.chromium.version} that names that commit; and Electron's own source at \`${ELECTRON_SOURCE.commit}\`, whose
+  \`patches/ffmpeg\` it applies to FFmpeg and whose \`build/args\` configure the build.
 - \`materials/crates/\`: the ${value.cargo.registryPackages} registry packages of Microsandbox's Cargo.lock.
 - \`materials/debian/\`: the Debian source package of every package installed in the box, proxy and browser images.
 - \`materials/python/\`: the source archive of every Python distribution in the proxy image.
@@ -614,6 +636,57 @@ export async function collectReleaseSources(options: {
 			},
 		]);
 
+		const desktop = JSON.parse(await readFile(join(root, "desktop", "package.json"), "utf8")) as {
+			devDependencies?: Record<string, string>;
+		};
+		if (desktop.devDependencies?.electron !== ELECTRON_SOURCE.version)
+			throw new Error("The desktop app is built on a different Electron than the one whose FFmpeg source is pinned.");
+		const electron = `native/electron-${ELECTRON_SOURCE.commit}.tar.gz`;
+		const electronFile = await fetched(
+			cache,
+			electron,
+			[`https://codeload.github.com/electron/electron/tar.gz/${ELECTRON_SOURCE.commit}`],
+			{ sha256: ELECTRON_SOURCE.archiveSha256 },
+		);
+		await add("electron", "electron", ELECTRON_SOURCE.version, [{ key: electron, file: electronFile }]);
+		const electronTop = `electron-${ELECTRON_SOURCE.commit}`;
+		const electronTexts = await gzipMember(electronFile, (path) =>
+			[`${electronTop}/DEPS`, `${electronTop}/LICENSE`, `${electronTop}/patches/ffmpeg/.patches`].includes(path),
+		);
+		if (
+			electronChromium(electronTexts.get(`${electronTop}/DEPS`)?.toString("utf8") ?? "") !==
+			ELECTRON_SOURCE.chromium.version
+		)
+			throw new Error("Electron's source builds on a different Chromium than the pinned one.");
+		const patches = electronTexts.get(`${electronTop}/patches/ffmpeg/.patches`);
+		const license = electronTexts.get(`${electronTop}/LICENSE`);
+		if (patches === undefined || license === undefined)
+			throw new Error("Electron's source lacks its license or its list of FFmpeg patches.");
+		notices.push({ path: "notices/electron/LICENSE", data: license });
+		const deps = `native/chromium-${ELECTRON_SOURCE.chromium.version}-DEPS`;
+		const depsFile = await fetched(
+			cache,
+			deps,
+			[ELECTRON_SOURCE.chromium.depsUrl],
+			{ sha256: ELECTRON_SOURCE.chromium.depsSha256 },
+			(served) => Buffer.from(served.toString("ascii"), "base64"),
+		);
+		if (chromiumFfmpeg(await readFile(depsFile, "utf8")) !== ELECTRON_SOURCE.ffmpeg.commit)
+			throw new Error("Electron's Chromium checks out a different FFmpeg than the pinned one.");
+		const ffmpeg = FFMPEG_MATERIAL.slice("materials/".length);
+		const ffmpegFile = await fetched(cache, ffmpeg, [ELECTRON_SOURCE.ffmpeg.url], {
+			tree: ELECTRON_SOURCE.ffmpeg.treeSha256,
+		});
+		await add("ffmpeg", "ffmpeg", ELECTRON_SOURCE.ffmpeg.commit, [
+			{ key: ffmpeg, file: ffmpegFile },
+			{ key: deps, file: depsFile },
+		]);
+		const ffmpegTexts = await gzipMember(ffmpegFile, (path) =>
+			["COPYING.LGPLv2.1", "LICENSE.md", "CREDITS.chromium"].includes(path),
+		);
+		if (ffmpegTexts.size !== 3) throw new Error("The FFmpeg source lacks its license files.");
+		for (const [path, data] of ffmpegTexts) notices.push({ path: `notices/ffmpeg/${path}`, data });
+
 		const crates = lockCrates(lock.toString("utf8"));
 		const crateFiles = new Map<string, string>();
 		await each(crates, 8, async (crate) => {
@@ -630,15 +703,12 @@ export async function collectReleaseSources(options: {
 			const name = `${crate.name}-${crate.version}`;
 			const file = crateFiles.get(name) ?? "";
 			await add("crate", crate.name, crate.version, [{ key: `crates/${name}.crate`, file }]);
-			const texts = await gzipMember(
-				file,
-				(path) =>
-					path === `${name}/Cargo.toml` ||
-					new RegExp(
-						`^${name.replace(/[.+]/g, "\\$&")}/(?:LICEN[CS]E|COPYING|COPYRIGHT|NOTICE|UNLICENSE|PATENTS)[^/]*$`,
-						"i",
-					).test(path),
-			);
+			const texts = await gzipMember(file, (path) => {
+				const [top, member, ...deeper] = path.split("/");
+				return (
+					top === name && member !== undefined && deeper.length === 0 && (member === "Cargo.toml" || noticeFile(member))
+				);
+			});
 			const manifest = texts.get(`${name}/Cargo.toml`)?.toString("utf8") ?? "";
 			texts.delete(`${name}/Cargo.toml`);
 			for (const [path, data] of texts) notices.push({ path: `notices/crates/${path}`, data });
@@ -755,6 +825,15 @@ export async function verifyReleaseFolder(folders: readonly string[], deep = fal
 				material.sha256 !== digest.digest("hex")
 			)
 				problems.push(`${shard.file}: ${member.path} differs from the index.`);
+			// the one source no hash of its bytes pins: read it and compare its members' digest
+			if (member.path === FFMPEG_MATERIAL) {
+				const packed = createReadStream(join(folder, shard.file), {
+					start: member.offset,
+					end: member.offset + member.size - 1,
+				});
+				if ((await treeSha256(packed.pipe(createGunzip())).catch(() => "")) !== ELECTRON_SOURCE.ffmpeg.treeSha256)
+					problems.push(`${shard.file}: ${member.path} is not the pinned FFmpeg source.`);
+			}
 		}
 	}
 	for (const path of expected.keys()) problems.push(`${path} is in no shard.`);
