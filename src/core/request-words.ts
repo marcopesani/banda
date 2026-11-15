@@ -91,6 +91,43 @@ function bodyText(body: string): string | { readonly what: string } {
 	return text;
 }
 
+/** A type whose body is text whatever bytes it holds. */
+const TEXT_TYPE = /^text\/|json|xml|javascript|ecmascript|x-www-form-urlencoded|yaml|csv/i;
+
+/**
+ * A response's body (base64, as the proxy gave it back: undone from its encoding, scrubbed, cut) as its reader gets
+ * it: text when its type says so or its bytes read as text, in the charset its type names; else what it is. A body
+ * still encoded (a proxy that could not undo it) is never shown: its bytes say nothing, and nothing in them was
+ * scrubbed. `cut`: it was longer, so a character the cut broke is dropped rather than read as not text.
+ */
+export function responseWords(body: string, headers: readonly (readonly [string, string])[], cut = false): string {
+	const header = (name: string) =>
+		headers
+			.filter(([key]) => key.trim().toLowerCase() === name)
+			.map(([, value]) => value.trim())
+			.join(", ");
+	const encoding = header("content-encoding").toLowerCase();
+	if (encoding !== "" && encoding !== "identity")
+		return `(not shown: it came encoded as ${encoding.slice(0, 40)}, which could not be undone)`;
+	const bytes = Buffer.from(body, "base64");
+	if (bytes.length === 0) return "(empty)";
+	const type = header("content-type");
+	const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(type)?.[1] ?? "utf-8";
+	const decoder = () => {
+		try {
+			return new TextDecoder(charset, { fatal: false });
+		} catch {
+			// a charset nobody knows: read as most text is
+			return new TextDecoder("utf-8", { fatal: false });
+		}
+	};
+	const text = decoder().decode(bytes, { stream: cut });
+	if (TEXT_TYPE.test(type.split(";")[0] ?? "")) return text;
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what marks a body as binary
+	if (text.includes("�") || /[\x00-\x08\x0e-\x1f]/.test(text)) return `(${bytes.length} bytes of binary data)`;
+	return text;
+}
+
 const MAX_FIELDS = 12;
 const MAX_VALUE = 120;
 

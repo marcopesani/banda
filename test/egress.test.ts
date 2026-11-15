@@ -12,7 +12,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync, zstdCompressSync } from "node:zlib";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, type Harness, LiveDoc, type TaskId } from "@earendil-works/pi-durable";
 import fc from "fast-check";
@@ -2011,6 +2011,43 @@ describe("a held write's release", () => {
 		}
 	});
 
+	it("a JSON answer is told as its text; one a proxy gave back still compressed is said to be so, never shown", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const json = Buffer.from('{"playabilityStatus":{"status":"OK"},"title":"café"}');
+			const answers: Replayed[] = [
+				{ status: 200, reason: "OK", headers: [["Content-Type", "application/json"]], body: json.toString("base64") },
+				{
+					status: 200,
+					reason: "OK",
+					headers: [
+						["Content-Type", "application/json"],
+						["Content-Encoding", "gzip"],
+					],
+					body: gzipSync(json).toString("base64"),
+				},
+			];
+			const first = await s.say(harness);
+			const requests = [held(first.chat, { path: "/plain" }), held(first.chat, { path: "/gzip" })];
+			s.proxy.replay = async (request) =>
+				answers[requests.findIndex((one) => one.ticket === request.ticket)] as Replayed;
+			s.proxy.pending.set(first.chat, requests);
+			await until(async () => (await openWaits(harness)).length === 2);
+			for (const wait of await openWaits(harness)) await approve(harness, wait.key);
+			const told = await until(async () => {
+				const all = (await released(harness, first.chat)).join("\n");
+				return all.includes("/plain") && all.includes("/gzip") ? all : undefined;
+			});
+			expect(told).toContain("playabilityStatus");
+			expect(told).toContain("café");
+			expect(told).toContain("(not shown: it came encoded as gzip, which could not be undone)");
+			expect(told).not.toContain("binary data");
+		} finally {
+			await close();
+		}
+	});
+
 	it("a WebSocket is kept and asks nothing; past the limit of open asks the rest ask nothing and the agent is told", async () => {
 		const s = setup();
 		const { harness, close } = await s.open(await tempHome());
@@ -3019,6 +3056,108 @@ function admit(config: object, cases: readonly object[]) {
 		rmSync(state, { recursive: true, force: true });
 	}
 }
+
+type ReplayCase = {
+	credentials?: { host: string; header: string; value: string }[];
+	headers?: [string, string][];
+	limit?: number;
+	response: { headers: [string, string][]; body: string };
+};
+
+/** proxy/ctl.py's replay on the host, against a server of the test's (test/fixtures/proxy-replay.py). */
+function replayed(cases: readonly ReplayCase[]) {
+	const dir = fileURLToPath(new URL("../proxy/", import.meta.url));
+	const harness = fileURLToPath(new URL("./fixtures/proxy-replay.py", import.meta.url));
+	const [limit, ...results] = JSON.parse(runPython(["-I", "-B", harness, dir], cases)) as [
+		number,
+		...({ replayed: Extract<Replayed, { status: number }>; sent: [string, string][] } | { missing: string })[],
+	];
+	return { limit, results };
+}
+
+describe.skipIf(!python)("a held request sent, at the proxy", () => {
+	const credential = "Bearer owner-token-12345";
+	const credentials = [{ host: "forge.example", header: "Authorization", value: credential }];
+	const json = Buffer.from(JSON.stringify({ ok: true, echo: credential, name: "café" }));
+	const scrubbed = JSON.stringify({ ok: true, echo: "[removed by banda]", name: "café" });
+	const answer = (encoding: string, body: Buffer): ReplayCase => ({
+		credentials,
+		headers: [["Accept-Encoding", "gzip, deflate, br, zstd"]],
+		response: {
+			headers: [
+				["Content-Type", "application/json"],
+				["Content-Encoding", encoding],
+			],
+			body: body.toString("base64"),
+		},
+	});
+
+	it("undoes the response's encoding before it scrubs it: a credential a compressed body echoes is removed", () => {
+		const cases = [
+			answer("gzip", gzipSync(json)),
+			answer("deflate", deflateSync(json)),
+			answer("deflate", deflateRawSync(json)),
+			answer("x-gzip", Buffer.concat([gzipSync(json.subarray(0, 20)), gzipSync(json.subarray(20))])),
+			answer("br", brotliCompressSync(json)),
+			answer("zstd", zstdCompressSync(json)),
+		];
+		const { results } = replayed(cases);
+		// the host's python may lack the modules the proxy's image undoes br and zstd with; gzip and deflate are its own
+		expect(results.slice(0, 4).every((one) => "replayed" in one)).toBe(true);
+		for (const one of results) {
+			if ("missing" in one) continue;
+			// sent as held: what it said it accepts is what its command said
+			expect(one.sent).toContainEqual(["Accept-Encoding", "gzip, deflate, br, zstd"]);
+			expect(Buffer.from(one.replayed.body, "base64").toString()).toBe(scrubbed);
+			expect(one.replayed.truncated).toBe(false);
+			const names = one.replayed.headers.map(([name]) => name.toLowerCase());
+			// what came back is no longer encoded, nor of the length it arrived with
+			expect(names).not.toContain("content-encoding");
+			expect(names).not.toContain("content-length");
+			expect(names).toContain("content-type");
+		}
+	});
+
+	it("never inflates past its limit, however far a body would: a few kilobytes that spell 64 MB are cut there", () => {
+		const bomb = Buffer.alloc(64 * 1024 * 1024, "a");
+		// the limit it runs with is a megabyte; a smaller one here, so the answer fits a pipe
+		const small = (one: ReplayCase) => ({ ...one, limit: 64 * 1024 });
+		const { limit, results } = replayed([
+			small(answer("gzip", gzipSync(bomb))),
+			small(answer("deflate", deflateSync(bomb))),
+			small(answer("br", brotliCompressSync(bomb))),
+			small(answer("zstd", zstdCompressSync(bomb))),
+		]);
+		expect(limit).toBe(1024 * 1024);
+		expect(results.slice(0, 2).every((one) => "replayed" in one)).toBe(true);
+		for (const one of results) {
+			if ("missing" in one) continue;
+			expect(Buffer.from(one.replayed.body, "base64")).toHaveLength(64 * 1024);
+			expect(one.replayed.truncated).toBe(true);
+		}
+	});
+
+	it("gives back no body it could not undo, so none it could not scrub; a credential the cut broke goes too", () => {
+		const plain = Buffer.from(`0123456789 ${credential} and the rest`);
+		const { results } = replayed([
+			answer("compress", json),
+			answer("gzip", json),
+			// cut inside the credential: its first half is no credential `scrub` knows, and is not left there
+			{ credentials, limit: 11 + 12, response: { headers: [], body: plain.toString("base64") } },
+			{ credentials, response: { headers: [["Content-Encoding", "identity"]], body: plain.toString("base64") } },
+		]);
+		const [unknown, wrong, cut, identity] = results as { replayed: Extract<Replayed, { status: number }> }[];
+		for (const one of [unknown, wrong]) {
+			expect(one?.replayed.body).toBe("");
+			expect(one?.replayed.headers.map(([name]) => name.toLowerCase())).toContain("content-encoding");
+		}
+		expect(Buffer.from(cut?.replayed.body ?? "", "base64").toString()).toBe("0123456789 ");
+		expect(cut?.replayed.truncated).toBe(true);
+		expect(Buffer.from(identity?.replayed.body ?? "", "base64").toString()).toBe(
+			"0123456789 [removed by banda] and the rest",
+		);
+	});
+});
 
 describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 	it("frames scrubbed identity and decoded bodies with their unknown streamed length", () => {

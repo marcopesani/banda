@@ -24,7 +24,7 @@ import { log } from "./activity.ts";
 import { AgentChats } from "./agents.ts";
 import type { EffectApi, EffectTool } from "./ask.ts";
 import { Permissions } from "./permissions.ts";
-import { addressWords, bodyWords, headersWords } from "./request-words.ts";
+import { addressWords, bodyWords, headersWords, responseWords } from "./request-words.ts";
 import { context } from "./store.ts";
 
 /** A request the proxy held: what the box sent, whole, and whose it is. */
@@ -548,7 +548,7 @@ const parameters = Type.Object({
  */
 function responseText(replayed: Extract<Replayed, { status: number }>): string {
 	const type = replayed.headers.find(([key]) => key.toLowerCase() === "content-type")?.[1];
-	const body = bodyWords(replayed.body);
+	const body = responseWords(replayed.body, replayed.headers, replayed.truncated === true);
 	const cut = body.length > 20_000 ? `${body.slice(0, 20_000)}\n…` : body;
 	return (
 		`Sent. The server answered ${replayed.status} ${replayed.reason}${type === undefined ? "" : ` (${type})`}.\n` +

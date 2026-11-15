@@ -5,6 +5,7 @@ the caller hands in, so its rules are tested without a proxy.
 """
 
 import hmac
+import io
 import ipaddress
 import re
 import zlib
@@ -468,6 +469,96 @@ def decoder(encoding):
         inflate = zstandard.ZstdDecompressor().decompressobj()
         return lambda chunk: inflate.decompress(chunk) if chunk else b""
     return None
+
+
+def _inflated(raw, wbits, limit):
+    """One zlib stream at the start of `raw`, never past `limit` bytes: what it held, whether it ended, what follows."""
+    inflate = zlib.decompressobj(wbits)
+    body = inflate.decompress(raw, limit)
+    return body, inflate.eof, inflate.unused_data
+
+
+def undone(raw, encoding, limit):
+    """
+    A whole body's `Content-Encoding` undone, never past `limit` bytes however far it would inflate (a few bytes can
+    spell gigabytes): `(body, more)`, `more` when there was more than `limit` or its encoding did not end. None for
+    an encoding it cannot undo (as `decoder`: several, or one it does not know) and for bytes that are not what
+    their encoding says.
+    """
+    encoding = encoding.strip().lower()
+    if encoding in ("", "identity"):
+        return raw[:limit], len(raw) > limit
+    if encoding not in ("gzip", "x-gzip", "deflate", "br", "zstd"):
+        return None
+    if raw == b"":
+        return b"", False
+    room = limit + 1
+    if encoding == "deflate":
+        # zlib's framing as the standard says, or none, as some servers send it
+        for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+            try:
+                body, ended, _ = _inflated(raw, wbits, room)
+            except zlib.error:
+                continue
+            return body[:limit], len(body) > limit or not ended
+        return None
+    if encoding in ("gzip", "x-gzip"):
+        # one member after another, as gzip allows
+        body, rest, ended = b"", raw, False
+        try:
+            while rest and len(body) < room:
+                part, ended, rest = _inflated(rest, 16 + zlib.MAX_WBITS, room - len(body))
+                body += part
+                if not ended:
+                    break
+        except zlib.error:
+            return None
+        return body[:limit], len(body) > limit or not ended
+    if encoding == "br":
+        import brotli  # in the proxy's image, as mitmproxy's own
+
+        inflate = brotli.Decompressor()
+        try:
+            try:
+                body = inflate.process(raw, output_buffer_limit=room)
+            except TypeError:
+                # a brotli that takes no limit: a little at a time, stopped once past it
+                body = b""
+                for at in range(0, len(raw), 16):
+                    body += inflate.process(raw[at : at + 16])
+                    if len(body) > limit:
+                        break
+        except brotli.error:
+            return None
+        return body[:limit], len(body) > limit or not inflate.is_finished()
+    import zstandard  # in the proxy's image, as mitmproxy's own
+
+    body = b""
+    try:
+        # the window HTTP allows a frame (RFC 9659), so its header cannot ask for more memory than that
+        reader = zstandard.ZstdDecompressor(max_window_size=8 * 1024 * 1024).stream_reader(io.BytesIO(raw))
+        while len(body) < room:
+            part = reader.read(room - len(body))
+            if not part:
+                break
+            body += part
+    except zstandard.ZstdError:
+        return None
+    return body[:limit], len(body) > limit
+
+
+def cut(data, limit, credentials):
+    """
+    The first `limit` bytes of `data`, which had more, scrubbed. A credential the cut broke in two is not one `scrub`
+    finds, so the start of one left at the end (four bytes or more) goes too.
+    """
+    out = scrub(data, credentials)[:limit]
+    for secret in _secrets(credentials):
+        for size in range(min(len(secret) - 1, len(out)), 3, -1):
+            if out.endswith(secret[:size]):
+                out = out[:-size]
+                break
+    return out
 
 
 def scrubber(credentials):

@@ -11,6 +11,7 @@ import {
 	headerWords,
 	isSecret,
 	masked,
+	responseWords,
 	secretLooking,
 } from "../src/core/request-words.ts";
 import { pbtRuns } from "./pbt.ts";
@@ -146,5 +147,41 @@ describe("a body's fields", () => {
 		const odd = bodyFields(b64('{"__proto__":"x","constructor":"y"}'), "application/json")!;
 		expect(Object.getPrototypeOf(odd)).toBe(Object.prototype);
 		expect(Object.keys(odd)).toEqual(["__proto__", "constructor"]);
+	});
+});
+
+describe("a response's body", () => {
+	const json: [string, string][] = [["Content-Type", "application/json"]];
+
+	it("is its text in the charset its type names, and by its type though some byte is not text", () => {
+		const latin: [string, string][] = [["content-type", "application/json; charset=ISO-8859-1"]];
+		expect(responseWords(Buffer.from('{"name":"café"}', "latin1").toString("base64"), latin)).toBe('{"name":"café"}');
+		expect(responseWords(Buffer.from('{"name":"café"}', "latin1").toString("base64"), json)).toBe('{"name":"caf�"}');
+		expect(responseWords(b64('{"ok":true}'), [["Content-Type", 'text/plain; charset="no-such"']])).toBe('{"ok":true}');
+		// no type: text when its bytes read as text
+		expect(responseWords(b64("plain"), [])).toBe("plain");
+		expect(responseWords(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2]).toString("base64"), [])).toBe(
+			"(7 bytes of binary data)",
+		);
+		expect(responseWords(Buffer.from([0xff, 0xd8, 0xff, 0]).toString("base64"), [["Content-Type", "image/jpeg"]])).toBe(
+			"(4 bytes of binary data)",
+		);
+		expect(responseWords("", json)).toBe("(empty)");
+	});
+
+	it("cut inside a character is still text: the broken character is dropped", () => {
+		const whole = Buffer.from("ação");
+		const broken = whole.subarray(0, whole.length - 2).toString("base64");
+		expect(responseWords(broken, [], true)).toBe("aç");
+		expect(responseWords(broken, json, true)).toBe("aç");
+	});
+
+	it("is never shown still encoded: its bytes are not what it says, and nothing in them was scrubbed", () => {
+		const gzip = Buffer.from([0x1f, 0x8b, 8, 0, 0, 0, 0, 0]).toString("base64");
+		for (const encoding of ["gzip", "br", "GZIP, br"])
+			expect(responseWords(gzip, [...json, ["Content-Encoding", encoding]])).toBe(
+				`(not shown: it came encoded as ${encoding.toLowerCase()}, which could not be undone)`,
+			);
+		expect(responseWords(b64("{}"), [...json, ["Content-Encoding", "identity"]])).toBe("{}");
 	});
 });

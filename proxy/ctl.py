@@ -8,7 +8,7 @@ How the daemon talks to the proxy, over `docker exec` alone (never through the b
 - `ack <chat> <read bytes> [ticket or sent id...]`: forget what the daemon stored.
 - `pass <chat> <hash>`: let one write the owner approved in the browser through, by its hash.
 - `replay`: send one held request (stdin), exactly as held, to the address it resolves to now, if that is public;
-  credentials set, the response scrubbed. Prints the response.
+  credentials set; the response undone from its encoding, scrubbed and cut at a megabyte. Prints the response.
 """
 
 import base64
@@ -166,12 +166,27 @@ def replay(request, progress):
     data = response.read(RESPONSE_LIMIT + 1)
     connection.close()
     every = cfg.get("credentials", [])
+    # undone from its encoding before it is scrubbed and cut: a credential inside a compressed body is found too, and
+    # the megabyte is of what the agent would read, however small it arrived
+    encoding = response.getheader("content-encoding", "")
+    undone = policy.undone(data, encoding, RESPONSE_LIMIT)
+    headers = response.getheaders()
+    if undone is None:
+        # an encoding it cannot undo cannot be scrubbed: its body stays here, its header says why
+        body, more = b"", False
+    else:
+        body, more = undone
+        more = more or len(data) > RESPONSE_LIMIT
+        if encoding.strip().lower() not in ("", "identity"):
+            headers = [(k, v) for k, v in headers if k.lower() not in ("content-encoding", "content-length")]
     return {
         "status": response.status,
         "reason": response.reason,
-        "headers": [[k, policy.scrub(v.encode(), every).decode()] for k, v in response.getheaders()],
-        "body": base64.b64encode(policy.scrub(data[:RESPONSE_LIMIT], every)).decode(),
-        "truncated": len(data) > RESPONSE_LIMIT,
+        "headers": [[k, policy.scrub(v.encode(), every).decode()] for k, v in headers],
+        "body": base64.b64encode(
+            policy.cut(body, RESPONSE_LIMIT, every) if more else policy.scrub(body, every)
+        ).decode(),
+        "truncated": more,
     }
 
 
