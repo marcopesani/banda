@@ -130,8 +130,11 @@ async function stageNode(out: string, target: Target, cache: string): Promise<vo
 	const unpacked = join(cache, `unpacked-${targetName(target)}`);
 	await rm(unpacked, { recursive: true, force: true });
 	await mkdir(unpacked, { recursive: true });
-	run(tar, ["-xf", archive, "-C", unpacked]);
-	const top = join(unpacked, name.replace(/\.(tar\.gz|zip)$/, ""));
+	// only the two files a release carries: the archive's npm links are never unpacked, which a shared folder may refuse
+	const inside = name.replace(/\.(tar\.gz|zip)$/, "");
+	const binary = target.platform === "win32" ? "node.exe" : "bin/node";
+	run(tar, ["-xf", archive, "-C", unpacked, `${inside}/${binary}`, `${inside}/LICENSE`]);
+	const top = join(unpacked, inside);
 	const node = join(out, "node");
 	await mkdir(node, { recursive: true });
 	if (target.platform === "win32") await rename(join(top, "node.exe"), join(node, "node.exe"));

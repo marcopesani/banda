@@ -8,6 +8,7 @@
 	"homepage": "https://github.com/purrgrammer/banda",
 	"type": "module",
 	"main": "dist/main.js",
+	"desktopName": "banda-desktop.desktop",
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"start": "npm run build && electron .",

@@ -10,6 +10,7 @@
 			"!web/src/assets/providers",
 			"!!.local",
 			"!!.worktrees",
+			"!!release",
 			"evals/**",
 			"scripts/**",
 			"site/**",

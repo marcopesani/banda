@@ -39,6 +39,8 @@ nsis:
   allowToChangeInstallationDirectory: true
 linux:
   category: Utility
+  # the window's app id is the launcher entry's name (package.json desktopName), so a desktop ties one to the other
+  syncDesktopName: true
   target: [deb]
   maintainer: banda
 deb:

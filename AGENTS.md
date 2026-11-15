@@ -70,7 +70,9 @@ account, object, harness, session, artifact, memory, box, workspace, gateway, in
   builds the box's images under the tags banda looks for (in CI through GitHub's layer cache).
 - Releases: `npm run desktop:dev` opens the desktop app on a throwaway home; `npm run cli:pack` and
   `npm run desktop:pack` build this computer's release files into `release/`; a `v*` tag makes the release workflow
-  draft a pre-release.
+  build every target and publish the pre-release. `npm run desktop:linux` builds the Linux package in Docker, for the
+  engine's CPU, and uses it on each supported distribution under X11 and Wayland (the computer's VM is not started:
+  no KVM there); `npm run desktop:try` uses the Mac app `desktop:pack` left the same way, on a throwaway home.
 - The phone app is `mobile/`, Android only: the built web app in a Capacitor shell whose `Banda` plugin speaks the
   API over Iroh as a paired device. `npm run mobile:apk` builds a debug APK (the Android SDK at `ANDROID_HOME` or
   `~/Library/Android/sdk`; Gradle fetches the Java 21 it compiles with), `npm run mobile:install` installs and starts
