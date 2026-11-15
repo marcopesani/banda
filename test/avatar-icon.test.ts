@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, get } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Resvg } from "@resvg/resvg-js";
-import { getExample } from "open-bot-avatar";
+import { examples, getExample } from "open-bot-avatar";
 import { describe, expect, it } from "vitest";
 import { type AvatarFace, defaultAvatarFace } from "../src/core/avatar-face.ts";
 import { avatarIcon, avatarIconPng, avatarIcons, avatarManifest, ICON_FILES } from "../src/core/avatar-icon.ts";
@@ -72,21 +72,34 @@ describe("avatar install icons", () => {
 		}
 	});
 
-	it("keeps every non-background pixel inside the maskable safe circle, with an opaque full bleed", () => {
-		const svg = avatarIcon(chosen, true);
-		expect(svg).toContain("translate(112 112)");
-		const { pixels } = new Resvg(svg, { font: { loadSystemFonts: false } }).render();
-		let colored = 0;
-		for (let y = 0; y < 512; y++) {
-			for (let x = 0; x < 512; x++) {
-				const offset = (y * 512 + x) * 4;
-				if (pixels[offset + 3] !== 255) throw new Error("Transparent maskable pixel");
-				if (pixels[offset] === 252 && pixels[offset + 1] === 252 && pixels[offset + 2] === 252) continue;
-				colored++;
-				if (Math.hypot(x + 0.5 - 256, y + 0.5 - 256) > 512 * 0.4) throw new Error("Outside safe circle");
+	it("keeps every non-background pixel inside the maskable safe circle, with an opaque full bleed, the face as large as the circle allows", () => {
+		// every shape a face can be chosen from, and the one a home starts with
+		const faces = [defaultAvatarFace(), ...examples.map((definition) => ({ definition, color: chosen.color }))];
+		expect(faces.length).toBeGreaterThan(2);
+		for (const face of faces) {
+			const { pixels } = new Resvg(avatarIcon(face, true), { font: { loadSystemFonts: false } }).render();
+			let colored = 0;
+			let reach = 0;
+			for (let y = 0; y < 512; y++) {
+				for (let x = 0; x < 512; x++) {
+					const offset = (y * 512 + x) * 4;
+					if (pixels[offset + 3] !== 255) throw new Error("Transparent maskable pixel");
+					if (pixels[offset] === 252 && pixels[offset + 1] === 252 && pixels[offset + 2] === 252) continue;
+					colored++;
+					reach = Math.max(reach, Math.hypot(x + 0.5 - 256, y + 0.5 - 256));
+				}
 			}
+			expect(colored).toBeGreaterThan(1000);
+			// what every mask keeps is the circle of radius 40%: nothing is past it, and the face is not small inside it
+			expect(reach, face.definition.name).toBeLessThanOrEqual(512 * 0.4);
+			expect(reach, face.definition.name).toBeGreaterThan(512 * 0.37);
 		}
-		expect(colored).toBeGreaterThan(1000);
+	});
+
+	it("gives a phone's home screen the opaque drawing, which is not painted over black as a clear icon is", () => {
+		const icons = avatarIcons()(chosen);
+		expect(icons.image("/apple-touch-icon.png").bytes).toEqual(avatarIconPng(chosen, 180, true));
+		expect(icons.image("/apple-touch-icon.png").bytes).not.toEqual(avatarIconPng(chosen, 180));
 	});
 
 	it("rejects malformed candidates before rendering", () => {
@@ -155,7 +168,7 @@ describe("icon HTTP routes", () => {
 				expect(response.headers.get("content-security-policy")).toBe("default-src 'none'");
 				expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 				const png = await fetch(`${base}/apple-touch-icon.png`);
-				expect(Buffer.from(await png.arrayBuffer())).toEqual(avatarIconPng(chosen, 180));
+				expect(Buffer.from(await png.arrayBuffer())).toEqual(avatarIconPng(chosen, 180, true));
 			},
 		);
 	});

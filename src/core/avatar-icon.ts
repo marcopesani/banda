@@ -9,23 +9,68 @@ export const ICON_FILES = {
 	"/icon-192.png": { size: 192, maskable: false, svg: false },
 	"/icon-512.png": { size: 512, maskable: false, svg: false },
 	"/icon-maskable-512.png": { size: 512, maskable: true, svg: false },
-	"/apple-touch-icon.png": { size: 180, maskable: false, svg: false },
+	// A phone's home screen paints black behind a transparent icon (iOS), so it is given the opaque drawing.
+	"/apple-touch-icon.png": { size: 180, maskable: true, svg: false },
 } as const;
 export type IconPath = keyof typeof ICON_FILES;
+
+/**
+ * What every mask keeps of a maskable icon is its central circle, of radius 40% of the icon (204.8 of 512). The face
+ * is fitted to `FIT` and nothing is drawn past `KEPT`, so an edge's soft pixels stay inside the circle too.
+ */
+const KEPT = 203;
+const FIT = 200;
 
 /** Only validated geometry enters the renderer; never caller-supplied SVG, URLs or markup. */
 export function avatarIcon(face: AvatarFace, maskable = false): string {
 	const checked = readAvatarFace(writeAvatarFace(face));
 	if (!checked.ok) throw new Error("Invalid avatar face");
-	const inset = maskable ? 112 : 32;
-	const extent = 512 - 2 * inset;
-	const background = maskable ? '<rect width="512" height="512" fill="#fcfcfc"/>' : "";
 	// Names and ids are not public identity data. A fixed id also gives every icon the same still pose.
 	const definition = { ...checked.face.definition, name: "Avatar", id: "icon" };
+	const open =
+		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Avatar">';
+	if (maskable) {
+		// The face as large as the circle allows: what is fitted is what the face draws, not its drawing's square, so
+		// a face on a home screen is near the size the phone's app gives it (scripts/mobile-icons.ts). The circle
+		// clips what the measure did not see, so even extreme accepted geometry cannot leave it.
+		const drawing = renderAvatarSvg(definition, { color: checked.face.color, size: DRAWN, reducedMotion: true });
+		const { x, y, reach } = drawn(drawing);
+		const fitted = `translate(256 256) scale(${hundredth(FIT / reach)}) translate(${-x} ${-y})`;
+		return `${open}<rect width="512" height="512" fill="#fcfcfc"/><clipPath id="kept"><circle cx="256" cy="256" r="${KEPT}"/></clipPath><g clip-path="url(#kept)"><g transform="${fitted}">${drawing}</g></g></svg>`;
+	}
+	const inset = 32;
+	const extent = 512 - 2 * inset;
 	const drawing = renderAvatarSvg(definition, { color: checked.face.color, size: extent, reducedMotion: true });
-	// The maskable square's corners are inside the required central circle (radius 40% of 512).
-	// Clip the renderer's overflow too, so even extreme accepted geometry cannot escape that square.
-	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Avatar">${background}<g transform="translate(${inset} ${inset})"><svg width="${extent}" height="${extent}" viewBox="0 0 ${extent} ${extent}" overflow="hidden" role="img" aria-label="Avatar">${drawing}</svg></g></svg>`;
+	return `${open}<g transform="translate(${inset} ${inset})"><svg width="${extent}" height="${extent}" viewBox="0 0 ${extent} ${extent}" overflow="hidden" role="img" aria-label="Avatar">${drawing}</svg></g></svg>`;
+}
+
+/** The side a face is drawn at to be measured, and the unit its measures are in. */
+const DRAWN = 256;
+
+/** To a hundredth: a measure is the same text on every computer. */
+const hundredth = (value: number) => Math.round(value * 100) / 100;
+
+/**
+ * Where a face's drawing has anything in it: the middle of that, and how far from the middle it reaches. Read off
+ * its pixels, since a rounded shape reaches less far than the corners of the box around it.
+ */
+function drawn(drawing: string): { x: number; y: number; reach: number } {
+	const { pixels } = new Resvg(drawing, { font: { loadSystemFonts: false } }).render();
+	const inked: [number, number][] = [];
+	for (let y = 0; y < DRAWN; y++)
+		for (let x = 0; x < DRAWN; x++) if ((pixels[(y * DRAWN + x) * 4 + 3] ?? 0) > 0) inked.push([x, y]);
+	// a face that draws nothing is fitted as its whole square would be
+	if (inked.length === 0) return { x: DRAWN / 2, y: DRAWN / 2, reach: DRAWN / Math.SQRT2 };
+	const span = (at: 0 | 1) => {
+		const along = inked.map((pixel) => pixel[at]);
+		return (Math.min(...along) + Math.max(...along) + 1) / 2;
+	};
+	const [x, y] = [span(0), span(1)];
+	// to each pixel's far corner, so the reach is never short of the drawing's
+	const reach = Math.max(
+		...inked.map(([px, py]) => Math.hypot(Math.abs(px + 0.5 - x) + 0.5, Math.abs(py + 0.5 - y) + 0.5)),
+	);
+	return { x, y, reach };
 }
 
 export function avatarIconPng(face: AvatarFace, size: 180 | 192 | 512, maskable = false): Buffer {
