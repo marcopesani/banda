@@ -7,7 +7,6 @@ import {
 	BotIcon,
 	BrainIcon,
 	CheckIcon,
-	ChevronDownIcon,
 	ChevronRightIcon,
 	CircleAlertIcon,
 	FileTextIcon,
@@ -21,7 +20,7 @@ import {
 	XIcon,
 } from "lucide-react";
 import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
-import { ChainOfThought, ChainOfThoughtContent, ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought";
+import { ChainOfThought, ChainOfThoughtContent } from "@/components/ai-elements/chain-of-thought";
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import { Conversation, ConversationContent, ConversationScrollButton } from "@/components/ai-elements/conversation";
 import { Shimmer } from "@/components/ai-elements/shimmer";
@@ -37,6 +36,7 @@ import { projectOf } from "../lib/project.ts";
 import { Tile } from "./Cards.tsx";
 import { Confirm } from "./Confirm.tsx";
 import { KeepEnd } from "./KeepEnd.tsx";
+import { Step, StepWords } from "./Steps.tsx";
 
 export { projectOf };
 
@@ -197,8 +197,9 @@ export function runHeadline(
 	// cut before its last step, never in it: what a chain ends on (a push, a submit) is what it does
 	const steps = capEnds(commandEnds(clean), 72);
 	const whole = { verb: ran ? "Ran" : "Running", object: steps.head + steps.end, code: true };
-	// a chained, piped, redirected or substituting command never hides behind one quiet verb: the owner sees it whole
-	if (compoundCommand(clean)) return whole;
+	// a chained, piped, redirected or substituting command never hides behind one quiet verb: the owner sees it whole.
+	// A new line ends a step too, and `clean` has none left: that one is asked of the command as it was written
+	if (compoundCommand(clean) || /\n/.test(bareOf(command.trim()))) return whole;
 	const tokens = clean.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
 	const head = (tokens[0] ?? "").split("/").at(-1) ?? "";
 	const positional = tokens
@@ -522,20 +523,6 @@ export function HarnessTile({
 	);
 }
 
-/** The verb and object of a headline, as the card and the sheet's rows draw them. */
-function HeadWords({ verb, object, code }: { verb: string; object: string; code: boolean }) {
-	return (
-		<>
-			<span className="shrink-0 text-ink-2">{verb}</span>
-			{object === "" ? null : code ? (
-				<KeepEnd ends={commandEnds(object)} className="font-code text-meta text-ink" />
-			) : (
-				<span className="min-w-0 truncate text-ui text-ink">{object}</span>
-			)}
-		</>
-	);
-}
-
 function continuationWords(session: HarnessSessionView): string | undefined {
 	if (session.continues === undefined) return undefined;
 	if (session.continuation === "native") return "Resumed its original session.";
@@ -753,14 +740,14 @@ function stepLine(
 			// what was asked is the session's point: three lines always, "Show all" for the rest, never a click to see it
 			return {
 				icon: MessageSquareIcon,
-				words: <span className="shrink-0 text-ink-2">Asked</span>,
+				words: <span className="shrink-0 text-ink-2 max-sm:order-1">Asked</span>,
 				always: <ClampedText text={step.text} />,
 			};
 		case "steered":
 			return {
 				icon: step.from === "agent" ? BotIcon : UserIcon,
 				words: (
-					<HeadWords
+					<StepWords
 						verb={`${step.from === "agent" ? `${agent ?? "Its agent"} followed up` : "You said"}${step.taken ? "" : " · after this step"}`}
 						object={oneline(step.text)}
 						code={false}
@@ -773,7 +760,7 @@ function stepLine(
 			return {
 				icon: step.allowed ? CheckIcon : XIcon,
 				words: (
-					<HeadWords
+					<StepWords
 						verb={step.allowed ? "You allowed:" : "You denied:"}
 						object={askSummary(step.ask ?? "other")}
 						code={false}
@@ -784,12 +771,12 @@ function stepLine(
 		case "read":
 			return {
 				icon: FileTextIcon,
-				words: <HeadWords verb="Read" object={relativeTo(step.path, folder, root)} code />,
+				words: <StepWords verb="Read" object={relativeTo(step.path, folder, root)} code />,
 			};
 		case "thought":
 			return {
 				icon: BrainIcon,
-				words: <HeadWords verb="Thought" object={oneline(step.text)} code={false} />,
+				words: <StepWords verb="Thought" object={oneline(step.text)} code={false} />,
 				detail: <ClampedText text={step.text} muted />,
 			};
 		case "edit":
@@ -797,9 +784,9 @@ function stepLine(
 				icon: PencilIcon,
 				words: (
 					<>
-						<HeadWords verb="Edited" object={relativeTo(step.path, folder, root)} code />
+						<StepWords verb="Edited" object={relativeTo(step.path, folder, root)} code />
 						{step.added === undefined || step.removed === undefined ? null : (
-							<span className="shrink-0 text-meta tabular-nums">
+							<span className="shrink-0 text-meta tabular-nums max-sm:order-2">
 								<span className="text-alive">+{step.added}</span> <span className="text-danger">−{step.removed}</span>
 							</span>
 						)}
@@ -814,26 +801,26 @@ function stepLine(
 			const { verb, object, code } = headlineOf(step, folder, root);
 			return {
 				icon: TerminalIcon,
-				words: <HeadWords verb={verb} object={object} code={code} />,
+				words: <StepWords verb={verb} object={object} code={code} />,
 				detail: <Terminal command={step.command} output={step.output ?? ""} isStreaming={step.running !== false} />,
 			};
 		}
 		case "waiting":
 			return {
 				icon: CircleAlertIcon,
-				words: <HeadWords verb="Waiting on you to allow:" object={askSummary(step.ask ?? "other")} code={false} />,
+				words: <StepWords verb="Waiting on you to allow:" object={askSummary(step.ask ?? "other")} code={false} />,
 				detail: <Raw text={step.command} />,
 			};
 		case "said":
 			return {
 				icon: MessageSquareIcon,
-				words: <HeadWords verb="Said" object={oneline(step.text)} code={false} />,
+				words: <StepWords verb="Said" object={oneline(step.text)} code={false} />,
 				detail: <ClampedText text={step.text} />,
 			};
 	}
 }
 
-/** A step in the sheet, folded to its one line; the row is a real button, 44px tall on a touch screen. */
+/** A step in the sheet, folded to its one line, as Activity's steps are (chat/Steps.tsx). */
 function StepRow({
 	step,
 	folder,
@@ -853,45 +840,17 @@ function StepRow({
 	open: boolean;
 	onToggle: () => void;
 }) {
-	const status = step.kind === "waiting" ? "active" : last && working ? "active" : "complete";
 	const { icon, words, detail, always } = stepLine(step, folder, agent, root);
-	if (detail === undefined)
-		return (
-			<ChainOfThoughtStep
-				icon={icon}
-				status={status}
-				label={<span className="flex min-w-0 items-baseline gap-1.5">{words}</span>}
-			>
-				{always}
-			</ChainOfThoughtStep>
-		);
 	return (
-		<ChainOfThoughtStep
+		<Step
 			icon={icon}
-			status={status}
-			label={
-				// the touch target grows by an invisible halo (±13px: 44px on an 18px row), never by moving the text off
-				// the icon's line; expanded content stays in this text column, aligned with the words, not the icon
-				<button
-					type="button"
-					aria-expanded={open}
-					onClick={onToggle}
-					className="relative -mx-1 flex w-full min-w-0 cursor-pointer items-start gap-1.5 rounded-field px-1 text-left outline-none before:absolute before:inset-x-0 before:inset-y-0 hover:bg-paper-2 focus-visible:outline-[1.5px] focus-visible:outline-offset-2 focus-visible:outline-focus pointer-coarse:before:-inset-y-[13px] max-sm:before:-inset-y-[13px]"
-				>
-					<span className="flex min-w-0 flex-1 items-baseline gap-1.5">{words}</span>
-					<span aria-hidden="true" className="flex h-[1.125rem] shrink-0 items-center">
-						<ChevronDownIcon
-							className={cn(
-								"size-3.5 shrink-0 text-ink-3 transition-transform motion-reduce:transition-none",
-								open && "rotate-180",
-							)}
-						/>
-					</span>
-				</button>
-			}
-		>
-			{open ? detail : null}
-		</ChainOfThoughtStep>
+			status={step.kind === "waiting" ? "waiting" : last && working ? "active" : "done"}
+			words={words}
+			detail={detail}
+			always={always}
+			open={open}
+			onToggle={onToggle}
+		/>
 	);
 }
 

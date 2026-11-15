@@ -55,7 +55,7 @@ export function ChainOfThoughtStep({
 	icon?: LucideIcon;
 	label: ReactNode;
 	description?: ReactNode;
-	status?: "complete" | "active" | "pending";
+	status?: "complete" | "active" | "pending" | "failed";
 }) {
 	return (
 		<div
@@ -70,7 +70,12 @@ export function ChainOfThoughtStep({
 			<div className="relative flex w-5 shrink-0 flex-col items-center self-stretch">
 				{/* the icon's box is the label's first line box, so they centre together even when the label wraps */}
 				<span aria-hidden="true" className="flex h-[1.125rem] shrink-0 items-center">
-					<Icon className={cn("size-4 shrink-0", status === "active" ? "text-alive" : "text-ink-2")} />
+					<Icon
+						className={cn(
+							"size-4 shrink-0",
+							status === "active" ? "text-alive" : status === "failed" ? "text-danger" : "text-ink-2",
+						)}
+					/>
 				</span>
 				<div className="my-2 w-px flex-1 bg-line-soft group-last/step:hidden" />
 			</div>

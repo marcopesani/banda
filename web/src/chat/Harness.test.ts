@@ -14,6 +14,7 @@ import {
 	middleEllipsis,
 	projectOf,
 	relativeTo,
+	runHeadline,
 	stepKey,
 	toggledStep,
 } from "./Harness.tsx";
@@ -376,5 +377,13 @@ describe("toggledStep", () => {
 		// a step stays open while new steps arrive: the set only changes when the owner toggles
 		expect(toggledStep(two, "run:3").has("run:3")).toBe(false);
 		expect(toggledStep(two, "run:3").has("edit:5")).toBe(true);
+	});
+});
+
+it("a command of several lines never hides behind the quiet verb of its first", () => {
+	expect(runHeadline("npm test\ngit push --force", "~/sancho", true)).toEqual({
+		verb: "Ran",
+		object: "npm test git push --force",
+		code: true,
 	});
 });
