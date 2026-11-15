@@ -24,6 +24,7 @@ import { SkillCatalogue } from "../chat/Skill.tsx";
 import { actOnFact, prepareBrowser, readMemory, setPaused, signOutSite } from "../lib/api.ts";
 import { attempt } from "../lib/attempt.ts";
 import { agentMainOf } from "../lib/chats.ts";
+import { desktop } from "../lib/desktop.ts";
 import { useMidnight } from "../lib/midnight.ts";
 import { type ArchivedAgent, archivedAgents, chatAgents } from "../lib/navigation.ts";
 import { setTheme, useTheme } from "../lib/prefs.ts";
@@ -34,7 +35,7 @@ import { AgentPersonality, createPersonalityDrafts } from "./AgentPersonality.ts
 import { AgentPublication } from "./AgentPublication.tsx";
 import { ArtifactPage } from "./ArtifactPage.tsx";
 import { BringOnboarding, BringSettings, useBring } from "./Bring.tsx";
-import { bandRows, titleOf, whoOf } from "./band.ts";
+import { attentionOf, bandRows, titleOf, whoOf } from "./band.ts";
 import { ChatThinking } from "./ChatThinking.tsx";
 import { ConnectFlow, freshAccounts } from "./ConnectFlow.tsx";
 import { ConnectionPage } from "./ConnectionPage.tsx";
@@ -308,6 +309,8 @@ function Main() {
 
 	useEffect(() => {
 		document.title = titleOf(rows);
+		// the desktop app's tray carries a dot for the same counts
+		desktop?.attention(attentionOf(rows));
 	}, [rows]);
 	const [notify, setNotify] = useNotify();
 	useAskNotifications(rows, notify === "on", openRow);

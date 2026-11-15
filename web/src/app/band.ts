@@ -138,10 +138,17 @@ export function bandRows(
 	return [...agentRows, ...groupRows].sort((a, b) => b.at - a.at);
 }
 
+/** What waits on the owner: chats with an open ask, and unread messages. */
+export function attentionOf(rows: readonly BandRow[]): { asks: number; unread: number } {
+	return {
+		asks: rows.filter((row) => row.ask !== undefined).length,
+		unread: rows.reduce((total, row) => total + (row.unread ?? 0), 0),
+	};
+}
+
 /** The tab's title: asks first, then unread, then the app's name. */
 export function titleOf(rows: readonly BandRow[]): string {
-	const asks = rows.filter((row) => row.ask !== undefined).length;
-	const unread = rows.reduce((total, row) => total + (row.unread ?? 0), 0);
+	const { asks, unread } = attentionOf(rows);
 	const counts = [asks === 0 ? undefined : `${asks} waiting`, unread === 0 ? undefined : `${unread} unread`].filter(
 		Boolean,
 	);

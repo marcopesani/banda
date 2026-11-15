@@ -10,6 +10,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } from "electron";
+import { attentionFrom, NOTHING, tooltipOf, wantsOwner, withDot } from "./attention.js";
 import { shellPath } from "./environment.js";
 import { failurePage, type Trouble, trouble } from "./trouble.js";
 
@@ -259,6 +260,8 @@ function openWindow(url: string | undefined, page?: string): BrowserWindow {
 		outside(target);
 	});
 	created.webContents.on("will-attach-webview", (event) => event.preventDefault());
+	// a page that loads anew has said nothing yet: the dot is what the page showing now last counted
+	created.webContents.on("did-navigate", () => markTray(NOTHING));
 	created.once("ready-to-show", () => created.show());
 	created.on("close", (event) => {
 		if (quitting) return;
@@ -270,6 +273,18 @@ function openWindow(url: string | undefined, page?: string): BrowserWindow {
 	return created;
 }
 
+/** Whether a message came from the daemon's own page: its top frame, on its origin, in the main window. */
+function fromOwnPage(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+	const frame = event.senderFrame;
+	return (
+		frame !== null &&
+		frame === event.sender.mainFrame &&
+		daemonOrigin !== undefined &&
+		URL.canParse(frame.url) &&
+		new URL(frame.url).origin === daemonOrigin
+	);
+}
+
 /**
  * The system's folder dialog, for the daemon's own page and nothing else: its top frame, on its origin (never an
  * artifact's frame, a sign-in window gone elsewhere, or the failure page). It hands back only the path the owner
@@ -277,15 +292,7 @@ function openWindow(url: string | undefined, page?: string): BrowserWindow {
  */
 function answerFolders(): void {
 	ipcMain.handle("banda:choose-folder", async (event, at: unknown) => {
-		const frame = event.senderFrame;
-		if (
-			frame === null ||
-			frame !== event.sender.mainFrame ||
-			daemonOrigin === undefined ||
-			!URL.canParse(frame.url) ||
-			new URL(frame.url).origin !== daemonOrigin
-		)
-			throw new Error("Only banda's own page may open the folder dialog.");
+		if (!fromOwnPage(event)) throw new Error("Only banda's own page may open the folder dialog.");
 		const start = typeof at === "string" && at.length < 4096 ? at.replace(/^~(?=$|[/\\])/, homedir()) : homedir();
 		const options: Electron.OpenDialogOptions = {
 			title: "Your code folder",
@@ -307,6 +314,43 @@ function show(): void {
 	window.focus();
 }
 
+/** The tray's icon as it is, and with the dot that says something waits on the owner or is unread. */
+let trayImages: { readonly plain: Electron.NativeImage; readonly dotted: Electron.NativeImage } | undefined;
+
+/**
+ * The icon with the dot drawn on each of its sizes. A macOS template image is one colour, which the menu bar paints
+ * to suit itself: there the dot is a hole in the icon, so it shows as the icon's opposite whatever the menu bar is.
+ * Elsewhere the icon has colours of its own, and the dot is dark in a white ring.
+ */
+function dotted(image: Electron.NativeImage, template: boolean): Electron.NativeImage {
+	const { width, height } = image.getSize();
+	const out = nativeImage.createEmpty();
+	for (const scaleFactor of image.getScaleFactors()) {
+		const pixels = image.toBitmap({ scaleFactor });
+		// the bitmap's own width, whatever this size's scale turned out to be
+		const wide = Math.round(Math.sqrt((pixels.length / 4) * (width / height)));
+		const drawn = template ? withDot(pixels, wide, [0, 0, 0]) : withDot(pixels, wide, [255, 255, 255], [28, 28, 28]);
+		out.addRepresentation({ scaleFactor, width: wide, height: pixels.length / 4 / wide, buffer: Buffer.from(drawn) });
+	}
+	if (template) out.setTemplateImage(true);
+	return out;
+}
+
+/** Show on the tray what the page counted: a dot while anything waits or is unread, and the counts in its tooltip. */
+function markTray(said: unknown): void {
+	if (tray === undefined || tray.isDestroyed() || trayImages === undefined) return;
+	const attention = attentionFrom(said);
+	tray.setImage(wantsOwner(attention) ? trayImages.dotted : trayImages.plain);
+	tray.setToolTip(tooltipOf(attention));
+}
+
+/** The page's count of what waits on the owner, from the daemon's own page and nothing else. */
+function answerAttention(): void {
+	ipcMain.on("banda:attention", (event, said: unknown) => {
+		if (fromOwnPage(event) && event.sender === window?.webContents) markTray(said);
+	});
+}
+
 function makeTray(icon: string): void {
 	// macOS: a template image (black and alpha, @2x beside it), which the menu bar paints white or black to suit itself
 	const image =
@@ -314,8 +358,9 @@ function makeTray(icon: string): void {
 			? nativeImage.createFromPath(join(app.getAppPath(), "assets", "trayTemplate.png"))
 			: nativeImage.createFromPath(icon).resize({ width: 18, height: 18 });
 	if (process.platform === "darwin") image.setTemplateImage(true);
+	trayImages = { plain: image, dotted: dotted(image, process.platform === "darwin") };
 	tray = new Tray(image);
-	tray.setToolTip("banda");
+	tray.setToolTip(tooltipOf(NOTHING));
 	const loginItem = process.platform !== "linux";
 	const menu = () =>
 		Menu.buildFromTemplate([
@@ -361,6 +406,7 @@ else {
 		if (!app.isPackaged) app.dock?.setIcon(release().icon.replace("icon-192", "icon-512"));
 		makeTray(release().icon);
 		answerFolders();
+		answerAttention();
 		if (!app.isPackaged && process.env.BANDA_HOME === undefined) {
 			// a development shell never touches the owner's home (AGENTS.md "Never touch a live banda")
 			window = openWindow(

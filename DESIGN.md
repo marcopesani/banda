@@ -126,7 +126,7 @@ one that gives them one more thing to manage stays out.
   (on the phone, by a long press). Unread rows get a
   bold name, an ink excerpt and an ink count on a neutral pill; read rows are muted. When an ask is open in a chat,
   its excerpt reads the ask in ink ("Waiting: send the email to Ana?"), a dot marks its face, and
-  the tab's title counts asks before unread; on the desktop an open ask also fires a local notification, which needs
+  the tab's title counts asks before unread, and the desktop app's tray icon carries a dot while either is not zero; on the desktop an open ask also fires a local notification, which needs
   no vendor, while a routine's message only badges. A harness's ask notifies with the harness and the kind of thing asked, never the
   command, the path or the project's name, any of which would sit in a banner on a lock screen. The agent's face moves while it works, a dot marks it while it waits
   on the owner, and it dims while its routines are paused. The header

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultAvatarFace } from "../src/core/avatar-face.ts";
 import type { ChatRow, GroupRow } from "../src/server/api.ts";
-import { bandRows, titleOf } from "../web/src/app/band.ts";
+import { attentionOf, bandRows, titleOf } from "../web/src/app/band.ts";
 
 const NOW = Date.parse("2026-11-03T12:00:00");
 const agents = [
@@ -48,6 +48,7 @@ describe("band rows", () => {
 			time: "",
 		});
 		expect(titleOf(rows)).toBe("(1 waiting, 2 unread) banda");
+		expect(attentionOf(rows)).toEqual({ asks: 1, unread: 2 });
 	});
 
 	it("greets with what an agent's tools can do: the web only when it has the web or a browser", () => {
