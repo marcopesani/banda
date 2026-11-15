@@ -62,7 +62,7 @@ import { userFiles } from "../lib/chat.ts";
 import { cn } from "../lib/cn.ts";
 import { useReturnFocus } from "../lib/return-focus.ts";
 import { harnessToolOf } from "../lib/segments/harness.ts";
-import { useShell } from "../lib/shell.ts";
+import { useShellPart } from "../lib/shell.ts";
 import { type Transcript, useTranscript } from "../lib/transcript.ts";
 import { FilePart } from "./FilePart.tsx";
 import { HarnessActivitySheet } from "./HarnessSession.tsx";
@@ -211,7 +211,8 @@ type ViewProps = {
 };
 function FetchedActivity(props: Omit<ViewProps, "transcript" | "given" | "harnesses">) {
 	const transcript = useTranscript(props.target.chat);
-	const { harnesses } = useShell();
+	// the sessions alone: the sheet renders when one changes, not at every event the shell hears
+	const harnesses = useShellPart("harnesses");
 	return <ActivityView {...props} transcript={transcript} harnesses={harnesses} />;
 }
 

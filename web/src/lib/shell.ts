@@ -186,6 +186,12 @@ export function useShellPick(pick: (shell: Shell) => string): string {
 	return useSyncExternalStore(subscribe, picked, picked);
 }
 
+/** One part of the shell, as the daemon last said it: a component re-renders only when that part changes. */
+export function useShellPart<K extends keyof Shell>(key: K): Shell[K] {
+	const picked = () => state[key];
+	return useSyncExternalStore(subscribe, picked, picked);
+}
+
 /** Chat `chat`'s tier as the daemon last said; a component using it renders only when that changes. */
 export function useChatTier(chat: number | undefined): ChatTierView {
 	const picked = () => (chat === undefined ? undefined : tiers.get(chat)) ?? NO_TIER;
