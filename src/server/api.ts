@@ -23,6 +23,7 @@ export type { Preview } from "../core/preview.ts";
 export type { Answer, Approving, Ask, Field, Sender as Answered } from "../core/wait.ts";
 // Each area's shapes live in its own file (slice 8's seams); this file only gathers them.
 export type * from "./api/artifacts.ts";
+export type * from "./api/backups.ts";
 export type * from "./api/band.ts";
 export type * from "./api/custom-providers.ts";
 export type * from "./api/devices.ts";

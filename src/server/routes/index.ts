@@ -4,6 +4,7 @@
  */
 import type { AreaModule } from "./area.ts";
 import { artifacts } from "./artifacts.ts";
+import { backups } from "./backups.ts";
 import { band } from "./band.ts";
 import { customProviders } from "./custom-providers.ts";
 import { faces } from "./faces.ts";
@@ -33,4 +34,5 @@ export const AREAS: readonly AreaModule[] = [
 	faces,
 	harnessesArea,
 	band,
+	backups,
 ];

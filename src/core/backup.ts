@@ -49,8 +49,10 @@ const STORE = "durable.db";
 const FILES = [STORE, "format", "config.json"] as const;
 /** The native computer's folders (src/box/microvm.ts), by what a backup may leave out. */
 const COMPUTER = ["workspace", "work", "tools", "proxy", "browser"] as const;
+/** Where the computer's files are when there is no box (src/box/host.ts): folders of the home itself. */
+const HOST = ["workspace", "work"] as const;
 /** Folders, each counted; the ones whose bytes are cheap to read are hashed too. */
-const TREES = ["auth", "blobs", ...COMPUTER.map((name) => `computer/${name}`)] as const;
+const TREES = ["auth", "blobs", ...COMPUTER.map((name) => `computer/${name}`), ...HOST] as const;
 /** A build tree, a tool cache and a browser's profile are many gigabytes: counted, not hashed. */
 const UNHASHED: ReadonlySet<string> = new Set(["computer/work", "computer/tools", "computer/browser"]);
 
@@ -89,21 +91,43 @@ export type BackupPoint =
 	| "restore:staged"
 	| "restore:copied"
 	| "restore:verified"
-	| "restore:renamed";
+	| "restore:renamed"
+	/** A restore made ready from the app (backups.ts): its copy checked, then its note written. */
+	| "restore:ready"
+	/** The ready restore taking the home's place at a start: the home moved aside, the copy in its place, the note gone. */
+	| "restore:aside"
+	| "restore:placed"
+	| "restore:settled"
+	/** A backup deleted: it left its name, before its bytes go. */
+	| "backup:deleting";
 
 export type BackupOptions = {
 	/** Leave out the native computer's folders altogether: the workspace, with its definitions and memory, among them. */
 	readonly computer?: false;
 	/** Leave out the browser's profile: the sites the owner signed in to. */
 	readonly browser?: false;
+	/** Stops the backup where it is, with nothing left of it: a daemon that closes does not wait for gigabytes. */
+	readonly signal?: AbortSignal | undefined;
 	readonly hit?: (point: BackupPoint) => void;
 };
 
 export type RestoreOptions = {
 	/** The home format this build reads (`HOME_FORMAT`): a backup of a newer one is refused. */
 	readonly format: number;
+	/** Stops the restore where it is, with no home made. */
+	readonly signal?: AbortSignal | undefined;
 	readonly hit?: (point: BackupPoint) => void;
 };
+
+/** Where a home's backups go unless the owner names another place: beside it. */
+export const backupsOf = (home: string) => `${resolve(home)}-backups`;
+
+/** The folder name of a backup taken at `at`: its time in UTC, as a file name takes it. */
+export const backupName = (at: Date = new Date()) =>
+	at
+		.toISOString()
+		.replace(/\.\d+Z$/, "Z")
+		.replaceAll(":", "-");
 
 export class BackupRefused extends Error {
 	override name = "BackupRefused";
@@ -122,6 +146,7 @@ export async function backupHome(
 	options: BackupOptions = {},
 ): Promise<{ readonly path: string; readonly manifest: Manifest }> {
 	const hit = options.hit ?? (() => {});
+	const { signal } = options;
 	home = resolve(home);
 	to = resolve(to);
 	const format = Number((await readFile(join(home, "format"), "utf8").catch(() => "")).trim());
@@ -135,7 +160,7 @@ export async function backupHome(
 	const stage = await staging(to, "partial");
 	try {
 		hit("backup:staged");
-		await copyTree(join(home, "blobs"), join(stage, "blobs"), { live: true });
+		await copyTree(join(home, "blobs"), join(stage, "blobs"), { live: true, signal });
 		hit("backup:blobs");
 		const source = new DatabaseSync(join(home, STORE), { readOnly: true });
 		try {
@@ -144,11 +169,11 @@ export async function backupHome(
 		} finally {
 			source.close();
 		}
-		await copyTree(join(home, "blobs"), join(stage, "blobs"), { live: true, missing: true });
+		await copyTree(join(home, "blobs"), join(stage, "blobs"), { live: true, missing: true, signal });
 		hit("backup:store");
 		for (const name of ["format", "config.json"])
 			if (await exists(join(home, name))) await copyFile(join(home, name), join(stage, name));
-		await copyTree(join(home, "auth"), join(stage, "auth"), { live: true });
+		await copyTree(join(home, "auth"), join(stage, "auth"), { live: true, signal });
 		hit("backup:files");
 		const excluded: string[] = [];
 		for (const name of COMPUTER) {
@@ -156,14 +181,19 @@ export async function backupHome(
 				excluded.push(`computer/${name}`);
 				continue;
 			}
-			await copyTree(join(home, "computer", name), join(stage, "computer", name), { live: true });
+			await copyTree(join(home, "computer", name), join(stage, "computer", name), { live: true, signal });
+		}
+		for (const name of HOST) {
+			if (!(await exists(join(home, name)))) continue;
+			if (options.computer === false) excluded.push(name);
+			else await copyTree(join(home, name), join(stage, name), { live: true, signal });
 		}
 		hit("backup:computer");
 		const manifest: Manifest = {
 			banda: version(),
 			format,
 			created: new Date().toISOString(),
-			...(await describe(stage, (tree) => !UNHASHED.has(tree))),
+			...(await describe(stage, (tree) => !UNHASHED.has(tree), signal)),
 			excluded,
 		};
 		if (Number((await readFile(join(stage, "format"), "utf8")).trim()) !== format)
@@ -205,6 +235,7 @@ export async function readManifest(from: string): Promise<Manifest> {
  */
 export async function restoreHome(from: string, home: string, options: RestoreOptions): Promise<Manifest> {
 	const hit = options.hit ?? (() => {});
+	const { signal } = options;
 	from = resolve(from);
 	home = resolve(home);
 	const manifest = await readManifest(from);
@@ -229,11 +260,11 @@ export async function restoreHome(from: string, home: string, options: RestoreOp
 		for (const tree of TREES) {
 			if (manifest.trees[tree] === undefined) continue;
 			await mkdir(dirname(join(stage, tree)), { recursive: true, mode: 0o700 });
-			await copyTree(join(from, tree), join(stage, tree), {});
+			await copyTree(join(from, tree), join(stage, tree), { signal });
 		}
 		hit("restore:copied");
 		// what is activated is what was checked: the stage itself, described as the backup was
-		const found = await describe(stage, (tree) => manifest.trees[tree]?.sha256 !== undefined);
+		const found = await describe(stage, (tree) => manifest.trees[tree]?.sha256 !== undefined, signal);
 		const wrong = differences(manifest, found);
 		if (wrong.length > 0)
 			throw new BackupRefused(
@@ -277,7 +308,7 @@ export function daemonRuns(home: string): boolean {
 type Described = Pick<Manifest, "files" | "trees">;
 
 /** What is in a backup or a stage, as a manifest says it: the same reading on both sides of a restore. */
-async function describe(root: string, hashed: (tree: string) => boolean): Promise<Described> {
+async function describe(root: string, hashed: (tree: string) => boolean, signal?: AbortSignal): Promise<Described> {
 	const files: Described["files"] = {};
 	for (const name of FILES) {
 		const stat = await lstat(join(root, name)).catch(() => undefined);
@@ -291,6 +322,7 @@ async function describe(root: string, hashed: (tree: string) => boolean): Promis
 		let bytes = 0;
 		const hash = hashed(tree);
 		await walk(join(root, tree), "", async (path, relative, entry) => {
+			signal?.throwIfAborted();
 			count++;
 			if (entry === "link") {
 				if (hash) lines.push(`${relative}\0link:${await readlink(path)}`);
@@ -333,13 +365,14 @@ const WIDTH = 16;
 async function copyTree(
 	from: string,
 	to: string,
-	{ live = false, missing = false }: { live?: boolean; missing?: boolean },
+	{ live = false, missing = false, signal }: { live?: boolean; missing?: boolean; signal?: AbortSignal | undefined },
 ): Promise<void> {
 	const gone = (error: unknown) => {
 		if (live && (error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
 	};
 	const folder = async (source: string, target: string): Promise<void> => {
+		signal?.throwIfAborted();
 		const stat = await lstat(source).catch(gone);
 		if (stat === undefined || !stat.isDirectory()) return;
 		const entries = await readdir(source, { withFileTypes: true }).catch(gone);
@@ -426,6 +459,28 @@ async function staging(path: string, word: string): Promise<string> {
 	return stage;
 }
 
+/**
+ * Remove the stages dead processes left in `parent`: a backup that was being filled, a restore being checked, a
+ * backup being deleted. Each is known by the process in its name, and one whose process lives is left alone.
+ */
+export async function sweepStages(parent: string): Promise<void> {
+	for (const name of await readdir(parent).catch(() => [])) {
+		const pid = Number(/^\..+\.(?:partial|restoring|deleting)-(\d+)-[0-9a-f]{8}$/.exec(name)?.[1]);
+		if (Number.isSafeInteger(pid) && pid > 0 && !alive(pid)) await remove(join(parent, name));
+	}
+}
+
+/**
+ * Delete the folder `path`: it leaves its name in one step and is removed under a stage's, so what a kill leaves is
+ * the folder whole or a stage, never half of it under its own name.
+ */
+export async function removeWhole(path: string, hit: () => void = () => {}): Promise<void> {
+	const stage = join(dirname(path), `.${basename(path)}.deleting-${process.pid}-${randomBytes(4).toString("hex")}`);
+	await rename(path, stage);
+	hit();
+	await remove(stage);
+}
+
 function alive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
@@ -436,7 +491,7 @@ function alive(pid: number): boolean {
 }
 
 /** Remove a stage, read-only folders in it too; one that will not go stays a stage, never a result. */
-async function remove(stage: string): Promise<void> {
+export async function remove(stage: string): Promise<void> {
 	await rm(stage, { recursive: true, force: true }).catch(async () => {
 		await walkFolders(stage, (folder) => chmod(folder, 0o700)).catch(() => undefined);
 		await rm(stage, { recursive: true, force: true }).catch(() => undefined);

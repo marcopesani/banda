@@ -39,6 +39,7 @@ import { stopArchived } from "./core/archive.ts";
 import type { EffectTool } from "./core/ask.ts";
 import { allowHost, askHostsTool } from "./core/ask-hosts.ts";
 import { avatarInstructionsExtension } from "./core/avatar-instructions.ts";
+import { finishRestore } from "./core/backups.ts";
 import { BlobStore, Blobs, safeName } from "./core/blobs.ts";
 import { ChatReads, readChat } from "./core/chat-reads.ts";
 import { compactionExtension, compactionSettings } from "./core/compaction.ts";
@@ -157,6 +158,8 @@ const SEND_DRAIN_MS = 10_000;
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	const { home } = options;
 	const log = options.log ?? ((line) => console.error(line));
+	// a restore the app made ready takes the home's place here, before the home is locked, made or read
+	await finishRestore(home, { log });
 	await mkdir(home, { recursive: true, mode: 0o700 });
 	const lock = acquireLock(home);
 	let harness: Harness | undefined;
@@ -433,7 +436,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		registry.install(nowExtension(Date.now, memoryFiles));
 		registry.install(toolDiscoveryExtension);
 		// each area's extensions, before the store opens: what it installs is there when anything resumes
-		const boot: Boot = { core, blobs, config, home, retrieval, root: agentBox.workspace, log };
+		const boot: Boot = { core, blobs, config, home, box: agentBox.kind, retrieval, root: agentBox.workspace, log };
 		for (const area of AREAS) for (const extension of area.install?.(boot) ?? []) registry.install(extension);
 		const credentials = new FileCredentialStore(home);
 		const models = cacheLong(timeThinking(dropEmptyReplies(options.models ?? builtinModels({ credentials }))));

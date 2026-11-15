@@ -5,6 +5,7 @@
  */
 import type { MutableModels } from "@earendil-works/pi-ai";
 import type { Extension, Harness, ModelRef, Registry, SessionDocToken } from "@earendil-works/pi-durable";
+import type { BoxKind } from "../../box/box.ts";
 import type { BlobStore } from "../../core/blobs.ts";
 import type { searchService } from "../../core/search-service.ts";
 import type { defineCore } from "../../core/turn.ts";
@@ -31,6 +32,8 @@ export type Boot = {
 	readonly blobs: BlobStore;
 	readonly config: Config;
 	readonly home: string;
+	/** Which box the agents work in: where the computer's files are kept follows from it. */
+	readonly box: BoxKind;
 	/** The workspace's root in the box. */
 	readonly root: string;
 	readonly log: (line: string) => void;
