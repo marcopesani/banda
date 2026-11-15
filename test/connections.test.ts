@@ -126,6 +126,52 @@ describe("a remote connection", () => {
 		expect(offeredAt.flat()).toContain("cal__list_events");
 	});
 
+	it("a write on a listing kept from before listings were numbered is a draft, runs approved, and its permission stands", async () => {
+		const fake = await startFakeMcp();
+		fakes.push(fake);
+		const s = await open(fake);
+		await define(s, "cal", connectionDefinition({ url: fake.url, reads: ["list_events"] }));
+		// as a build from before tool authority stored it, and as a relisting of the same definition keeps it
+		const unnumbered = async () =>
+			s.harness.commit(async (tx) => {
+				const { tools } = (await tx.doc(Connected)).connections.cal as { tools: { [tool: string]: object } };
+				for (const tool of Object.values(tools)) delete (tool as { generation?: number }).generation;
+			}, context);
+		await unnumbered();
+		await s.capabilities.connect("cal");
+		const listed = (await s.harness.snapshot(Connected, context))?.connections.cal.tools.create_event;
+		expect(listed).not.toHaveProperty("generation");
+		const args = { title: "Tea", day: "mon" };
+		s.model.plan([{ tool: "cal__create_event", args }]);
+		const ran = await s.say("tea on monday");
+		const wait = await until(async () => {
+			const failed = (await s.results(ran.chat)).find((result) => result.error);
+			if (failed !== undefined) throw new Error(failed.text);
+			return (await openWaits(s.harness)).find((w) => w.ask.type === "approval");
+		});
+		await answer(s.harness, wait.key, "approve", web, "bearer", { approving: { permission: { scope: "always" } } });
+		await s.done(ran.turn);
+		expect(fake.calls).toEqual([{ tool: "create_event", args }]);
+		// the same listing again: the permission covers it, with nothing asked
+		await s.capabilities.connect("cal");
+		s.model.plan([{ tool: "cal__create_event", args }]);
+		await s.done((await s.say("and again")).turn);
+		expect(await openWaits(s.harness)).toEqual([]);
+		expect(fake.calls).toEqual([
+			{ tool: "create_event", args },
+			{ tool: "create_event", args },
+		]);
+		// listed anew, the tool is numbered and what was given for the earlier listing ends
+		fake.tools = fake.tools.map((tool) =>
+			tool.name === "create_event" ? { ...tool, description: "Create an event, differently" } : tool,
+		);
+		await define(s, "cal", connectionDefinition({ url: fake.url, reads: ["list_events", "whoami"] }));
+		expect((await s.harness.snapshot(Connected, context))?.connections.cal.tools.create_event?.generation).toBeTypeOf(
+			"number",
+		);
+		expect(Object.keys((await s.harness.snapshot(Permissions, context))?.permissions ?? {})).toEqual([]);
+	});
+
 	it("a server's relisting cannot change an accepted tool's prompt description or schema", async () => {
 		const fake = await startFakeMcp();
 		fakes.push(fake);
