@@ -1,7 +1,7 @@
 #!/bin/bash
 # On a CI runner where the package is installed (release acceptance): use the app as the ordinary user who installed
 # it, with what the release notes ask of an owner and nothing more: membership of the kvm group, taken up by signing
-# in again (here, `sudo -u` to the same user, as scripts/verify-linux-computer.ts does), on a display and a session
+# in again (here, `sg kvm`), on a display and a session
 # bus started for this run. The home and the port are the ones an owner gets: ~/.banda and the default.
 #
 #   runner.sh <out> [NAME=value ...]    the evidence folder, then drive.mjs's own settings (BANDA_TRY_COMPUTER=1 ...)
@@ -25,8 +25,10 @@ need "this runs as an ordinary user, not root" test "$(id -u)" -ne 0
 need "the package is not installed at /opt/banda" test -x /opt/banda/banda-desktop
 need "this machine has no /dev/kvm" test -c /dev/kvm
 need "the user could not be added to the kvm group" sudo -n usermod -aG kvm "$user"
-need "the user cannot read /dev/kvm after joining the kvm group" sudo -n -u "$user" -- test -r /dev/kvm
-need "the user cannot write /dev/kvm after joining the kvm group" sudo -n -u "$user" -- test -w /dev/kvm
+# the membership is taken up as signing in again would, with `sg`, which reads the group file as it is now: on
+# Ubuntu 26.04 `sudo -u` to the same user keeps the groups the session started with
+need "the user cannot read /dev/kvm after joining the kvm group" sg kvm -c "test -r /dev/kvm"
+need "the user cannot write /dev/kvm after joining the kvm group" sg kvm -c "test -w /dev/kvm"
 mkdir -p "$out"
 # drive.mjs waits for display :99's socket: one left by a server that is gone would answer before the new one is up
 if ! pgrep -x Xvfb >/dev/null; then
@@ -34,10 +36,11 @@ if ! pgrep -x Xvfb >/dev/null; then
 fi
 runtime=$(mktemp -d)
 chmod 700 "$runtime"
-exec sudo -n -u "$user" -- env -i \
+command=$(printf '%q ' env -i \
 	PATH=/usr/local/bin:/usr/bin:/bin \
 	HOME="$HOME" \
 	LANG=C.UTF-8 \
 	XDG_RUNTIME_DIR="$runtime" \
 	"$@" \
-	dbus-run-session -- /opt/banda/resources/banda/node/node "$here/drive.mjs" x11 "$out"
+	dbus-run-session -- /opt/banda/resources/banda/node/node "$here/drive.mjs" x11 "$out")
+exec sg kvm -c "$command"
