@@ -208,7 +208,8 @@ export function BrowserScreen({
 				)}
 			</div>
 			{holding ? (
-				<form className="flex items-center gap-2" onSubmit={typeInto}>
+				// only where a tap opens no keyboard (a phone): with a keyboard, the owner types on the page itself
+				<form className="hidden items-center gap-2 pointer-coarse:flex" onSubmit={typeInto}>
 					<Input
 						aria-label="Type into the page"
 						placeholder="Type into the page"
