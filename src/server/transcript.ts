@@ -885,15 +885,22 @@ export async function shell(
 	const partial = new Set<Area | RuntimeShellPart>();
 	// pushes in flight, so the stream ends only after them: none writes into a response that ended
 	const pushing = new Set<Promise<void>>();
+	// one push at a time, in the order asked: a push that read before a change never writes after one that read later,
+	// which would leave the app showing what was, with nothing to correct it until the next change
+	let last: Promise<void> = Promise.resolve();
 	const pushed = () => {
 		timer = undefined;
-		const all = whole;
-		const some = [...partial];
-		whole = false;
-		partial.clear();
-		const running = (all ? push() : Promise.all(some.map(pushPart)).then(() => undefined)).finally(() =>
-			pushing.delete(running),
-		);
+		const running = last
+			.then(async () => {
+				const all = whole;
+				const some = [...partial];
+				whole = false;
+				partial.clear();
+				if (all) await push();
+				else await Promise.all(some.map(pushPart));
+			})
+			.finally(() => pushing.delete(running));
+		last = running.catch(() => {});
 		pushing.add(running);
 		return running;
 	};

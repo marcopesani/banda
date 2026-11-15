@@ -117,6 +117,67 @@ describe("the shell stream", () => {
 		});
 	}
 
+	it("a slow read never lands after a later one: the last thing written is the newest", async () => {
+		const core = defineCore({ blobs: blobStore(), gateway: () => new FakeGateway(), model: () => FAUX_MODEL });
+		const registry = createRegistry();
+		registry.install(core.extension);
+		const harness = await openStore(await tempHome(), { models: echoModels().models, registry });
+		const stop = new AbortController();
+		let notify: (scope: "all") => void = () => {};
+		// what the connections are now, and each read of them: answered when the test says, with what was true when asked
+		let now = "first";
+		const asked: { readonly was: string; readonly answer: () => void }[] = [];
+		const events: ShellEvent[] = [];
+		const streaming = shell(
+			harness,
+			{
+				agents: async () => [],
+				memory: async () => ({ facts: [] }) as unknown as MemoryView,
+				control: async () => ({ routines: [], activity: [], permissions: [], removed: {} }),
+				capabilities: () =>
+					new Promise((resolve) => {
+						const was = now;
+						asked.push({
+							was,
+							answer: () => resolve({ connections: [], signedIn: [{ agent: was, site: "", at: 0 }] }),
+						});
+					}),
+			},
+			(listener) => {
+				notify = listener;
+				return () => {};
+			},
+			(event) => events.push(event),
+			stop.signal,
+		);
+		const written = () =>
+			events.flatMap((event) => (event.type === "capabilities" ? [event.capabilities.signedIn?.[0]?.agent] : []));
+		try {
+			await waitUntil(() => asked.length === 1);
+			asked[0]?.answer();
+			await waitUntil(() => written().length === 1);
+			// a read is under way and slow; the connections change, and the stream is told
+			notify("all");
+			await waitUntil(() => asked.length === 2);
+			now = "second";
+			notify("all");
+			// were pushes to overlap, the later read would be asked now and could answer first
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			for (const each of asked.slice(1).reverse()) each.answer();
+			await waitUntil(() => asked.length === 3);
+			asked[2]?.answer();
+			await waitUntil(() => written().at(-1) === "second");
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			expect(written().at(-1)).toBe("second");
+			expect(asked.map((each) => each.was)).toEqual(["first", "first", "second"]);
+		} finally {
+			stop.abort();
+			for (const each of asked) each.answer();
+			await streaming;
+			await harness.close(context);
+		}
+	});
+
 	it("a doc an area owns pushes that area's events alone; a doc the shell reads pushes the whole shell, where it changed", async () => {
 		const home = await tempHome();
 		const core = defineCore({ blobs: blobStore(), gateway: () => new FakeGateway(), model: () => FAUX_MODEL });
