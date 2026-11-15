@@ -49,6 +49,7 @@ import { registerCustomProviders } from "./core/custom-provider.ts";
 import { isCustomProvider } from "./core/custom-providers.ts";
 import { GIT_HOSTS, proxyKnows, sweepReceipts } from "./core/egress.ts";
 import { dropEmptyReplies } from "./core/empty-replies.ts";
+import { backupBeforeUpgrade, migrateHome } from "./core/format.ts";
 import { type Gateway, INLINE_IMAGES, mimeOf, OWNER, routeKey } from "./core/gateway.ts";
 import { guardImages } from "./core/images.ts";
 import { cacheLong } from "./core/long-cache.ts";
@@ -247,6 +248,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			stopped({ failed });
 		})());
 	try {
+		// before anything reads the home: a home of an earlier format is brought to this build's, another is refused
+		await migrateHome(home, { before: async (from) => void (await backupBeforeUpgrade(home, from, log)) });
 		const config = await readConfig(home);
 		const fileLimit = maxFileBytes(config);
 		const turnEnded = async (turn: number) => {

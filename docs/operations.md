@@ -15,8 +15,9 @@ Entry points: ../src/cli/index.ts, ../src/daemon.ts, ../src/box/container.ts, ..
 - Provide clean installation, provider setup, autostart, shutdown, sleep/wake and offline behavior. The app must
   explain a missing runtime, full disk, provider outage or failed update with a concrete next action.
 - Spike signed distribution/update installation on the selected platform. Updates stop work safely, back up first,
-  verify artifacts and activate atomically. Define application/store compatibility and restore behavior; do not add
-  speculative migrations during pre-release. Binary rollback alone is not data rollback.
+  verify artifacts and activate atomically. A later build opens the home an earlier one left (DESIGN.md "Home"); a
+  migration step exists for a shape that changed, never ahead of one. Binary rollback alone is not data rollback: a
+  home a newer build converted goes back only as the backup taken before its first step.
 - Add owner-controlled diagnostics with redaction, explicit export and retention. Document token rotation, backup key
   loss, uninstall/data retention and recovery. No telemetry or outbound support upload without owner action.
 - Exit: a clean supported machine installs, runs, updates and recovers without CLI or hand-installed Docker.
@@ -90,4 +91,7 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
   fsync on Windows; qualify power-loss recovery on a Windows filesystem
 - [ ] Push notifications that carry no content
 - [ ] Qualify recoverable updates, owner-controlled diagnostics and the exact packaged candidate (operations.md, verification.md)
+- [ ] Qualify an upgrade through the installed app: a home the published release made, opened by its successor on
+  each platform, with what the app says while steps run and when one fails. The migration runner's kill sweep
+  (test/home-format.faults.test.ts) has not yet run in CI, and no build has a real step
 - [ ] The daemon runs the checkout's code: merged work takes effect only at a restart

@@ -11,11 +11,18 @@ export type Trouble = {
 /** Read the daemon's output for a cause the owner can act on. */
 export function trouble(output: string, at: { home: string; port: number; log: string }): Trouble {
 	const tail = output.trim().split("\n").slice(-20).join("\n");
-	if (/made by an earlier build of banda|is in format \d+, and this build/.test(output))
+	if (/was made by a build of banda from before/.test(output))
 		return {
 			title: "This version can't open your home",
-			said: `${at.home} was made by another version of banda, and this pre-release changes how it stores things without converting them.`,
+			said: `${at.home} was made by a version of banda from before 0.1.0, whose homes later versions do not convert.`,
 			fix: `Quit, rename ${at.home} to keep it, and start again for a fresh home; or install the version that made it.`,
+			details: tail,
+		};
+	if (/from a newer build of banda than this one/.test(output))
+		return {
+			title: "Your home needs a newer version",
+			said: `${at.home} was last opened by a newer version of banda than this one, which left it as it was.`,
+			fix: "Quit and install the latest version of banda.",
 			details: tail,
 		};
 	if (/EADDRINUSE/.test(output))

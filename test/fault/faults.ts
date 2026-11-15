@@ -13,6 +13,9 @@ export type FaultPoint =
 	| import("../../src/server/agent-publication.ts").AgentPublicationPoint
 	/** A home's backup and its restore: each stage filled, checked and renamed into place. */
 	| import("../../src/core/backup.ts").BackupPoint
+	/** A home brought to the build's format: the runner's boundaries, and those inside a test step. */
+	| import("../../src/core/format.ts").FormatPoint
+	| import("./format-scenario.ts").StepPoint
 	| "commit:before"
 	| "commit:after"
 	| "send:before"

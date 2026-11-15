@@ -20,6 +20,8 @@ Entry points: ../src/core/blobs.ts, ../src/core/store.ts, ../src/home.ts, ../src
   restored home; do not overwrite the current home during validation. Rebuild derived state afterward.
 - Restore on a fresh home and fresh containers, then resume pending work. Unknown external outcomes still ask;
   restoration must not replay already completed sends merely because the backup predates them.
+- An upgrade that converts the home takes a backup first, and converts nothing when the backup fails. The backup is
+  of the home before any step: a start that goes on after a kill never takes it again over a home half converted.
 - Exit: recovery acceptance R1-R4 passes, including a corrupted or incomplete backup and pending approvals.
 
 Follow [Delivery](delivery.md) and the relevant gates in [Verification](verification.md).
@@ -40,3 +42,5 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] Hash the large computer folders (work, tools, browser), which a manifest only counts, where that is cheap
 - [ ] Make a backup hold through power loss, not only a kill: only the store and the manifest are synced before the
   rename
+- [ ] Keep the backup an upgrade takes until the owner lets it go, and offer to restore it when a step fails for good
+  or the owner returns to the earlier build (operations.md)

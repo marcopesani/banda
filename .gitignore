@@ -16,3 +16,6 @@ release/
 
 # git worktrees of feature branches
 .worktrees/
+
+# a kept home (test/home-upgrade.test.ts) is its store
+!/test/fixtures/homes/*/durable.db

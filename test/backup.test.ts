@@ -29,8 +29,9 @@ import {
 	readManifest,
 	restoreHome,
 } from "../src/core/backup.ts";
+import { HOME_FORMAT } from "../src/core/format.ts";
 import { Control } from "../src/core/routines.ts";
-import { context, HOME_FORMAT } from "../src/core/store.ts";
+import { context } from "../src/core/store.ts";
 import {
 	BACKUP_POINTS,
 	CARRIED,

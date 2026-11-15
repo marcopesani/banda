@@ -6,7 +6,7 @@
  * argv: home, to, restored, fault schedule JSON (Fault[])
  */
 import { backupHome, restoreHome } from "../../src/core/backup.ts";
-import { HOME_FORMAT } from "../../src/core/store.ts";
+import { HOME_FORMAT } from "../../src/core/format.ts";
 import { whole } from "./backup-scenario.ts";
 import { type Fault, Faults } from "./faults.ts";
 

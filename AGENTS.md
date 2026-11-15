@@ -133,6 +133,12 @@ A banda daemon may be running from another checkout, possibly the one you are ru
   as `https://raw.githubusercontent.com/purrgrammer/banda/pr-proof/pr-<N>/<file>`.
 - Push to GitHub only (`git push https://github.com/purrgrammer/banda <branch>`): `origin` also pushes to
   a nostr mirror that rejects force pushes.
-- Pre-release: no backwards-compatibility layers. Change stored shapes in place, with no `migrate` and no version
-  bump: a home made by an earlier build need not open, and the owner starts a fresh one. test/stored-shapes.test.ts
-  covers the shapes as they are now.
+- An upgrade keeps the owner's home: a home made by 0.1.0-alpha.14 (format 3) or any later build opens in every later
+  one. A stored shape (a doc, a task's input or checkpoint, a file in the home, what a pinned dependency keeps there)
+  changes only together with three things: a step appended to `MIGRATIONS` in src/core/format.ts, which moves the
+  home's format (a doc may convert through its definition's `version` and `migrate`, and the step then does nothing
+  more: the format still moves, so an earlier build refuses the home plainly instead of failing on a doc it cannot
+  read); the step's kills and thrown faults under `test/fault/` (principle 10: it can stop anywhere and run again);
+  and a home of the new format kept under test/fixtures/homes/ (test/home-upgrade.test.ts says how). A released step
+  and a kept home never change, and a kept home that stops opening means a missing step, never a fixture to redo.
+  A shape nothing released has stored yet changes in place. test/stored-shapes.test.ts covers the shapes doc by doc.

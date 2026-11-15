@@ -192,7 +192,7 @@ async function main(argv: string[]): Promise<number> {
 		const [from, ...extra] = rest;
 		if (from === undefined || extra.length > 0) throw new Error("restore needs the backup's folder, and nothing else");
 		const { restoreHome } = await import("../core/backup.ts");
-		const { HOME_FORMAT } = await import("../core/store.ts");
+		const { HOME_FORMAT } = await import("../core/format.ts");
 		const manifest = await restoreHome(from, home, { format: HOME_FORMAT });
 		console.log(
 			`restored ${from} (banda ${manifest.banda}, ${manifest.created}) as ${home}\n${held(manifest)}\nA sign-in renewed after the backup was taken may ask to sign in again.`,
