@@ -310,7 +310,12 @@ export const readItems = (connection: Connection): string[] => [
 
 /** A tool as a server listed it when it was connected: what the model is offered, fixed until it is listed again. */
 export type Listed = {
-	generation: number;
+	/**
+	 * Which listing of the tool this is, from `versions`: what a draft and a permission are bound to. A listing kept
+	 * from before listings were numbered has none, and stays so while the same definition lists it again: read it
+	 * through `listingOf`.
+	 */
+	generation?: number;
 	description: string;
 	schema: JsonObject;
 	/** The server's own word that it only reads, shown, never trusted. */
@@ -677,11 +682,14 @@ export type ToolAuthority = {
 	readonly accountArg?: "account" | "as_account";
 };
 
+/** A listed tool's number. One never numbered is 0, which `versions` gives to none: listed anew, it takes a number. */
+export const listingOf = (listed: Listed): number => listed.generation ?? 0;
+
 export const toolAuthority = (tool: InEffect): ToolAuthority => ({
 	connection: tool.connection.name,
 	tool: tool.tool,
 	version: definitionVersion(tool.connection.version),
-	listing: tool.listed.generation,
+	listing: listingOf(tool.listed),
 	...(signsIn(tool.connection) ? { accountArg: accountArg(tool.listed.schema) } : {}),
 });
 
@@ -704,7 +712,7 @@ export async function validToolAuthority(tx: Tx, name: string, authority: ToolAu
 		connection !== undefined &&
 		listed !== undefined &&
 		definitionVersion(connection.version) === authority.version &&
-		listed.generation === authority.listing &&
+		listingOf(listed) === authority.listing &&
 		(signsIn(connection) ? accountArg(listed.schema) : undefined) === authority.accountArg
 	);
 }
