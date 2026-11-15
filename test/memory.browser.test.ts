@@ -30,9 +30,20 @@ async function click(page: Page, selector: string) {
 }
 /** Radix menu triggers open on pointerdown, not click. */
 async function tap(page: Page, selector: string) {
-	// found and acted on at once, once enabled, as a person would: a re-render in between would leave nothing to act on
+	// The closing drawer's overlay still intercepts a real press on the menu.
 	await page.until(
-		`(() => {const el=${selector}; if (!el || el.disabled) return false; el.scrollIntoView({block:'nearest'}); el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:1})); el.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,pointerId:1})); el.click(); return true;})()`,
+		`(() => {
+			if (document.querySelector('[role="dialog"]')) return false;
+			const el=${selector};
+			if (!el || el.disabled) return false;
+			el.scrollIntoView({block:'nearest'});
+			const rect=el.getBoundingClientRect();
+			if (!el.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2))) return false;
+			el.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:1}));
+			el.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,pointerId:1}));
+			el.click();
+			return true;
+		})()`,
 	);
 }
 async function fill(page: Page, label: string, value: string) {

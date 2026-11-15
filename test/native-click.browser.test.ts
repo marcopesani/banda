@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
-import { hasChrome, withPage } from "./smoke/chrome.ts";
+import { expect, it, vi } from "vitest";
+import { Cdp } from "../src/box/cdp.ts";
+import { COMMAND_MS, hasChrome, withPage } from "./smoke/chrome.ts";
 
 const fixture = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>button {position:absolute;top:200px;width:110px;height:40px} #allow {left:20px} #decline {left:140px}</style>
@@ -42,7 +43,200 @@ window.move = () => {
 const url = `data:text/html,${encodeURIComponent(fixture)}`;
 const target = "document.querySelector('#decline')";
 
+for (const failure of ["press", "cleanup"]) {
+	it.skipIf(!hasChrome())(
+		`native click releases admission after ${failure} failure without repeating an action`,
+		async () => {
+			await withPage(url, { width: 390, height: 900 }, async (page) => {
+				const send = Cdp.prototype.send;
+				const injected = new Error(`Injected ${failure} failure`);
+				let failed = false;
+				let presses = 0;
+				let releases = 0;
+				const intercepted = vi.spyOn(Cdp.prototype, "send").mockImplementation(function (
+					this: Cdp,
+					method,
+					params = {},
+					...rest
+				) {
+					if (method === "Input.dispatchMouseEvent" && "type" in params) {
+						if (params.type === "mousePressed") presses++;
+						if (params.type === "mouseReleased") releases++;
+					}
+					const shouldFail =
+						failure === "press"
+							? method === "Input.dispatchMouseEvent" && "type" in params && params.type === "mousePressed"
+							: method === "Runtime.evaluate" &&
+								"expression" in params &&
+								typeof params.expression === "string" &&
+								params.expression.startsWith("delete window[");
+					if (!failed && shouldFail) {
+						failed = true;
+						return Promise.reject(injected);
+					}
+					return send.call(this, method, params, ...rest);
+				});
+				try {
+					await expect(page.click(target)).rejects.toBe(injected);
+					expect(failed).toBe(true);
+					expect(presses).toBe(1);
+					expect(releases).toBe(1);
+					expect(await page.run("answers")).toEqual({ deny: failure === "cleanup" ? 1 : 0, allow: 0 });
+					await page.click("document.querySelector('#allow')");
+					expect(await page.run("answers")).toEqual({ deny: failure === "cleanup" ? 1 : 0, allow: 1 });
+					expect(presses).toBe(2);
+					expect(releases).toBe(presses);
+					expect(await page.run("Object.keys(window).filter(key => key.startsWith('banda-click-'))")).toEqual([]);
+					expect(page.errors()).toEqual([]);
+				} finally {
+					intercepted.mockRestore();
+				}
+			});
+		},
+	);
+}
+
+it.skipIf(!hasChrome())("native decline bounds repeated pre-input movement without delivering an action", async () => {
+	await withPage(url, { width: 390, height: 900 }, async (page) => {
+		const input = page.input;
+		let now = Date.now();
+		const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+		let presses = 0;
+		let releases = 0;
+		const intercepted = vi.spyOn(page, "input").mockImplementation(async (method, params) => {
+			if (method === "Input.dispatchMouseEvent" && "type" in params) {
+				if (params.type === "mousePressed") {
+					presses++;
+					if (presses > 2) throw new Error("Input repeated after the click deadline");
+					now += COMMAND_MS / 2;
+					await page.run(`document.querySelector('#decline').style.top = '${presses % 2 ? 350 : 200}px'`);
+				} else if (params.type === "mouseReleased") releases++;
+			}
+			return input(method, params);
+		});
+		try {
+			await expect(page.click(target)).rejects.toThrow(/Native click refused|No stable click target/);
+			expect(presses).toBe(2);
+			expect(releases).toBe(presses);
+			expect(await page.run("answers")).toEqual({ deny: 0, allow: 0 });
+			expect(await page.run("pointers")).toEqual([]);
+			expect(await page.run("Object.keys(window).filter(key => key.startsWith('banda-click-'))")).toEqual([]);
+			expect(page.errors()).toEqual([]);
+		} finally {
+			intercepted.mockRestore();
+			clock.mockRestore();
+		}
+	});
+});
+
 for (const width of [1440, 390]) {
+	it.skipIf(!hasChrome())(
+		`native click refuses overlap without repeating the completed action at ${width}px`,
+		async () => {
+			await withPage(url, { width, height: 900 }, async (page) => {
+				const input = page.input;
+				const signal = () => {
+					let resolve: () => void = () => {};
+					const promise = new Promise<void>((done) => {
+						resolve = done;
+					});
+					return { promise, resolve };
+				};
+				const firstReleased = signal();
+				const secondReleased = signal();
+				const resumeFirst = signal();
+				const resumeSecond = signal();
+				let presses = 0;
+				let releases = 0;
+				const intercepted = vi.spyOn(page, "input").mockImplementation(async (method, params) => {
+					if (method !== "Input.dispatchMouseEvent" || !("type" in params)) return input(method, params);
+					if (params.type === "mousePressed") {
+						presses++;
+						if (presses === 2) await page.run("document.querySelector('#allow').style.top = '350px'");
+					}
+					const result = await input(method, params);
+					if (params.type === "mouseReleased") {
+						releases++;
+						if (releases === 1) {
+							firstReleased.resolve();
+							await resumeFirst.promise;
+						} else if (releases === 2) {
+							secondReleased.resolve();
+							await resumeSecond.promise;
+						}
+					}
+					return result;
+				});
+				const first = Promise.allSettled([page.click(target)]);
+				let second: ReturnType<typeof Promise.allSettled> | undefined;
+				try {
+					await firstReleased.promise;
+					expect(await page.run("answers")).toEqual({ deny: 1, allow: 0 });
+					second = Promise.allSettled([page.click("document.querySelector('#allow')")]);
+					await Promise.race([second, secondReleased.promise]);
+					resumeFirst.resolve();
+					const firstResult = await first;
+					resumeSecond.resolve();
+					const secondResult = await second;
+					expect(await page.run("answers")).toEqual({ deny: 1, allow: 0 });
+					expect(firstResult).toEqual([{ status: "fulfilled", value: undefined }]);
+					expect(secondResult).toEqual([
+						{
+							status: "rejected",
+							reason: expect.objectContaining({ message: expect.stringMatching(/click.*in progress/i) }),
+						},
+					]);
+					expect(presses).toBe(1);
+					expect(releases).toBe(presses);
+					expect(await page.run("pointers")).toEqual([
+						{ type: "pointerdown", trusted: true, target: "decline" },
+						{ type: "pointerup", trusted: true, target: "decline" },
+					]);
+					expect(await page.run("Object.keys(window).filter(key => key.startsWith('banda-click-'))")).toEqual([]);
+					expect(page.errors()).toEqual([]);
+					intercepted.mockRestore();
+					await page.click("document.querySelector('#allow')");
+					expect(await page.run("answers")).toEqual({ deny: 1, allow: 1 });
+				} finally {
+					resumeFirst.resolve();
+					resumeSecond.resolve();
+					await first;
+					await second;
+					intercepted.mockRestore();
+				}
+			});
+		},
+	);
+
+	it.skipIf(!hasChrome())(
+		`native decline follows movement before input without acting on Allow at ${width}px`,
+		async () => {
+			await withPage(url, { width, height: 900 }, async (page) => {
+				await page.run(`window.delivered = [];
+					document.addEventListener('pointerdown', event => delivered.push(event.target.id));`);
+				const input = page.input;
+				let moved = false;
+				const intercepted = vi.spyOn(page, "input").mockImplementation(async (method, params) => {
+					if (method === "Input.dispatchMouseEvent" && "type" in params && params.type === "mousePressed" && !moved) {
+						moved = true;
+						await page.run(`document.querySelector('#decline').style.top = '350px';
+							document.querySelector('#allow').style.left = '140px';`);
+					}
+					return input(method, params);
+				});
+				try {
+					await page.click(target);
+					expect(await page.run("answers")).toEqual({ deny: 1, allow: 0 });
+					expect(await page.run("delivered")).toEqual(["decline"]);
+					expect(await page.run("Object.keys(window).filter(key => key.startsWith('banda-click-'))")).toEqual([]);
+					expect(page.errors()).toEqual([]);
+				} finally {
+					intercepted.mockRestore();
+				}
+			});
+		},
+	);
+
 	it.skipIf(!hasChrome())(
 		`native decline follows movement and a replacement after a screenshot at ${width}px`,
 		async () => {
@@ -80,10 +274,7 @@ for (const width of [1440, 390]) {
 			}, {capture: true, once: true})`);
 				await expect(page.click(target)).rejects.toThrow(/Native click refused.*hit BUTTON#allow Allow/);
 				expect(await page.run("answers")).toEqual({ deny: 0, allow: 0 });
-				expect(await page.run("pointers")).toEqual([
-					{ type: "pointerdown", trusted: true, target: "decline" },
-					{ type: "pointerup", trusted: true, target: "allow" },
-				]);
+				expect(await page.run("pointers")).toEqual([{ type: "pointerdown", trusted: true, target: "decline" }]);
 				expect(await page.run("Object.keys(window).filter(key => key.startsWith('banda-click-'))")).toEqual([]);
 				expect(page.errors()).toEqual([]);
 			});
@@ -102,7 +293,7 @@ for (const width of [1440, 390]) {
 					await page.run(`window.addEventListener('pointerdown', () => { ${change} }, {capture: true, once: true})`);
 					await expect(page.click(target)).rejects.toThrow(refusal);
 					expect(await page.run("answers")).toEqual({ deny: 0, allow: 0 });
-					expect(await page.run("pointers.map(event => event.type)")).toEqual(["pointerdown", "pointerup"]);
+					expect(await page.run("pointers.map(event => event.type)")).toEqual(["pointerdown"]);
 					expect(await page.run("Object.keys(window).filter(key => key.startsWith('banda-click-'))")).toEqual([]);
 					expect(page.errors()).toEqual([]);
 				});

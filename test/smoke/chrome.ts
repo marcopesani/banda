@@ -26,7 +26,7 @@ export type Page = {
 	readonly reload: () => Promise<void>;
 	/** Native CDP input, for pointer, keyboard and touch acceptance checks. */
 	readonly input: (method: string, params: object) => Promise<unknown>;
-	/** Scroll to the current element, wait for stable geometry, then click once with native input. Never retry a failure. */
+	/** Scroll to stable geometry and click natively. Reject overlap; resample a blocked first press only before any event was allowed. */
 	readonly click: (expression: string) => Promise<void>;
 	/** The page's uncaught exceptions and console errors so far. */
 	readonly errors: () => readonly string[];
@@ -91,6 +91,17 @@ export async function withPage<T>(
 		await send("Runtime.enable", {}, sessionId);
 		await send("Page.enable", {}, sessionId);
 		await send("Page.setLifecycleEventsEnabled", { enabled: true }, sessionId);
+		const clickKey = JSON.stringify(`banda-click-${randomUUID()}`);
+		// A blocked press is safe to resample only when no application capture handler has received it.
+		await send(
+			"Page.addScriptToEvaluateOnNewDocument",
+			{
+				source: `for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+					window.addEventListener(type, event => window[${clickKey}]?.guard(event), true);
+				}`,
+			},
+			sessionId,
+		);
 		const mobile = width < 768;
 		await send(
 			"Emulation.setDeviceMetricsOverride",
@@ -107,6 +118,7 @@ export async function withPage<T>(
 				throw new Error(exceptionDetails.exception?.description ?? exceptionDetails.text);
 			return result.value as R;
 		};
+		let clicking = false;
 		const page: Page = {
 			errors: () => errors,
 			run,
@@ -159,11 +171,16 @@ export async function withPage<T>(
 				}
 			},
 			click: async (expression) => {
-				const key = JSON.stringify(`banda-click-${randomUUID()}`);
+				if (clicking) throw new Error("Native click already in progress on this page");
+				clicking = true;
 				try {
-					const point = await run<{ x: number; y: number }>(`new Promise((resolve, reject) => {
+					const end = Date.now() + COMMAND_MS;
+					const key = clickKey;
+					for (;;) {
+						try {
+							const point = await run<{ x: number; y: number }>(`new Promise((resolve, reject) => {
 						const find = () => (${expression});
-						const end = performance.now() + ${COMMAND_MS};
+						const end = performance.now() + ${Math.max(0, end - Date.now())};
 						let previous, scrolled, stable = 0, reason = 'missing element';
 						const describe = el => el instanceof Element ? el.tagName + (el.id ? '#' + el.id : '') + ' ' + el.textContent.trim().slice(0, 80) : String(el);
 						const inspect = (el, x, y) => {
@@ -188,20 +205,21 @@ export async function withPage<T>(
 								stable = !reason && previous?.every((value, index) => value === geometry[index]) ? stable + 1 : 0;
 								previous = reason ? undefined : geometry;
 								if (stable >= 2) {
-									const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-									const state = {error: undefined, clicks: 0, remove: () => events.forEach(type => window.removeEventListener(type, guard, true))};
-									const guard = event => {
+									const state = {error: undefined, clicks: 0, allowed: 0, blockedFirstPress: false, guard: event => {
 										if (!event.isTrusted) return;
 										const current = find();
 										const problem = inspect(current, event.clientX, event.clientY);
 										if (state.error || problem || !current.contains(event.target)) {
+											if (!state.error && event.type === 'pointerdown' && state.allowed === 0) state.blockedFirstPress = true;
 											state.error ??= event.type + ': ' + (problem ?? 'event targeted ' + describe(event.target));
 											event.preventDefault();
 											event.stopImmediatePropagation();
-										} else if (event.type === 'click') state.clicks++;
-									};
+										} else {
+											state.allowed++;
+											if (event.type === 'click') state.clicks++;
+										}
+									}};
 									window[${key}] = state;
-									events.forEach(type => window.addEventListener(type, guard, true));
 									resolve({x, y});
 									return;
 								}
@@ -215,30 +233,36 @@ export async function withPage<T>(
 						};
 						requestAnimationFrame(sample);
 					})`);
-					try {
-						await page.input("Input.dispatchMouseEvent", {
-							type: "mousePressed",
-							button: "left",
-							clickCount: 1,
-							...point,
-						});
-					} finally {
-						await page.input("Input.dispatchMouseEvent", {
-							type: "mouseReleased",
-							button: "left",
-							clickCount: 1,
-							...point,
-						});
+							try {
+								await page.input("Input.dispatchMouseEvent", {
+									type: "mousePressed",
+									button: "left",
+									clickCount: 1,
+									...point,
+								});
+							} finally {
+								await page.input("Input.dispatchMouseEvent", {
+									type: "mouseReleased",
+									button: "left",
+									clickCount: 1,
+									...point,
+								});
+							}
+							const result = await run<{ error?: string; clicks: number; allowed: number; blockedFirstPress: boolean }>(
+								`window[${key}]`,
+							);
+							if (result.blockedFirstPress && result.allowed === 0 && Date.now() < end) continue;
+							if (result.error !== undefined || result.clicks !== 1)
+								throw new Error(
+									`Native click refused for ${expression}: ${result.error ?? `received ${result.clicks} clicks`}`,
+								);
+							return;
+						} finally {
+							await run(`delete window[${key}]`);
+						}
 					}
-					const result = await run<{ error?: string; clicks: number }>(
-						`({error: window[${key}].error, clicks: window[${key}].clicks})`,
-					);
-					if (result.error !== undefined || result.clicks !== 1)
-						throw new Error(
-							`Native click refused for ${expression}: ${result.error ?? `received ${result.clicks} clicks`}`,
-						);
 				} finally {
-					await run(`window[${key}]?.remove(); delete window[${key}]`);
+					clicking = false;
 				}
 			},
 			shoot: async (file) => {

@@ -49,7 +49,7 @@ restart walkthroughs pass at desktop and phone widths. Receipt fault scenarios p
 The bundled computer candidate targets Apple silicon Mac and Linux x64 desktops. The landing page advertises
 those desktops and command-line archives, with Android in its separate phone section. Windows, Intel Mac and Linux
 ARM downloads are no longer advertised. Local ordinary checks and independent desktop/phone-width landing review pass.
-The next release version is 0.1.0-alpha.13. Main landing and the tag wait for the remaining release gates.
+The integration is on main. The next release version is 0.1.0-alpha.13; its tag waits for the remaining release gates.
 
 The published macOS ARM64 alpha.12 has packaged desktop/phone-width walkthrough evidence, including lazy browser
 preparation, guarded sends and restart persistence. Its public-download and source reconstruction checks pass.
