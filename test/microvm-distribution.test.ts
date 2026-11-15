@@ -7,6 +7,7 @@ import { expect, it } from "vitest";
 import {
 	ComputerDistributionReviews,
 	computerDistribution,
+	distributionNotice,
 	readComputerDistribution,
 } from "../scripts/microvm-distribution.ts";
 import { MICROVM_PLATFORMS, MicrovmRuntimeBuild } from "../src/box/microvm-assets.ts";
@@ -57,6 +58,17 @@ it("preserves the complete accepted alpha.12 Mac record and adds no Linux accept
 	await expect(readComputerDistribution({ ...review.inputs, applicationVersion: "0.1.0-alpha.13" })).resolves.toBe(
 		"review-required",
 	);
+});
+
+it("calls a build reviewed only for the owner's exact record, and says where an unreviewed one's sources are", () => {
+	for (const target of ["darwin-arm64", "linux-x64", "linux-arm64"] as const) {
+		const pending = distributionNotice("review-required", target);
+		expect(pending.title).toBe("distribution review pending");
+		expect(pending.note).toMatch(/^No person has reviewed the distribution of this exact build\./);
+		expect(pending.note).toContain("release-materials.json");
+		expect(pending.note).not.toMatch(/accepted|has been reviewed/);
+		expect(distributionNotice("reviewed", target).title).toBe(`${target} distribution reviewed`);
+	}
 });
 
 it("requires a separate exact Linux x64 record and leaves Linux ARM64 pending", async () => {

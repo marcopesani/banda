@@ -18,7 +18,7 @@ import {
 	readMicrovmAssets,
 	verifyBundleFile,
 } from "../src/box/microvm-assets.ts";
-import { readComputerDistribution } from "./microvm-distribution.ts";
+import { distributionNotice, readComputerDistribution } from "./microvm-distribution.ts";
 import { buildMicrovmRuntime } from "./microvm-runtime.ts";
 import type { Target } from "./stage.ts";
 
@@ -212,16 +212,7 @@ export async function stageMicrovmBundle(options: { root: string; out: string; t
 		await downloaded(cached, notice.url, notice.sha256);
 		await copyFile(cached, join(bundle, "notices", notice.name));
 	}
-	const distribution =
-		redistribution === "reviewed"
-			? {
-					title: `${target} distribution reviewed`,
-					note: `The source and third-party notice packet for these exact native and image inputs has been accepted for this ${target} pre-release. Matching corresponding sources and third-party notices ship as release assets. The inventory records selected source and dependency inputs.`,
-				}
-			: {
-					title: "distribution review pending",
-					note: "The included license texts and source inventory do not qualify redistribution. Corresponding source, third-party dependency notices and guest-image distribution requirements remain to be reviewed before release. Local candidate testing only.",
-				};
+	const distribution = distributionNotice(redistribution, target);
 	await writeFile(
 		join(bundle, "notices", "INVENTORY.md"),
 		`# Bundled computer: ${distribution.title}\n\nMicrosandbox ${MICROSANDBOX_VERSION}: https://github.com/superradcompany/microsandbox/tree/60fc5071b34e6cc2671c84c8dc07709795d45d27\nThe CLI is built from that pinned source with banda's require-running execution patch. Patch SHA-256: ${runtimeBuild.patchSha256}. The manifest records the selected source and compiler inputs, build recipe and actual executable hash.\nOriginal vendor input archive SHA-256: ${vendor.sha256}\nIts libkrunfw submodule: https://github.com/containers/libkrunfw/tree/223f11693774646eaa8ba892e3a6ebd07653154b\n\n${distribution.note}\n\nBox source identity: ${images.box.ref}; proxy source identity: ${images.proxy.ref}. Their Dockerfiles and inputs are shipped beside this bundle. Guest package license files remain in each image.\n`,

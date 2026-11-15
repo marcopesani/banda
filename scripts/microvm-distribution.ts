@@ -130,3 +130,22 @@ export async function readComputerDistribution(inputs: DistributionInputs) {
 	const reviews: unknown = JSON.parse(await readFile(new URL("computer-distribution.json", import.meta.url), "utf8"));
 	return computerDistribution({ reviews, inputs });
 }
+
+/**
+ * What the installed inventory says about distribution. It is written when the bundle is staged, before anyone could
+ * have looked at that build, so it calls a build reviewed only when the owner's record names its exact inputs.
+ */
+export function distributionNotice(
+	redistribution: ReturnType<typeof computerDistribution>,
+	target: MicrovmTarget,
+): { title: string; note: string } {
+	return redistribution === "reviewed"
+		? {
+				title: `${target} distribution reviewed`,
+				note: `The source and third-party notice packet for these exact native and image inputs has been accepted for this ${target} pre-release. Matching corresponding sources and third-party notices ship as release assets. The inventory records selected source and dependency inputs.`,
+			}
+		: {
+				title: "distribution review pending",
+				note: "No person has reviewed the distribution of this exact build. A published release that carries it publishes the corresponding sources and third-party notices beside its downloads: release-materials.json there binds them to each download by SHA-256, and RELEASE-SOURCES.md says what they hold and what they leave out. A build that is not a published release has no such set and is for local testing only.",
+			};
+}
