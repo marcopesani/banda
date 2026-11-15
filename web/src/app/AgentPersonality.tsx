@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, useSyncExternalStore } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { personalityWords, withPersonality } from "../../../src/core/choices.ts";
 import { type AgentFileView, type AgentView, api, changeCompanion, Refused, saveAgent } from "../lib/api.ts";
@@ -53,7 +53,6 @@ export function AgentPersonality({
 	const [draft] = useState(() => drafts.forAgent(agent, file, text, onSaved));
 	const state = useSyncExternalStore(draft.subscribe, draft.getSnapshot, draft.getSnapshot);
 	const id = useId();
-	const help = `${id}-help`;
 	const error = `${id}-error`;
 	useEffect(() => {
 		draft.receive(file, text);
@@ -64,15 +63,14 @@ export function AgentPersonality({
 		<FieldGroup>
 			<Field data-invalid={failed || undefined}>
 				<FieldLabel htmlFor={id}>Personality</FieldLabel>
-				<FieldDescription id={help}>How it talks and what it cares about, in your words.</FieldDescription>
 				<Textarea
 					id={id}
 					name="personality"
 					value={state.text}
 					onChange={(event) => draft.edit(event.target.value)}
 					aria-invalid={failed || undefined}
-					aria-describedby={failed ? `${help} ${error}` : help}
-					className="min-h-32"
+					aria-describedby={failed ? error : undefined}
+					className="max-h-80 min-h-32 overflow-y-auto"
 				/>
 				{state.status.kind === "failed" ? (
 					<Alert id={error}>

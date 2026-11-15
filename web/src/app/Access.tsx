@@ -195,10 +195,7 @@ function AllowHost({
 	const [busy, setBusy] = useState(false);
 	const every = host.trim() === "*" || /^[a-z]+:\/\/\*(?::\d+)?\/?$/i.test(host.trim());
 	return (
-		<Block
-			title="Hosts"
-			note={`Anything ${agent.name} sends there goes straight through, without asking you, WebSockets included, with any key or cookie its commands set themselves. Where banda keeps a key of yours for the host, a request carrying its own still asks you. Use *.example.com for every name under it, or * for every host.`}
-		>
+		<Block title="Hosts">
 			{hosts.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">
 					{`None yet: ${agent.name} asks before sending anywhere.`}
@@ -277,7 +274,7 @@ function HarnessAccess({ agent }: { agent: { readonly id: string; readonly name:
 	const connected = harnesses.harnesses.filter(({ name }) => harnesses.accounts[name] !== undefined);
 	const names = connected.map(({ name }) => name);
 	return (
-		<Block title="Coding agents" note={`On this computer, for ${agent.name} to hand work to.`}>
+		<Block title="Coding agents">
 			{names.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">
 					{`${agent.name} hands work to none yet.`}

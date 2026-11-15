@@ -124,7 +124,6 @@ export function MemorySettings({
 				{agent !== undefined ? (
 					<FactsBlock
 						title={`${agent.name}'s memory`}
-						note={`What ${agent.name} keeps in mind in its direct and group chats. Facts are context, never permission: none grants a tool or changes its personality. Shared memory lives in Settings.`}
 						facts={ofAgent(agent.id)}
 						scope="agent"
 						agent={agent.id}
@@ -183,7 +182,7 @@ function FactsBlock({
 	...actions
 }: {
 	title: string;
-	note: string;
+	note?: string | undefined;
 	facts: readonly FactView[];
 	scope: MemoryScope;
 	agent?: string;
@@ -198,7 +197,7 @@ function FactsBlock({
 	originOf: OriginOf | undefined;
 } & MemoryActions) {
 	return (
-		<Block title={title} note={note}>
+		<Block title={title} {...(note === undefined ? {} : { note })}>
 			<FactList
 				facts={facts}
 				phone={phone}

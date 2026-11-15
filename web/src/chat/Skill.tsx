@@ -193,7 +193,6 @@ export function SkillCatalogue({
 				/>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="flex min-w-0 flex-col gap-2 pt-3">
-				<p className="text-meta text-ink-2">Use /name in a message, or let the agent choose when one fits.</p>
 				{skills.length === 0 ? (
 					<p className="text-ui text-ink-2">No skills yet.</p>
 				) : (

@@ -257,13 +257,13 @@ export function Personality({
 		onChange?.(next);
 	};
 	return (
-		<Block title="Personality" note="How it talks and what it cares about, in your words.">
+		<Block title="Personality">
 			<Textarea
 				aria-label="Personality"
 				value={value}
 				onChange={(event) => setValue(event.target.value)}
 				placeholder="Warm and brief. Plans our family trips, keeps to the budget, and asks before booking anything."
-				className="min-h-32"
+				className="max-h-80 min-h-32 overflow-y-auto"
 			/>
 			{starters ? (
 				<span className="flex flex-wrap items-center gap-2">
@@ -316,7 +316,7 @@ export function Connections({
 }) {
 	const used = rows.flatMap((row) => row.accounts.filter((account) => account.on).map((account) => ({ row, account })));
 	return (
-		<Block title="Connections" note={`What ${agent} may read. It asks before anything it writes.`}>
+		<Block title="Connections">
 			{used.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">{empty}</p>
 			) : (
@@ -437,9 +437,9 @@ export function ThinkingTiers({
 		? "This agent's file names its own model, so it thinks the same whatever is picked here."
 		: tier === undefined
 			? "You can pick this once the chat has started."
-			: "Quick answers fast; Deep takes its time on hard things.";
+			: undefined;
 	return (
-		<Block title="Thinking" note={note}>
+		<Block title="Thinking" {...(note === undefined ? {} : { note })}>
 			<Thinking
 				value={shownTier(view, tier)}
 				saving={view.saving}
@@ -462,7 +462,7 @@ export function Permissions({
 	onRevoke?: ((id: string) => void) | undefined;
 }) {
 	return (
-		<Block title="Permissions" note={`What ${agent} may do without asking: each one you allowed, and until when.`}>
+		<Block title="Permissions">
 			{permissions.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">Nothing yet: {agent} asks every time.</p>
 			) : (
@@ -524,11 +524,8 @@ export function Archive({
 	return (
 		<Block
 			title="Archive"
-			note={
-				last
-					? `${agent} is your only active agent, and banda opens in its chat: make another before archiving it.`
-					: `${agent} leaves the band; its chat is kept, and Settings can bring it back.`
-			}
+			// the confirmation says what archiving does; here only why it cannot be
+			{...(last ? { note: `Make another agent before archiving ${agent}.` } : {})}
 		>
 			<AlertDialog>
 				<AlertDialogTrigger asChild>

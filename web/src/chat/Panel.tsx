@@ -542,10 +542,7 @@ export function Watching({
 			)}
 			{watches.length === 0 ? (
 				form.step === "closed" ? (
-					<p className="text-meta text-ink-2">
-						Paste a link to follow it (a pull request, an issue, a repository, an email search, a Drive file or folder),
-						and {agent} wakes when it changes.
-					</p>
+					<p className="text-meta text-ink-2">Paste a link and {agent} wakes when it changes.</p>
 				) : null
 			) : (
 				<ul className="-mx-2 flex flex-col">
@@ -880,9 +877,6 @@ export function GroupPanel({
 			)}
 			{onArchive === undefined ? null : (
 				<PanelSection title="Archive">
-					<p className="text-meta text-ink-2">
-						It leaves the band; its messages are kept, and Settings can bring it back.
-					</p>
 					<Confirm {...archiveGroupWords(name)} action="Archive" keep={`Keep ${name}`} onConfirm={onArchive}>
 						<Button variant="destructive" size="sm" className="mt-2 self-start">
 							<ArchiveIcon />
