@@ -210,7 +210,7 @@ describe("home format", () => {
 
 	it("an upgrade keeps the home as it was beside it, taken before the first step and once", async () => {
 		const home = await seeded();
-		await (await open(home)).close(context);
+		await (await open(home, { migrations: [] })).close(context);
 		const said: string[] = [];
 		const before = async (from: number) => void (await backupBeforeUpgrade(home, from, (line) => said.push(line)));
 		await migrateHome(home, { migrations: steps(2, () => {}), before });

@@ -23,7 +23,14 @@ export type Migration = {
 };
 
 /** Every step since the floor: the one at index `i` takes format `FORMAT_FLOOR + i` to the next. */
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [
+	{
+		// nothing to convert: an earlier home holds no such ticket. The format moves so that a build from before it,
+		// which does not know the reason, refuses the home at its start instead of failing on a ticket later.
+		what: "a held request resolved as a repeat of one waiting on the owner",
+		run: async () => {},
+	},
+];
 
 /** The format this build reads and writes. */
 export const HOME_FORMAT = FORMAT_FLOOR + MIGRATIONS.length;
