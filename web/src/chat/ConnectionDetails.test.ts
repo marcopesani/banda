@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ConnectionView } from "../../../src/server/api.ts";
 import { MARA, SANCHO } from "../specimen/fixtures.ts";
-import { ConnectionDetailsView, signOutWords } from "./ConnectionDetails.tsx";
+import { ConnectionDetailsView, filterTools, signOutWords } from "./ConnectionDetails.tsx";
 
 const AGENTS = [
 	{ id: "mara", ...MARA },
@@ -75,5 +75,38 @@ describe("a connection's accounts", () => {
 		expect(plain).not.toContain("More for");
 		expect(plain).not.toContain("Add account");
 		expect(html({ mode: "review", onSignOut: () => {}, onAddAccount: () => {} })).not.toContain("Add account");
+	});
+});
+
+describe("a long tool list", () => {
+	const tool = (title: string, words: string, description = "") => ({ title, words, description });
+	const tools = [
+		tool("list_deployments", "List deployments", "Every deployment of a project."),
+		tool("get_project", "Get project"),
+		tool("delete_deployment", "Delete deployment", "Removes one for good."),
+	];
+
+	it("is filtered by every word typed, in a tool's words, its name or what it says it does", () => {
+		expect(filterTools(tools, "deploy").map((each) => each.title)).toEqual(["list_deployments", "delete_deployment"]);
+		expect(filterTools(tools, "  DELETE deploy ").map((each) => each.title)).toEqual(["delete_deployment"]);
+		expect(filterTools(tools, "for good").map((each) => each.title)).toEqual(["delete_deployment"]);
+		expect(filterTools(tools, "get_project").map((each) => each.title)).toEqual(["get_project"]);
+		expect(filterTools(tools, "nothing here")).toEqual([]);
+		expect(filterTools(tools, "")).toHaveLength(3);
+	});
+
+	it("has a filter above it only once it is long", () => {
+		const listed = (count: number) =>
+			Array.from({ length: count }, (_, at) => ({
+				name: `cal__t${at}`,
+				title: `t${at}`,
+				words: `Tool ${at}`,
+				description: "",
+				parameters: {},
+				kind: "read" as const,
+				on: true,
+			}));
+		expect(html({ view: { ...VIEW, tools: listed(8) } })).not.toContain("Filter tools");
+		expect(html({ view: { ...VIEW, tools: listed(9) } })).toContain('aria-label="Filter tools"');
 	});
 });

@@ -179,6 +179,19 @@ it.skipIf(!hasChrome())(
 				await rowsAgree("Other");
 				expect(await page.run(`${group("Other")}.textContent.trim()`)).toBe("Allow");
 				expect(await page.run(`document.querySelectorAll('[data-sonner-toast]').length`)).toBe(0);
+				// a list this long has a filter: typed into, only what matches is listed, open, each row with its own control
+				await page.run(`document.querySelector('input[aria-label="Filter tools"]').focus()`);
+				await page.input("Input.insertText", { text: "drain" });
+				await page.until(`document.querySelectorAll('[data-tool-list] [data-tool]').length === 4`);
+				expect(await page.run(`[...document.querySelectorAll('[data-group]')].map(el => el.dataset.group)`)).toEqual([
+					"Drains",
+				]);
+				expect(await page.run(`document.querySelector('[data-group="Drains"]').textContent.includes('4 of 4')`)).toBe(
+					true,
+				);
+				expect(await page.run(`Boolean(${group("Drains")})`)).toBe(false);
+				expect((await pick(page, toolSelect("get_drain"), "Allow")).shows).toBe("Allow");
+				expect(await counts("Drains")).toEqual({ "read:allow": 1, "read:ask": 1, "write:always": 2 });
 				expect(page.errors()).toEqual([]);
 			});
 		} finally {

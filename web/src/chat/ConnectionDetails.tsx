@@ -16,6 +16,7 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import { FLOOR_WORDS } from "../../../src/core/floor.ts";
@@ -117,6 +118,24 @@ const groupSet = (tools: readonly Settable[], setting: Setting): { [tool: string
 		}),
 	);
 
+/** A list this long gets a filter above it. */
+const FILTER_FROM = 9;
+
+/** The tools `query` finds: every word of it in the tool's words, its name or what it says it does. */
+export function filterTools<T extends Pick<ConnectionToolView, "words" | "title" | "description">>(
+	tools: readonly T[],
+	query: string,
+): T[] {
+	const words = query
+		.toLowerCase()
+		.split(/\s+/)
+		.filter((word) => word !== "");
+	return tools.filter((tool) => {
+		const text = `${tool.words} ${tool.title} ${tool.description}`.toLowerCase();
+		return words.every((word) => text.includes(word));
+	});
+}
+
 /** A connection's tools in their groups, each set as `settingOf` says; a tool with no settings is shown as it is. */
 export function ToolList({
 	tools,
@@ -133,30 +152,52 @@ export function ToolList({
 	disabled?: boolean | undefined;
 	expanded?: boolean | undefined;
 }) {
-	const all = settable(tools);
-	const without = tools.filter((tool) => !all.includes(tool as Settable));
+	const [query, setQuery] = useState("");
+	const filtering = tools.length >= FILTER_FROM && query.trim() !== "";
+	const shown = filtering ? filterTools(tools, query) : tools;
+	const all = settable(shown);
+	const without = shown.filter((tool) => !all.includes(tool as Settable));
 	if (tools.length === 0) return <p className="text-ui text-ink-2">Its tools aren't listed yet.</p>;
 	return (
-		<div className="flex flex-col divide-y divide-line-soft rounded-field border border-line-soft" data-tool-list="">
-			{groups.map((group) => {
-				const inside = all.filter((tool) => tool.group === group);
-				return inside.length === 0 ? null : (
-					<ToolGroup
-						key={group}
-						group={group}
-						tools={inside}
-						settingOf={settingOf}
-						onTools={onTools}
-						disabled={disabled}
-						expanded={expanded}
-					/>
-				);
-			})}
-			{without.length === 0 ? null : (
-				<div className="flex flex-col divide-y divide-line-soft">
-					{without.map((tool) => (
-						<ToolRow key={tool.name} tool={tool} />
-					))}
+		<div className="flex min-w-0 flex-col gap-2">
+			{tools.length >= FILTER_FROM ? (
+				<Input
+					type="search"
+					aria-label="Filter tools"
+					placeholder="Filter tools"
+					value={query}
+					onChange={(event) => setQuery(event.target.value)}
+				/>
+			) : null}
+			{shown.length === 0 ? (
+				<p className="text-ui text-ink-2">No tool matches “{query.trim()}”.</p>
+			) : (
+				<div
+					className="flex flex-col divide-y divide-line-soft rounded-field border border-line-soft"
+					data-tool-list=""
+				>
+					{groups.map((group) => {
+						const inside = all.filter((tool) => tool.group === group);
+						return inside.length === 0 ? null : (
+							<ToolGroup
+								key={group}
+								group={group}
+								tools={inside}
+								of={filtering ? settable(tools).filter((tool) => tool.group === group).length : undefined}
+								settingOf={settingOf}
+								onTools={onTools}
+								disabled={disabled}
+								expanded={expanded}
+							/>
+						);
+					})}
+					{without.length === 0 ? null : (
+						<div className="flex flex-col divide-y divide-line-soft">
+							{without.map((tool) => (
+								<ToolRow key={tool.name} tool={tool} />
+							))}
+						</div>
+					)}
 				</div>
 			)}
 		</div>
@@ -208,6 +249,7 @@ function ToolGroup({
 	onTools,
 	disabled,
 	expanded,
+	of,
 }: {
 	group: string;
 	tools: readonly Settable[];
@@ -215,9 +257,12 @@ function ToolGroup({
 	onTools: (settings: { readonly [tool: string]: Setting }, group?: boolean) => void;
 	disabled?: boolean | undefined;
 	expanded: boolean;
+	/** The list is filtered: how many tools the group has in all. Its rows are open, and only they are set. */
+	of?: number | undefined;
 }) {
 	const waiting = tools.filter((tool) => tool.waiting === true).length;
-	const [open, setOpen] = useState(expanded || waiting > 0);
+	const [opened, setOpen] = useState(expanded || waiting > 0);
+	const open = opened || of !== undefined;
 	const id = useId();
 	const now = tools.map((tool) => ({ classed: tool.classed, options: tool.options, setting: settingOf(tool) }));
 	const common = groupAt(now);
@@ -231,20 +276,23 @@ function ToolGroup({
 							data-icon="inline-start"
 						/>
 						<span className="truncate font-medium text-ink">{group}</span>
-						<span className="text-ink-2">{tools.length}</span>
+						<span className="text-ink-2">{of === undefined ? tools.length : `${tools.length} of ${of}`}</span>
 						{waiting > 0 ? (
 							<Badge variant="secondary">{waiting === 1 ? "1 waiting" : `${waiting} waiting`}</Badge>
 						) : null}
 					</Button>
 				</CollapsibleTrigger>
-				<PermissionSelect
-					label={`Every tool in ${group}`}
-					options={groupOffers(now)}
-					value={common}
-					disabled={disabled}
-					waiting={waiting > 0}
-					onChange={(setting) => onTools(groupSet(tools, setting), true)}
-				/>
+				{/* filtered, the group's control would set tools that are not on screen: each row has its own */}
+				{of !== undefined ? null : (
+					<PermissionSelect
+						label={`Every tool in ${group}`}
+						options={groupOffers(now)}
+						value={common}
+						disabled={disabled}
+						waiting={waiting > 0}
+						onChange={(setting) => onTools(groupSet(tools, setting), true)}
+					/>
+				)}
 			</div>
 			<CollapsibleContent id={id} className="flex flex-col divide-y divide-line-soft border-t border-line-soft">
 				{tools.map((tool) => (
