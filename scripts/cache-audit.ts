@@ -20,7 +20,7 @@ import { startsRun } from "../web/src/lib/feed.ts";
 
 const canonical = (path: string) => realpath(path).catch(() => resolve(path));
 
-async function refuseLive(home: string): Promise<void> {
+export async function refuseLive(home: string): Promise<void> {
 	const target = await canonical(home);
 	for (const live of [resolveHome(), join(homedir(), ".banda")])
 		if (target === (await canonical(live)))
@@ -29,7 +29,7 @@ async function refuseLive(home: string): Promise<void> {
 			);
 }
 
-async function conversations(harness: Harness): Promise<ConversationId[]> {
+export async function conversations(harness: Harness): Promise<ConversationId[]> {
 	const found: ConversationId[] = [];
 	let cursor: Parameters<Tx["scanConversations"]>[2];
 	do {
