@@ -22,6 +22,8 @@ The egress proxy's addon (DESIGN.md "The box", Network): every request from the 
   whether the owner holds it: its reads go to any public host (what a page loads is the page's; the daemon gates what
   the agent puts into a page), its writes wait in the browser itself, and one reaches here only once the owner approved
   it (a pass for its exact bytes) or while the owner holds the browser. It gets no credential: its session is its own.
+  A write of its held here says it is a browser's in a header the proxy sets (and takes from anything the box sends),
+  so the daemon names its cookies as the browser's session and a command's as the command's.
 """
 
 import base64
@@ -95,8 +97,11 @@ def tab_holder(agent, stamp, key):
     return chat, bool(tab.get("owner"))
 
 
-def held(flow, chat, host, port):
-    """A request as it is held: whole, and whose it is."""
+def held(flow, chat, host, port, browser=False):
+    """A request as it is held: whole, and whose it is; a browser's says so in a header only the proxy sets."""
+    headers = [[k, v] for k, v in flow.request.headers.items(multi=True)]
+    if browser:
+        headers.append([policy.FROM_HEADER, policy.FROM_BROWSER])
     return {
         "chat": chat,
         "method": flow.request.method,
@@ -104,7 +109,7 @@ def held(flow, chat, host, port):
         "host": host,
         "port": port,
         "path": flow.request.path,
-        "headers": [[k, v] for k, v in flow.request.headers.items(multi=True)],
+        "headers": headers,
         "body": base64.b64encode(flow.request.raw_content or b"").decode(),
     }
 
@@ -202,6 +207,8 @@ class Egress:
                 return None
         flow.request.headers.pop("proxy-authorization", None)
         flow.request.headers.pop("proxy-connection", None)
+        # whose a held request is, is the proxy's to say: nothing the box or a page sends says it
+        flow.request.headers.pop(policy.FROM_HEADER, None)
         nobody = flow.request.headers.pop(NOBODY_HEADER, None) is not None
         writes = policy.is_write(flow.request.method, flow.request.headers.items(multi=True), flow.request.url)
         if isinstance(chat, Browser):
@@ -271,7 +278,7 @@ class Egress:
             digest = policy.write_hash(flow.request.method, host, port, flow.request.path, flow.request.raw_content)
             if owner or state.passes(chat, digest):
                 return
-            ticket = state.hold(chat, held(flow, chat, host, port))
+            ticket = state.hold(chat, held(flow, chat, host, port, browser=True))
             refuse(flow, 403, f"this request writes, so it waits for the owner: ticket {ticket}. It has not been sent.", {"x-banda-ticket": ticket})
             return
         state.read(chat, host)

@@ -327,6 +327,15 @@ export function ownCredential(headers: readonly (readonly [string, string])[], p
 }
 
 /**
+ * The header a held request of a browser's carries, and its value (policy.py FROM_HEADER): the proxy alone sets it,
+ * takes it from whatever the box sends, and never sends it on.
+ */
+export const FROM_HEADER = "x-banda-from";
+/** Whether a held request is a browser's (a page's write that reached the proxy), not a command's. */
+export const fromBrowser = (request: Pick<HeldRequest, "headers">): boolean =>
+	request.headers.some(([key, value]) => key.trim().toLowerCase() === FROM_HEADER && value === "browser");
+
+/**
  * The draft for a stored request: its method, address, headers and body as a person reads them, and, for the daemon,
  * the ticket that names its exact bytes, the route a permission would bind, and the host a host permission would.
  */
@@ -335,7 +344,11 @@ export function draftArgs(request: HeldRequest): JsonObject {
 		method: request.method,
 		address: addressWords(addressOf(request)),
 		// credentials masked: the ticket names the exact bytes, so none is written into the draft
-		headers: headersWords(request.headers),
+		// a cookie is named by whose it is: the browser's session, or one the command set
+		headers: headersWords(
+			request.headers.filter(([key]) => key.trim().toLowerCase() !== FROM_HEADER),
+			fromBrowser(request) ? "browser" : "command",
+		),
 		body: bodyWords(request.body),
 		_ticket: request.ticket,
 		_route: routeOf(request),

@@ -34,12 +34,14 @@ describe("masking", () => {
 			"X-Csrf-Token",
 			"Proxy-Authorization",
 		])
-			expect(headerWords(name, "abc")).toBe(`${name}: hidden (3 characters)`);
-		expect(headerWords("Cookie", "session=s1")).toBe("Cookie: (the browser's session, hidden)");
+			expect(headerWords(name, "abc", "command")).toBe(`${name}: hidden (3 characters)`);
+		// a cookie is named by whose it is, never shown: a command's is not the browser's session
+		expect(headerWords("Cookie", "session=s1", "browser")).toBe("Cookie: (the browser's session, hidden)");
+		expect(headerWords("cookie", "VISITOR=abc", "command")).toBe("cookie: (set by the command, hidden)");
 	});
 
 	it("masks a value shaped like a key, whatever its header's name", () => {
-		expect(headerWords("x-cp-connect-id", "5f0e7c1a-9b2d-4e3f-8a6b-1c2d3e4f5a6b")).toBe(
+		expect(headerWords("x-cp-connect-id", "5f0e7c1a-9b2d-4e3f-8a6b-1c2d3e4f5a6b", "browser")).toBe(
 			"x-cp-connect-id: 5f0e… (36 characters)",
 		);
 		expect(secretLooking("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dGVzdHNpZw")).toBe(true);
@@ -61,7 +63,7 @@ describe("masking", () => {
 			["Date", "Thu, 05 Nov 2026 10:00:00 GMT"],
 			["Cache-Control", "no-cache"],
 		];
-		expect(headersWords(plain)).toBe(plain.map(([k, v]) => `${k}: ${v}`).join("\n"));
+		expect(headersWords(plain, "browser")).toBe(plain.map(([k, v]) => `${k}: ${v}`).join("\n"));
 	});
 
 	it("never shows a credential's value whole", () => {
@@ -69,8 +71,9 @@ describe("masking", () => {
 			fc.property(
 				fc.constantFrom("Authorization", "x-api-key", "X-Secret", "session", "x-token", "Cookie"),
 				fc.string({ minLength: 1, maxLength: 200 }),
-				(name, value) => {
-					const shown = headerWords(name, value).slice(name.length + 2);
+				fc.constantFrom<"browser" | "command">("browser", "command"),
+				(name, value, from) => {
+					const shown = headerWords(name, value, from).slice(name.length + 2);
 					expect(value.length < 5 || !shown.includes(value)).toBe(true);
 				},
 			),
@@ -79,7 +82,7 @@ describe("masking", () => {
 		fc.assert(
 			fc.property(fc.stringMatching(/^[A-Za-z0-9_-]{24,64}$/), (key) => {
 				fc.pre(/[0-9]/.test(key) && /[A-Za-z]/.test(key) && isSecret("x-id", key));
-				expect(headerWords("x-id", key)).not.toContain(key);
+				expect(headerWords("x-id", key, "command")).not.toContain(key);
 			}),
 			{ numRuns: pbtRuns(100) },
 		);

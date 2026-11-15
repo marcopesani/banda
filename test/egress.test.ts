@@ -31,6 +31,8 @@ import {
 	addressOf,
 	draftArgs,
 	type EgressControl,
+	FROM_HEADER,
+	fromBrowser,
 	type HeldRequest,
 	hostOf,
 	intake,
@@ -2636,6 +2638,17 @@ describe("routes", () => {
 		expect(draftArgs(held(1, { scheme: "http", port: 80 }))._host).toMatch(/^http:\/\//);
 	});
 
+	it("a draft names a cookie by whose it is, never its value: one a command set is not the browser's session", () => {
+		// a command against a site that sets a visitor cookie: the command's own, no session of the owner's
+		const cookie: [string, string] = ["Cookie", "VISITOR_INFO1_LIVE=abcdef0123456789"];
+		const command = draftArgs(held(1, { headers: [["User-Agent", "curl/8.7.1"], cookie] }));
+		expect(command.headers).toBe("User-Agent: curl/8.7.1\nCookie: (set by the command, hidden)");
+		// a page's write that reached the proxy: the proxy said whose it is, and its words leave that header out
+		const page = draftArgs(held(1, { headers: [cookie, [FROM_HEADER, "browser"]] }));
+		expect(page.headers).toBe("Cookie: (the browser's session, hidden)");
+		for (const args of [command, page]) expect(JSON.stringify(args)).not.toContain("abcdef0123456789");
+	});
+
 	it("a draft names a binary body by its size, never its bytes, and a credential the box sent puts it on the floor", () => {
 		const binary = held(1, { body: Buffer.from([0, 1, 2, 255]).toString("base64") });
 		expect(draftArgs(binary).body).toBe("(4 bytes of binary data)");
@@ -3137,6 +3150,21 @@ describe.skipIf(!python)("a held request sent, at the proxy", () => {
 		}
 	});
 
+	it("sends a browser's held request without the header that said whose it was", () => {
+		const { results } = replayed([
+			{
+				headers: [
+					["Cookie", "sid=1"],
+					[FROM_HEADER, "browser"],
+				],
+				response: { headers: [], body: "" },
+			},
+		]);
+		const [one] = results as { sent: [string, string][] }[];
+		expect(one?.sent).toContainEqual(["Cookie", "sid=1"]);
+		expect(one?.sent.map(([name]) => name.toLowerCase())).not.toContain(FROM_HEADER);
+	});
+
 	it("gives back no body it could not undo, so none it could not scrub; a credential the cut broke goes too", () => {
 		const plain = Buffer.from(`0123456789 ${credential} and the rest`);
 		const { results } = replayed([
@@ -3323,6 +3351,35 @@ describe.skipIf(!python)("a host the owner allowed, at the proxy", () => {
 		});
 		// the browser's page write is held under its holder, as before
 		expect(Object.keys(result.held).sort()).toEqual(["11", "7", "8"]);
+	});
+
+	it("says a held request is a browser's in a header only the proxy sets, never sent on", () => {
+		const forged = [FROM_HEADER, "browser"];
+		const result = admit(config(["forge.example"]), [
+			// chat 8's tab in sancho's browser, whose page forged nothing, and one whose page tried to
+			{
+				...push,
+				login: "b-sancho",
+				headers: [
+					["x-banda-tab", tabStamp(key, "sancho", 8)],
+					["Cookie", "sid=1"],
+				],
+			},
+			// a command saying it is a browser is not believed: held as a command's, and what it sends on has no such header
+			{ ...push, host: "other.example", headers: [forged, ["Cookie", "sid=1"]] },
+			{ ...push, headers: [forged] },
+			{ login: "c7", method: "GET", host: "other.example", headers: [forged] },
+		]);
+		const from = (chat: string) =>
+			(result.held[chat] ?? []).map((one) => one.headers.filter(([name]) => name.toLowerCase() === FROM_HEADER));
+		expect(from("8")).toEqual([[[FROM_HEADER, "browser"]]]);
+		expect(from("7")).toEqual([[]]);
+		expect(result.held["8"]?.every(fromBrowser)).toBe(true);
+		expect(result.held["7"]?.some(fromBrowser)).toBe(false);
+		for (const one of result.cases.slice(2))
+			expect((one as { headers: [string, string][] }).headers.map(([name]) => name.toLowerCase())).not.toContain(
+				FROM_HEADER,
+			);
 	});
 
 	it("streams a WebSocket to a permitted host, recorded as it opens and scrubbed; cuts every other", () => {

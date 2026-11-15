@@ -269,6 +269,12 @@ SECRET_HEADERS = {
 SECRET_QUERY = {"access_token", "token", "api_key", "apikey", "private_token"}
 
 
+# What a held request of a browser's carries among its headers, so the daemon knows whose it is: set by the proxy
+# alone, taken from whatever the box sends, and never sent on.
+FROM_HEADER = "x-banda-from"
+FROM_BROWSER = "browser"
+
+
 def permitted_host(scheme, host, port):
     """
     The host a host permission binds, as the daemon spells it (egress.ts `permittedHost`): its name in lower case, its

@@ -944,7 +944,7 @@ function draftOf(write: PageWrite, signedIn: string | undefined): JsonObject {
 		page,
 		method: write.method,
 		address: addressWords(write.url),
-		headers: headersWords(write.headers),
+		headers: headersWords(write.headers, "browser"),
 		body: bodyWords(write.body),
 		_write: write.id,
 		_hash: write.hash,

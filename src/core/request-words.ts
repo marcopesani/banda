@@ -39,15 +39,19 @@ export function isSecret(name: string, value: string): boolean {
 	return SECRET_NAME.test(name) || secretLooking(value);
 }
 
-/** A header line as shown: a session cookie named only, any other credential masked. */
-export function headerWords(name: string, value: string): string {
-	if (name.trim().toLowerCase() === "cookie") return `${name}: (the browser's session, hidden)`;
+/** What sent a request: the agent's browser, whose cookies are its sessions, or a command, which set its own. */
+export type Sender = "browser" | "command";
+
+/** A header line as shown: a cookie by whose it is and never its value, any other credential masked. */
+export function headerWords(name: string, value: string, from: Sender): string {
+	if (name.trim().toLowerCase() === "cookie")
+		return `${name}: (${from === "browser" ? "the browser's session" : "set by the command"}, hidden)`;
 	return `${name}: ${isSecret(name, value) ? masked(value) : value}`;
 }
 
 /** Headers as shown, one a line. */
-export const headersWords = (headers: readonly (readonly [string, string])[]): string =>
-	headers.map(([name, value]) => headerWords(name, value)).join("\n");
+export const headersWords = (headers: readonly (readonly [string, string])[], from: Sender): string =>
+	headers.map(([name, value]) => headerWords(name, value, from)).join("\n");
 
 /** An address as shown: each query parameter that is a credential masked, the rest as it is. */
 export function addressWords(address: string): string {

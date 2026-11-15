@@ -149,7 +149,7 @@ def replay(request, progress):
     connection.putheader("Host", named if port == default else f"{named}:{port}")
     framed = False
     for key, value in request["headers"]:
-        if key.lower() in swapped or key.lower() in ("transfer-encoding", "host"):
+        if key.lower() in swapped or key.lower() in ("transfer-encoding", "host", policy.FROM_HEADER):
             continue
         # the body is sent whole, so its framing is its length, where the box put it
         if key.lower() == "content-length":
