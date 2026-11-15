@@ -254,7 +254,7 @@ export function useHarnessMenu(sessions: readonly HarnessSessionView[], waiting:
 	}, [sessions.length, open]);
 	const known = companion === undefined ? [] : chatAgents(agents, companion);
 	const session = harnesses?.sessions.find((one) => one.task === selected);
-	const now = useNow(open || (session !== undefined && session.ended === undefined));
+	const now = useNow(open);
 	const nameOf = (one: HarnessSessionView) => known.find((agent) => agent.id === one.agent)?.name;
 	return {
 		open: () => setOpen(true),
@@ -288,7 +288,7 @@ export function useHarnessMenu(sessions: readonly HarnessSessionView[], waiting:
 			session === undefined ? undefined : (
 				<HarnessActivitySheet
 					session={session}
-					view={viewOf(session, now, nameOf(session))}
+					agent={nameOf(session)}
 					onClose={() => setSelected(undefined)}
 					returnFocus={() => trigger.current?.focus()}
 				/>
@@ -296,18 +296,25 @@ export function useHarnessMenu(sessions: readonly HarnessSessionView[], waiting:
 	};
 }
 
-function HarnessActivitySheet({
+/**
+ * One session in a sheet of its own: its steps, the owner's note, Stop and its open asks. It opens from whatever holds
+ * the session (the header's menu, a step of Activity) and, closed, hands focus back through `returnFocus`.
+ */
+export function HarnessActivitySheet({
 	session,
-	view,
+	agent,
 	onClose,
 	returnFocus,
 }: {
 	session: HarnessSessionView;
-	view: CardView;
+	/** Whose session it is, by the agent's name. */
+	agent?: string | undefined;
 	onClose: () => void;
 	returnFocus: () => void;
 }) {
 	const titleRef = useRef<HTMLHeadingElement>(null);
+	const now = useNow(session.ended === undefined);
+	const view = viewOf(session, now, agent);
 	return (
 		<Sheet
 			open

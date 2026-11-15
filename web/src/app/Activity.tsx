@@ -9,6 +9,7 @@ import {
 	CheckIcon,
 	CircleAlertIcon,
 	ClockIcon,
+	CodeXmlIcon,
 	MessagesSquareIcon,
 	PenLineIcon,
 	SquareIcon,
@@ -51,6 +52,7 @@ import {
 	type Block,
 	type ChatPrompt,
 	chatPrompt,
+	type HarnessSessionView,
 	type Item,
 	type RunningTool,
 	type ShownWait,
@@ -59,8 +61,12 @@ import {
 import { userFiles } from "../lib/chat.ts";
 import { cn } from "../lib/cn.ts";
 import { useReturnFocus } from "../lib/return-focus.ts";
+import { harnessToolOf } from "../lib/segments/harness.ts";
+import { useShell } from "../lib/shell.ts";
 import { type Transcript, useTranscript } from "../lib/transcript.ts";
 import { FilePart } from "./FilePart.tsx";
+import { HarnessActivitySheet } from "./HarnessSession.tsx";
+import { callSession, type HarnessesSeen, toolService } from "./harness-activity.ts";
 
 export type ActivityTarget = {
 	readonly chat: number;
@@ -70,8 +76,16 @@ export type ActivityTarget = {
 	readonly anchor?: ActivityAnchor;
 	readonly heading?: string;
 };
-/** A transcript given instead of read from the daemon (the specimen's), with the model context it was prompted with. */
-type Source = { readonly chat: number; readonly transcript: Transcript; readonly prompt?: ChatPrompt };
+/**
+ * A transcript given instead of read from the daemon (the specimen's), with the model context it was prompted with and
+ * the coding sessions its calls led to.
+ */
+type Source = {
+	readonly chat: number;
+	readonly transcript: Transcript;
+	readonly prompt?: ChatPrompt;
+	readonly harnesses?: HarnessesSeen;
+};
 export type ActivityDepth = "activity" | "transcript";
 
 export function ActivitySheet({
@@ -167,7 +181,13 @@ export function ActivitySheet({
 					</Tabs>
 				</SheetHeader>
 				{source?.chat === target.chat ? (
-					<ActivityView key={index} {...props} transcript={source.transcript} given={source.prompt} />
+					<ActivityView
+						key={index}
+						{...props}
+						transcript={source.transcript}
+						given={source.prompt}
+						harnesses={source.harnesses}
+					/>
 				) : (
 					<FetchedActivity key={index} {...props} />
 				)}
@@ -186,14 +206,17 @@ type ViewProps = {
 	transcript: Transcript;
 	/** The model context, when it came with the transcript instead of being fetched. */
 	given?: ChatPrompt | undefined;
+	/** The coding agents and their sessions, as the shell holds them: what a coding agent's step is named by and opens. */
+	harnesses?: HarnessesSeen | undefined;
 };
-function FetchedActivity(props: Omit<ViewProps, "transcript" | "given">) {
+function FetchedActivity(props: Omit<ViewProps, "transcript" | "given" | "harnesses">) {
 	const transcript = useTranscript(props.target.chat);
-	return <ActivityView {...props} transcript={transcript} />;
+	const { harnesses } = useShell();
+	return <ActivityView {...props} transcript={transcript} harnesses={harnesses} />;
 }
 
 /** One depth of a work's activity, with no sheet around it: the sheet's body, and what the specimen shows open. */
-export function ActivityView({ target, depth, onDrill, at, transcript, given }: ViewProps) {
+export function ActivityView({ target, depth, onDrill, at, transcript, given, harnesses }: ViewProps) {
 	const { items, input, busy, older, loaded, missing, loadOlder, partial, running } = transcript;
 	const works = useMemo(() => activityWork(items, input), [items, input]);
 	// Pin the first selected work: a new owner input must not retarget an open sheet.
@@ -273,6 +296,8 @@ export function ActivityView({ target, depth, onDrill, at, transcript, given }: 
 				</p>
 				<ActivityTimeline
 					chat={target.chat}
+					agent={target.name}
+					harnesses={harnesses}
 					running={live ? running : []}
 					work={work}
 					live={live}
@@ -336,7 +361,52 @@ type Row = {
 	meta?: string;
 	/** What the line opens to, in place. */
 	detail?: ReactNode;
+	/** The coding session its call led to, or "gone" when that session is no longer kept. */
+	session?: HarnessSessionView | "gone";
 };
+
+/**
+ * Where an opened step leads, under what it opened to: itself in the transcript, and the coding session its call led
+ * to. Beside the step's line, never inside it: the line is a button of its own.
+ */
+export function StepLinks({
+	onTranscript,
+	session,
+	onSession,
+}: {
+	onTranscript?: (() => void) | undefined;
+	session?: HarnessSessionView | "gone" | undefined;
+	/** Open that session; `from` is the control pressed, where focus returns once it closes. */
+	onSession?: ((task: number, from: HTMLElement) => void) | undefined;
+}) {
+	if (onTranscript === undefined && session === undefined) return null;
+	return (
+		<div className="-ml-2 flex min-w-0 flex-wrap items-center gap-x-1">
+			{onTranscript === undefined ? null : (
+				<Button variant="ghost" size="xs" className="text-ink-2" onClick={onTranscript}>
+					<MessagesSquareIcon data-icon="inline-start" />
+					In the transcript
+				</Button>
+			)}
+			{session === undefined ? null : session === "gone" ? (
+				<span data-session-gone="" className="px-2 text-meta text-ink-2">
+					This coding session is no longer kept.
+				</span>
+			) : (
+				<Button
+					variant="ghost"
+					size="xs"
+					className="text-ink-2"
+					data-open-session={session.task}
+					onClick={(event) => onSession?.(session.task, event.currentTarget)}
+				>
+					<CodeXmlIcon data-icon="inline-start" />
+					Open session
+				</Button>
+			)}
+		</div>
+	);
+}
 
 /** A step's text, whole, under its line. */
 function StepText({ children, muted = false }: { children: string; muted?: boolean }) {
@@ -363,7 +433,16 @@ function callDetail(
 	const parts: ReactNode[] = [];
 	if (MESSAGES.has(call.name) && typeof call.args.text === "string")
 		parts.push(<StepText key="text">{call.args.text}</StepText>);
-	else if (result?.receipt?.kind === "skill")
+	else if (harnessToolOf(call.name) === "work" && typeof call.args.prompt === "string") {
+		// what the coding agent was asked, whole; its answer to the agent only when it says why nothing started
+		parts.push(<StepText key="text">{call.args.prompt}</StepText>);
+		if (result?.error && output !== "")
+			parts.push(
+				<RawValue key="out" label="Error">
+					{output}
+				</RawValue>,
+			);
+	} else if (result?.receipt?.kind === "skill")
 		parts.push(
 			<SkillToolPreview
 				key="skill"
@@ -410,6 +489,8 @@ function callDetail(
  */
 function ActivityTimeline({
 	chat,
+	agent,
+	harnesses,
 	work,
 	live,
 	partial,
@@ -418,6 +499,9 @@ function ActivityTimeline({
 	waits,
 }: {
 	chat: number;
+	/** Whose work it is, by name: a coding session it started says so. */
+	agent: string;
+	harnesses: HarnessesSeen | undefined;
 	work: ActivityWork;
 	live: boolean;
 	partial: readonly Block[];
@@ -426,13 +510,19 @@ function ActivityTimeline({
 	onDrill?: ((step?: string) => void) | undefined;
 }) {
 	const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+	// the coding session open over the activity, by its task, and the control it opened from
+	const [shown, setShown] = useState<number>();
+	const opener = useRef<HTMLElement | null>(null);
+	const showing = shown === undefined ? undefined : harnesses?.sessions.find((one) => one.task === shown);
 	const output = new Map(running.map((tool) => [tool.call, tool]));
 	const called = new Map(activityCalls(work).map((call) => [`${call.entry}:${call.call.id}`, call]));
 	const end = activityEnd(work);
 	const waiting = new Set(waits.flatMap((wait) => (wait.call === undefined ? [] : [wait.call])));
 	const rows: Row[] = [];
 	const callRow = (key: string, call: ToolCall, result: Extract<Item, { role: "tool" }> | undefined): Row => {
-		const head = toolHead(call, result !== undefined);
+		const session = callSession(harnesses, chat, call, result);
+		const service = typeof session === "object" ? session.service : toolService(harnesses, call.name);
+		const head = toolHead(call, result !== undefined, service);
 		const state: Pick<Row, "status" | "meta"> =
 			result === undefined
 				? live
@@ -446,7 +536,14 @@ function ActivityTimeline({
 						? { status: "failed", meta: "Failed" }
 						: { status: "done", ...(result.durationMs === undefined ? {} : { meta: took(result.durationMs) }) };
 		const detail = callDetail(chat, call, result, output.get(call.id));
-		return { key, icon: toolIcon(call.name), ...head, ...state, ...(detail === undefined ? {} : { detail }) };
+		return {
+			key,
+			icon: toolIcon(call.name),
+			...head,
+			...state,
+			...(detail === undefined ? {} : { detail }),
+			...(session === undefined ? {} : { session }),
+		};
 	};
 	let request = 0;
 	for (const item of work.items) {
@@ -531,56 +628,70 @@ function ActivityTimeline({
 	// a step at work says so itself: the last line says "Working…" only while none does
 	const busy = rows.some((row) => row.status === "active" || row.status === "waiting");
 	return (
-		<ChainOfThought open>
-			<ChainOfThoughtContent>
-				{rows.map((row) => (
-					<Step
-						key={row.key}
-						name={row.key}
-						icon={row.icon}
-						status={row.status}
-						meta={row.meta}
-						words={
-							<StepWords
-								verb={row.verb}
-								object={row.object ?? ""}
-								code={row.code ?? false}
-								ends={row.ends}
-								active={row.status === "active"}
-							/>
-						}
-						detail={
-							row.detail === undefined ? undefined : (
-								<div className="flex min-w-0 flex-col items-start gap-1">
-									<div className="w-full min-w-0">{row.detail}</div>
-									{onDrill === undefined ? null : (
-										<Button variant="ghost" size="xs" className="-ml-2 text-ink-2" onClick={() => onDrill(row.key)}>
-											<MessagesSquareIcon data-icon="inline-start" />
-											In the transcript
-										</Button>
-									)}
-								</div>
-							)
-						}
-						open={open.has(row.key)}
-						onToggle={() => setOpen((prior) => toggledStep(prior, row.key))}
-					/>
-				))}
-				{live ? (
-					busy ? null : (
-						<Step name="end" icon={WorkingIcon} status="active" words={<StepWords verb="Working…" active />} />
-					)
-				) : (
-					<Step
-						name="end"
-						icon={failed ? CircleAlertIcon : end === "Stopped" ? SquareIcon : CheckIcon}
-						status={failed ? "failed" : "done"}
-						words={<span className={failed ? "text-danger" : "text-ink"}>{end}</span>}
-						meta={total === undefined ? undefined : took(total)}
-					/>
-				)}
-			</ChainOfThoughtContent>
-		</ChainOfThought>
+		<>
+			<ChainOfThought open>
+				<ChainOfThoughtContent>
+					{rows.map((row) => (
+						<Step
+							key={row.key}
+							name={row.key}
+							icon={row.icon}
+							status={row.status}
+							meta={row.meta}
+							words={
+								<StepWords
+									verb={row.verb}
+									object={row.object ?? ""}
+									code={row.code ?? false}
+									ends={row.ends}
+									active={row.status === "active"}
+								/>
+							}
+							detail={
+								// a coding agent's step opens even with nothing of its own to show: its session is what it leads to
+								row.detail === undefined && row.session === undefined ? undefined : (
+									<div className="flex min-w-0 flex-col items-start gap-1">
+										{row.detail === undefined ? null : <div className="w-full min-w-0">{row.detail}</div>}
+										<StepLinks
+											onTranscript={onDrill === undefined ? undefined : () => onDrill(row.key)}
+											session={row.session}
+											onSession={(task, from) => {
+												opener.current = from;
+												setShown(task);
+											}}
+										/>
+									</div>
+								)
+							}
+							open={open.has(row.key)}
+							onToggle={() => setOpen((prior) => toggledStep(prior, row.key))}
+						/>
+					))}
+					{live ? (
+						busy ? null : (
+							<Step name="end" icon={WorkingIcon} status="active" words={<StepWords verb="Working…" active />} />
+						)
+					) : (
+						<Step
+							name="end"
+							icon={failed ? CircleAlertIcon : end === "Stopped" ? SquareIcon : CheckIcon}
+							status={failed ? "failed" : "done"}
+							words={<span className={failed ? "text-danger" : "text-ink"}>{end}</span>}
+							meta={total === undefined ? undefined : took(total)}
+						/>
+					)}
+				</ChainOfThoughtContent>
+			</ChainOfThought>
+			{/* over the activity, as a file's preview is: closed, the activity is still there and the control has focus */}
+			{showing === undefined ? null : (
+				<HarnessActivitySheet
+					session={showing}
+					agent={agent}
+					onClose={() => setShown(undefined)}
+					returnFocus={() => opener.current?.focus()}
+				/>
+			)}
+		</>
 	);
 }
 

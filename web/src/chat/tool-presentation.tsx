@@ -5,6 +5,7 @@ import {
 	CalendarClockIcon,
 	CameraIcon,
 	ClockIcon,
+	CodeXmlIcon,
 	FilePenLineIcon,
 	FilePlusIcon,
 	FileTextIcon,
@@ -32,6 +33,7 @@ import {
 	WrenchIcon,
 } from "lucide-react";
 import { capEnds, commandEnds, type Ends, pathEnds, suffixEnds } from "@/lib/ends";
+import { harnessToolOf } from "@/lib/segments/harness";
 
 const ICONS: Record<string, LucideIcon> = {
 	message_user: MessageCircleIcon,
@@ -67,6 +69,7 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 export function toolIcon(name: string): LucideIcon {
+	if (harnessToolOf(name) !== undefined) return CodeXmlIcon;
 	return Object.hasOwn(ICONS, name) ? (ICONS[name] ?? WrenchIcon) : WrenchIcon;
 }
 export function ToolIcon({ name }: { name: string }) {
@@ -179,8 +182,13 @@ export function toolPreviewEnds(name: string, args: Readonly<Record<string, unkn
 		case "forget":
 			value = text("id");
 			break;
-		default:
-			value = text("path", "url", "query");
+		default: {
+			// a coding agent's work is what it was asked; the two tools over sessions say which session
+			const harness = harnessToolOf(name);
+			if (harness === undefined) value = text("path", "url", "query");
+			else if (harness === "work") value = text("prompt");
+			else value = typeof args.session === "number" ? `Session ${args.session}` : "";
+		}
 	}
 	if (!value) return undefined;
 	const one = value.replace(/\s+/g, " ").trim();

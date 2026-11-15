@@ -5,6 +5,7 @@
  */
 import type { Item, ToolCall, TurnUsage } from "../../../src/server/api.ts";
 import { capEnds, type Ends, pathEnds } from "../lib/ends.ts";
+import { harnessToolOf } from "../lib/segments/harness.ts";
 import { cached, dollars, sent, tokens } from "../lib/usage.ts";
 import { runHeadline } from "./Harness.tsx";
 import { toolPreviewEnds } from "./tool-presentation.tsx";
@@ -65,9 +66,26 @@ export function prettyUrl(url: string): string {
 		.replace(/\/$/, "");
 }
 
-/** A call as a step's one line. `done` says it ran: "Opened" for "Opening". */
-export function toolHead(call: ToolCall, done: boolean): StepHead {
+/**
+ * A call as a step's one line. `done` says it ran: "Opened" for "Opening". `service` is the coding agent a harness's
+ * tool hands work to, as the owner knows it ("Claude Code"); unknown, the line says "a coding agent".
+ */
+export function toolHead(call: ToolCall, done: boolean, service?: string): StepHead {
 	const { name, args } = call;
+	const harness = harnessToolOf(name);
+	if (harness === "work") {
+		const preview = toolPreviewEnds(name, args);
+		return {
+			verb: `${done ? "Asked" : "Asking"} ${service ?? "a coding agent"}`,
+			object: preview === undefined ? "" : preview.head + preview.end,
+			code: false,
+		};
+	}
+	if (harness !== undefined) {
+		const verb = harness === "stop" ? (done ? "Stopped" : "Stopping") : done ? "Checked" : "Checking";
+		const one = typeof args.session === "number" ? `coding session ${args.session}` : undefined;
+		return { verb, object: one ?? (harness === "stop" ? "a coding session" : "coding sessions"), code: false };
+	}
 	if (name === "bash" && typeof args.command === "string" && args.command.trim() !== "") {
 		// a here-document's body is what the command reads, not more of the command: its first line says what ran
 		const [first = "", ...body] = args.command.trim().split("\n");

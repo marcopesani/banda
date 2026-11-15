@@ -346,6 +346,7 @@ export const SECTIONS: readonly Entry[] = [
 		status: "app",
 		sources: [
 			"web/src/app/Activity.tsx",
+			"web/src/app/HarnessSession.tsx",
 			"web/src/chat/Steps.tsx",
 			"web/src/components/ai-elements/chain-of-thought.tsx",
 			"web/src/components/ai-elements/reasoning.tsx",

@@ -23,6 +23,32 @@ it("says a call as going on, then as done, in the owner's words", () => {
 	expect(toolHead(call("browser_snapshot", {}), true)).toMatchObject({ verb: "Read the page", object: "" });
 });
 
+it("names a coding agent's call by the coding agent, never by its tool", () => {
+	const work = call("harness__claude_code", { prompt: "Fix the login test.", project: "auth" });
+	expect(toolHead(work, false, "Claude Code")).toMatchObject({
+		verb: "Asking Claude Code",
+		object: "Fix the login test.",
+		code: false,
+	});
+	expect(toolHead(work, true, "Claude Code").verb).toBe("Asked Claude Code");
+	// which coding agent is not known: plain words
+	expect(toolHead(work, true).verb).toBe("Asked a coding agent");
+	expect(toolHead(call("harness__sessions", {}), true)).toMatchObject({ verb: "Checked", object: "coding sessions" });
+	expect(toolHead(call("harness__sessions", { session: 4 }), false)).toMatchObject({
+		verb: "Checking",
+		object: "coding session 4",
+	});
+	expect(toolHead(call("harness__stop", { session: 4 }), true)).toMatchObject({
+		verb: "Stopped",
+		object: "coding session 4",
+		code: false,
+	});
+	for (const name of ["harness__claude_code", "harness__sessions", "harness__stop"]) {
+		const head = toolHead(call(name, { prompt: "x", session: 1 }), true, "Claude Code");
+		expect(`${head.verb} ${head.object}`).not.toContain("harness__");
+	}
+});
+
 it("keeps a path's file name and an address's last part when the line runs out", () => {
 	expect(toolHead(call("read", { path: "web/src/app/Activity.tsx" }), true).ends).toEqual({
 		head: "web/src/app/",

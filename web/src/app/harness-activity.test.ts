@@ -1,6 +1,15 @@
 import { expect, it } from "vitest";
 import type { HarnessSessionView } from "../../../src/server/api.ts";
-import { askNotice, askSummary, askWords, chatActivity, harnessActivity, shownAsks } from "./harness-activity.ts";
+import {
+	askNotice,
+	askSummary,
+	askWords,
+	callSession,
+	chatActivity,
+	harnessActivity,
+	shownAsks,
+	toolService,
+} from "./harness-activity.ts";
 
 const one: HarnessSessionView = {
 	task: 1,
@@ -14,6 +23,48 @@ const one: HarnessSessionView = {
 	steps: [],
 	dropped: 0,
 };
+it("finds the session a coding agent's call led to by the call, and says when it is no longer kept", () => {
+	const started = { ...one, task: 7, call: "c1" };
+	const seen = { sessions: [started, { ...one, task: 5, call: "c0" }] };
+	const work = (id: string, args: Record<string, unknown> = {}) => ({
+		id,
+		name: "harness__claude_code",
+		args: { prompt: "Fix it.", ...args },
+	});
+	const ok = { error: false };
+	// by the call that started it, in this chat only, and before any answer came
+	expect(callSession(seen, 3, work("c1"), ok)).toBe(started);
+	expect(callSession(seen, 3, work("c1"), undefined)).toBe(started);
+	expect(callSession(seen, 4, work("c1"), ok)).toBe("gone");
+	// a follow-up that started a session of its own leads there, not to the one it follows
+	expect(callSession(seen, 3, work("c1", { session: 5 }), ok)).toBe(started);
+	// a note to a running session started none: it leads to the session it named
+	expect(callSession(seen, 3, work("c9", { session: 5 }), ok)).toMatchObject({ task: 5 });
+	// started, and no longer kept
+	expect(callSession(seen, 3, work("c9"), ok)).toBe("gone");
+	expect(callSession(seen, 3, work("c9", { session: 99 }), ok)).toBe("gone");
+	// refused, or not answered yet: there is no session to speak of
+	expect(callSession(seen, 3, work("c9"), { error: true })).toBeUndefined();
+	expect(callSession(seen, 3, work("c9"), undefined)).toBeUndefined();
+	// the two tools over sessions lead to the one they name and reached, and to none when they name none
+	const over = (name: string, args: Record<string, unknown>) => ({ id: "c1", name, args });
+	expect(callSession(seen, 3, over("harness__stop", { session: 7 }), ok)).toBe(started);
+	expect(callSession(seen, 3, over("harness__sessions", { session: 7 }), ok)).toBe(started);
+	expect(callSession(seen, 3, over("harness__sessions", {}), ok)).toBeUndefined();
+	expect(callSession(seen, 3, over("harness__stop", { session: 7 }), { error: true })).toBeUndefined();
+	expect(callSession(seen, 3, over("harness__stop", { session: 99 }), ok)).toBe("gone");
+	// another tool, or a shell that has not said its sessions yet
+	expect(callSession(seen, 3, { id: "c1", name: "bash", args: {} }, ok)).toBeUndefined();
+	expect(callSession(undefined, 3, work("c1"), ok)).toBeUndefined();
+});
+it("names a coding agent's tool by its service, from what is installed or from a session kept", () => {
+	expect(toolService({ sessions: [one] }, "harness__claude_code")).toBe("Claude Code");
+	expect(
+		toolService({ sessions: [], harnesses: [{ name: "open-code", service: "OpenCode" }] }, "harness__open_code"),
+	).toBe("OpenCode");
+	expect(toolService({ sessions: [one] }, "harness__codex")).toBeUndefined();
+	expect(toolService(undefined, "harness__claude_code")).toBeUndefined();
+});
 it("tracks recorded working, permission, completed and interrupted states in the relevant chat only", () => {
 	expect(harnessActivity([one], [3]).label).toBe("Claude Code is working…");
 	const asking = { ...one, state: "waiting" as const, asks: [{ id: "ask", kind: "execute", command: "npm test" }] };

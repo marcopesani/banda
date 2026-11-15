@@ -1,6 +1,7 @@
 import {
 	BookOpenIcon,
 	CalendarClockIcon,
+	CodeXmlIcon,
 	FileTextIcon,
 	GlobeIcon,
 	MessageCircleIcon,
@@ -8,6 +9,7 @@ import {
 	WrenchIcon,
 } from "lucide-react";
 import { describe, expect, it } from "vitest";
+import { harnessToolOf } from "../lib/segments/harness.ts";
 import { shortPreview, toolIcon, toolPreview, toolPreviewEnds } from "./tool-presentation.tsx";
 
 describe("tool identity and literal previews", () => {
@@ -61,6 +63,22 @@ describe("tool identity and literal previews", () => {
 		// short enough to show whole: unchanged; a call with nothing to keep keeps nothing
 		expect(toolPreview("bash", { command: "npm test && git push" })).toBe("npm test && git push");
 		expect(toolPreviewEnds("message_user", { text: "hello" })).toEqual({ head: "hello", end: "" });
+	});
+	it("knows a coding agent's tool from the two over sessions, and previews what each was asked", () => {
+		expect(harnessToolOf("harness__claude_code")).toBe("work");
+		expect(harnessToolOf("harness__sessions")).toBe("sessions");
+		expect(harnessToolOf("harness__stop")).toBe("stop");
+		expect(harnessToolOf("bash")).toBeUndefined();
+		for (const name of ["harness__claude_code", "harness__sessions", "harness__stop"])
+			expect(toolIcon(name)).toBe(CodeXmlIcon);
+		// the work is its prompt, never its project or the session it follows
+		expect(toolPreview("harness__claude_code", { prompt: "Fix the\nlogin test.", project: "auth", session: 3 })).toBe(
+			"Fix the login test.",
+		);
+		expect(toolPreview("harness__codex", { prompt: "word ".repeat(100) })?.length).toBe(180);
+		expect(toolPreview("harness__stop", { session: 3 })).toBe("Session 3");
+		expect(toolPreview("harness__sessions", { session: 3 })).toBe("Session 3");
+		expect(toolPreview("harness__sessions", {})).toBeUndefined();
 	});
 	it("does not put credentials or unknown arguments in a collapsed preview", () => {
 		expect(toolPreview("propose_key", { key: "private", connection: "GitHub", host: "api.github.com" })).toBe(

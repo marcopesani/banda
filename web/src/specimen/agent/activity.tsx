@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { ActivitySheet, ActivityView } from "../../app/Activity.tsx";
 import { Band } from "../../chat/Band.tsx";
 import { Bubble, DaySeparator, Run } from "../../chat/Feed.tsx";
-import type { Block, ChatPrompt, Item, RunningTool } from "../../lib/api.ts";
+import type { Block, ChatPrompt, HarnessSessionView, Item, RunningTool } from "../../lib/api.ts";
 import type { Transcript } from "../../lib/transcript.ts";
 import { MARA, ROWS } from "../fixtures.ts";
 import { ChatScreen } from "../screens/screens.tsx";
@@ -38,7 +38,7 @@ export function transcriptOf(
 	};
 }
 
-type Scenario = "working" | "finished" | "failed";
+type Scenario = "working" | "finished" | "failed" | "coding";
 const CHAT = 1;
 const REQUEST =
 	"Find me a direct train from Barcelona to Madrid on Friday morning. Under €60, ideally arriving before noon.";
@@ -251,9 +251,60 @@ function working(tick: number): { transcript: Transcript } {
 	};
 }
 
-const SCENES: Readonly<Record<Exclude<Scenario, "working">, { transcript: Transcript }>> = {
+/** Work handed to a coding agent: one session still kept, a look at it, and one whose session is no longer kept. */
+const CODING_ASK =
+	"The fare alert script in trains/alert.py crashes on a sold-out train. Make it skip those, and run its tests.";
+const CODING_REQUEST = "The fare alert stopped working this morning. Can you get it fixed?";
+const CODING_REPLY = "Claude Code fixed it: the alert skips sold-out trains now, and its tests pass.";
+const CODING: readonly Item[] = [
+	{ id: 1, role: "user", text: CODING_REQUEST, at: at(0) },
+	...round(
+		2,
+		2,
+		{ id: "h1", name: "harness__claude_code", args: { prompt: CODING_ASK, project: "trains" } },
+		{ text: "Started session 7: Claude Code in ~/code/trains.", durationMs: 300 },
+	),
+	...round(
+		4,
+		40,
+		{ id: "h2", name: "harness__sessions", args: { session: 7 } },
+		{ text: "Session 7: Claude Code in ~/code/trains, done.", durationMs: 100 },
+	),
+	...round(
+		6,
+		44,
+		{ id: "h3", name: "harness__claude_code", args: { prompt: "Add a test for a train with no fare at all." } },
+		{ text: "Started session 3: Claude Code in ~/code/trains.", durationMs: 300 },
+	),
+	{ id: 8, role: "assistant", stop: "stop", text: "", at: at(46), ...REQUEST_COST(8) },
+];
+const CODING_SESSION: HarnessSessionView = {
+	task: 7,
+	chat: CHAT,
+	call: "h1",
+	agent: "mara",
+	harness: "claude-code",
+	service: "Claude Code",
+	folder: "~/code/trains",
+	state: "done",
+	at: at(2),
+	ended: at(38),
+	outcome: "Sold-out trains are skipped now, and the tests pass.",
+	steps: [
+		{ kind: "read", path: "alert.py" },
+		{ kind: "edit", path: "alert.py", added: 4, removed: 1 },
+		{ kind: "run", command: "python3 -m pytest", output: "6 passed in 0.41s\n", running: false },
+		{ kind: "said", text: "Sold-out trains are skipped now, and the tests pass." },
+	],
+	dropped: 0,
+};
+
+const SCENES: Readonly<
+	Record<Exclude<Scenario, "working">, { transcript: Transcript; sessions?: readonly HarnessSessionView[] }>
+> = {
 	finished: { transcript: transcriptOf(FINISHED) },
 	failed: { transcript: transcriptOf(FAILED) },
+	coding: { transcript: transcriptOf(CODING), sessions: [CODING_SESSION] },
 };
 
 /** The chat with its activity: the scenario and the stream are the specimen's controls above it. */
@@ -276,7 +327,9 @@ export function ActivityChat() {
 		setScenario("finished");
 		setPlaying(false);
 	}, [tick, playing]);
-	const scene = scenario === "working" ? working(tick) : SCENES[scenario];
+	const scene: { transcript: Transcript; sessions?: readonly HarnessSessionView[] } =
+		scenario === "working" ? working(tick) : SCENES[scenario];
+	const coding = scenario === "coding";
 	const live = scenario === "working";
 	const show = (anchor?: number) => {
 		setScheme(root.current ? getComputedStyle(root.current).colorScheme : "light");
@@ -305,6 +358,7 @@ export function ActivityChat() {
 						<TabsTrigger value="working">Working</TabsTrigger>
 						<TabsTrigger value="finished">Finished</TabsTrigger>
 						<TabsTrigger value="failed">Failure</TabsTrigger>
+						<TabsTrigger value="coding">Coding agent</TabsTrigger>
 					</TabsList>
 				</Tabs>
 				<Button variant="ghost" size="sm" onClick={play}>
@@ -315,11 +369,11 @@ export function ActivityChat() {
 			<ChatScreen name={MARA.name} face={MARA.face}>
 				<DaySeparator>Today</DaySeparator>
 				<Run time="10:41">
-					<Bubble copy={REQUEST}>{REQUEST}</Bubble>
+					<Bubble copy={coding ? CODING_REQUEST : REQUEST}>{coding ? CODING_REQUEST : REQUEST}</Bubble>
 				</Run>
 				<Run who={MARA} time="10:42" compact>
-					<Bubble copy={ACKNOWLEDGEMENT} onActivity={() => show(2)}>
-						{ACKNOWLEDGEMENT}
+					<Bubble copy={coding ? CODING_REPLY : ACKNOWLEDGEMENT} onActivity={() => show(2)}>
+						{coding ? CODING_REPLY : ACKNOWLEDGEMENT}
 					</Bubble>
 				</Run>
 				{scenario === "finished" ? (
@@ -340,7 +394,12 @@ export function ActivityChat() {
 			{open === undefined ? null : (
 				<ActivitySheet
 					targets={[{ chat: CHAT, name: MARA.name, face: MARA.face, ...open }]}
-					source={{ chat: CHAT, transcript: scene.transcript, prompt: PROMPT }}
+					source={{
+						chat: CHAT,
+						transcript: scene.transcript,
+						prompt: PROMPT,
+						...(scene.sessions === undefined ? {} : { harnesses: { sessions: scene.sessions } }),
+					}}
 					onClose={() => setOpen(undefined)}
 					style={{ colorScheme: scheme, ...(phone ? { maxWidth: 390 } : {}) }}
 				/>
@@ -362,10 +421,30 @@ export function ActivitySection() {
 	);
 }
 
-const OPEN: readonly { scenario: Scenario; label: string }[] = [
-	{ scenario: "working", label: "Working: a thought streaming, nothing opened" },
-	{ scenario: "finished", label: "Finished" },
-	{ scenario: "failed", label: "Failed: a page that did not load, and a model error that ended the run" },
+const OPEN: readonly {
+	scenario: string;
+	label: string;
+	transcript: () => Transcript;
+	sessions?: readonly HarnessSessionView[];
+}[] = [
+	{
+		scenario: "working",
+		label: "Working: a thought streaming, nothing opened",
+		transcript: () => working(16).transcript,
+	},
+	{ scenario: "finished", label: "Finished", transcript: () => SCENES.finished.transcript },
+	{
+		scenario: "failed",
+		label: "Failed: a page that did not load, and a model error that ended the run",
+		transcript: () => SCENES.failed.transcript,
+	},
+	{
+		scenario: "coding",
+		label:
+			"A coding agent: its step, opened, leads to the session it started; the last one's session is no longer kept",
+		transcript: () => SCENES.coding.transcript,
+		sessions: [CODING_SESSION],
+	},
 ];
 
 /** The sheet's two depths with no sheet around them: the activity beside the transcript, in each state. */
@@ -377,8 +456,8 @@ export function ActivityOpenSection() {
 			wide
 		>
 			<div className="@container flex w-full min-w-0 flex-col gap-6">
-				{OPEN.map(({ scenario, label }) => {
-					const scene = scenario === "working" ? working(16) : SCENES[scenario];
+				{OPEN.map(({ scenario, label, transcript, sessions }) => {
+					const scene = { transcript: transcript() };
 					return (
 						<div key={scenario} className="flex min-w-0 flex-col gap-2">
 							<p className="text-meta text-ink-2">{label}</p>
@@ -394,6 +473,7 @@ export function ActivityOpenSection() {
 											depth={depth}
 											transcript={scene.transcript}
 											given={PROMPT}
+											harnesses={sessions === undefined ? undefined : { sessions }}
 										/>
 									</div>
 								))}

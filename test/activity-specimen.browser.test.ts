@@ -145,6 +145,52 @@ for (const width of [320, 390, 1440]) {
 	});
 }
 
+for (const width of [390, 1440]) {
+	it.skipIf(!hasChrome())(`a coding agent's step opens its session over the activity at ${width}px`, async () => {
+		await withPage(url, { width, height: 900 }, async (page) => {
+			const dialogs = `document.querySelectorAll('[role="dialog"]').length`;
+			const open = `document.querySelector('[data-open-session="7"]')`;
+			const over = `[...document.querySelectorAll('[role="dialog"]')].at(-1)`;
+			await page.until(first);
+			await press(page, tab("Coding agent"));
+			await page.until(`document.body.textContent.includes('Claude Code fixed it')`);
+			await chooseMessageAction(page, first, "Activity");
+			// the step is named by the coding agent and what it was asked, never by its tool
+			await page.until(`${dialogText}?.includes('Asked Claude Code')`);
+			expect(await page.run(`${dialogText}.includes('harness__')`)).toBe(false);
+			expect(await page.run(`${dialogText}.includes('Checked')`)).toBe(true);
+			// a session no longer kept: the step says so and offers nothing to open
+			await press(page, step("Asked Claude Code", 1));
+			await page.until(`document.querySelector('[data-session-gone]')`);
+			expect(await page.run(`document.querySelectorAll('[data-open-session]').length`)).toBe(0);
+			// the one it started opens over the activity, from a button beside the way to the transcript
+			await press(page, step("Asked Claude Code"));
+			await page.until(open);
+			expect(
+				await page.run(`${open}.closest('[data-step]').querySelector('button[aria-expanded]').contains(${open})`),
+			).toBe(false);
+			await press(page, open);
+			await page.until(`${dialogs} === 2`);
+			await page.until(`${over}.textContent.includes('alert.py')`);
+			await page.until(`${over}.contains(document.activeElement)`);
+			expect(await page.run(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+			// closed, the activity is still there, as it was, and focus is on the button that opened the session
+			await press(page, `[...${over}.querySelectorAll('button')].find(el => el.textContent.trim() === 'Close')`);
+			await page.until(`${dialogs} === 1`);
+			await page.until(`document.activeElement === ${open}`);
+			expect(await page.run(`${step("Asked Claude Code")}.getAttribute('aria-expanded')`)).toBe("true");
+			// the look at that session leads to it too
+			await press(page, step("Checked"));
+			await page.until(`document.querySelectorAll('[data-open-session="7"]').length === 2`);
+			// and the step still leads to itself in the transcript
+			await press(page, button("In the transcript"));
+			await page.until(`${tab("Transcript")}.getAttribute('aria-selected') === 'true'`);
+			await page.until(`${row("harness__claude_code")}?.getAttribute('aria-expanded') === 'true'`);
+			expect(page.errors()).toEqual([]);
+		});
+	});
+}
+
 it.skipIf(!hasChrome())("streaming preserves inspection and keeps the sheet open when work completes", async () => {
 	await withPage(url, { width: 390, height: 740 }, async (page) => {
 		await page.until(first);
