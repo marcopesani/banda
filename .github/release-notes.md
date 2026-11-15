@@ -12,4 +12,4 @@ Unsigned pre-release for Apple silicon Macs on macOS 14 or newer, and for Linux 
 
 The command-line archive includes Node.js. Unpack it and put `banda/bin` on your PATH. The desktop app and `banda serve` use the same home.
 
-`SHA256SUMS` covers the downloads.
+`SHA256SUMS` covers every file here. The Mac and Linux downloads carry a virtual machine with a Linux kernel and Debian guest images. Their source code and license notices are the `banda-*-sources-*.tar` and `banda-*-notices.tar` files of this release, and `release-materials.json` binds them to each download by SHA-256. `RELEASE-SOURCES.md` says what they hold, what they leave out and how to check them. The release workflow assembled them; no person reviewed this set before publication.

@@ -9,8 +9,9 @@ alpha.14 commit, Linux x64 passes native computer use through the app on a KVM r
 and the installed shell's start and quit; the package was tried locally on Debian 12 and 13 and Ubuntu 22.04, 24.04
 and 26.04 under X11 and Wayland (arm64, no VM). The computer banda ships is the default box on Mac and Linux; Docker
 is used only by name, on Windows, and once to bring an earlier home's files. alpha.13 was tagged but published
-nothing. Open: a person installing the x64 .deb on a physical Linux machine, and source and notice assets for
-releases a tag publishes.
+nothing. Open: a person installing the x64 .deb on a physical Linux machine. alpha.14 was published without source
+and notice assets. A tag now assembles them from its own builds and publishes nothing without them; that job has run
+only on a development Mac against alpha.14's downloads, never on a runner, and nobody has reviewed a set it made.
 
 The native-computer candidate is rebased onto current main. Routine requests now retain their original agent and
 execution after the run ends, and their existing approvals appear in that agent's chat. Archiving cancels retained

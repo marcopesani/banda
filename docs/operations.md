@@ -35,12 +35,22 @@ upstream digest-pinned manylinux 2.28 Docker image and checks that baseline befo
 requirements. The installed native Mac and Linux applications use their bundled executables and need neither Rust
 nor Docker. Windows keeps its existing backend until native qualification.
 
-The reviewed Mac bundle ships matching corresponding sources and third-party notices as release assets. Build-time
-review records name the exact accepted native and image inputs. Only matching inputs receive `reviewed`; other Mac
-candidates and Linux manifests retain `review-required`.
+## Sources and notices
 
-Manual release runs build qualification artifacts. A version tag drafts release metadata; the verified material set
-is uploaded separately, so an automatic build cannot replace the selected runtime, notices or source assets.
+The Mac and Linux downloads carry GPL and LGPL code: the kernel inside the firmware, and the Debian packages of the
+guest images. A release offers their source from the same place as the downloads. The release workflow assembles it
+from its own builds, never by hand: it reads what each built computer contains (the installed manifest, each image's
+package database and Python distributions) and fetches the source of exactly that. Every fetched file is checked
+against a hash: one pinned in the repository (Microsandbox, the firmware, the kernel), one the pinned Cargo.lock
+gives (crates), or one the distribution's own index gives (Debian's snapshot, PyPI). `release-materials.json` binds
+the set to each download by SHA-256, and a tag publishes nothing when a source is missing, fails its hash, or the
+index does not name the exact files being published.
+
+Review is a person's act, so nothing a workflow writes says `reviewed`. The installed manifest's `redistribution`
+is decided when the bundle is staged, before its bytes exist to be read: it is `reviewed` only for inputs the owner
+recorded in `scripts/computer-distribution.json` (the alpha.12 Mac bundle), and `review-required` for every build
+since. The release's index can only say `unreviewed`. What the set leaves out is written in the index and in
+`RELEASE-SOURCES.md`, never implied.
 
 ## Open work
 
@@ -58,6 +68,21 @@ is uploaded separately, so an automatic build cannot replace the selected runtim
 Recheck these items against current code before implementation; an unchecked item is not a freshly verified
 defect. Remove it only when its fix and acceptance evidence are recorded in a commit.
 
+- [ ] Run the release workflow's `materials` job once by hand (`build_target: all`, no tag) before the next tag: it
+  has only run on a development Mac against alpha.14's downloads, never on a runner. Watch its disk use and its time
+- [ ] Decide how the owner's review of a release's sources and notices is recorded. The set exists only after the
+  build, so no committed record can name its hashes beforehand. Either the tag run drafts the release and the owner
+  publishes it after reading `release-materials.json`, or a manual workflow run attaches a review record that names
+  the published index's SHA-256 and who accepted it. Until then every release says `unreviewed`
+- [ ] alpha.14 is published without sources or notices. Attach the set this collector makes from its downloads, or
+  replace it with a release that has one
+- [ ] Sources the set leaves out: CPython in the proxy image, pi-env and the guest agent's C library (permissive
+  licenses), and the FFmpeg library inside Electron, which Electron ships under the LGPL: the desktop packages carry
+  Electron's license files but neither that library's source nor an offer of it
+- [ ] Verify the OpenPGP signature of each Debian source control file against Debian's keyrings; today a `.dsc` is
+  trusted by the hash snapshot.debian.org's index gives over HTTPS
+- [ ] Third-party notices for the Rust crates and guest packages ship beside the downloads, not inside them. Put the
+  notices the MIT and Apache-2.0 licenses ask for into the application itself, as alpha.12's `licenses` folder did
 - [ ] Rootless box, and a supervisor that alone holds the Docker socket
 - [ ] Bring a qualified native runtime on every platform. The reviewed Apple-silicon bundle includes it; Windows
   keeps its existing backend and Linux native acceptance remains open
