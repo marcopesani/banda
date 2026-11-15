@@ -1228,7 +1228,12 @@ export function ModelProviders({
 						actions.length > 0 ? (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
-									<Button variant="ghost" size="icon-xs" aria-label={`More for ${name}`}>
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										className="pointer-coarse:size-11"
+										aria-label={`More for ${name}`}
+									>
 										<EllipsisIcon />
 									</Button>
 								</DropdownMenuTrigger>
@@ -1295,7 +1300,7 @@ export function ModelProviders({
 													title={`Sign out of ${name}?`}
 													body={leave}
 													action="Sign out"
-													keep="Stay signed in"
+													keep="Stay connected"
 													onConfirm={onSignOut === undefined ? undefined : () => onSignOut(provider.id)}
 													open={leaving === provider.id}
 													onOpenChange={(open) => setLeaving(open ? provider.id : undefined)}

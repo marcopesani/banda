@@ -2,9 +2,15 @@
  * Owner-driven MCP setup. Also embeddable in a future owner-reviewed proposal card. `McpSetup` holds the state and
  * talks to the daemon; `McpSetupView` draws it from that state alone, so the specimen shows every phase over a fixture.
  */
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, EllipsisIcon, PlusIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,9 +19,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { ACCOUNT_LABEL_MAX } from "../../../src/core/choices.ts";
 import type { McpConfig } from "../../../src/core/mcp-config.ts";
 import type { Setting } from "../../../src/core/tool-kinds.ts";
-import type { CapabilitiesView, ConnectionView } from "../../../src/server/api.ts";
+import type { AccountView, CapabilitiesView, ConnectionView } from "../../../src/server/api.ts";
 import { Confirm } from "../chat/Confirm.tsx";
-import { ConnectionDetailsView } from "../chat/ConnectionDetails.tsx";
+import { ConnectionDetailsView, SignOutConfirm } from "../chat/ConnectionDetails.tsx";
 import { McpServerForm } from "../chat/McpConnection.tsx";
 import {
 	actOnCapability,
@@ -74,7 +80,8 @@ export type McpSetupActions = {
 	readonly save: () => void;
 	readonly review: () => void;
 	readonly signInAnother: () => void;
-	readonly signOut: () => void;
+	/** Sign out of an account, already confirmed; with none, remove a server that has no sign-in. */
+	readonly signOut: (account?: string) => void;
 };
 
 /**
@@ -325,7 +332,7 @@ export function McpSetup({
 			go("review");
 		},
 		signInAnother: () => go("auth"),
-		signOut: () => {
+		signOut: (leaving) => {
 			if (!view) return;
 			void run(async () => {
 				// a server with no sign-in has only Remove, the same one its details offer: the page goes with it
@@ -335,10 +342,17 @@ export function McpSetup({
 					update(next);
 					return;
 				}
-				update(await signOutAccount(view.name, account));
+				if (leaving === undefined) return;
+				const left = freshAccounts(update(await signOutAccount(view.name, leaving)));
+				setTrail([]);
+				// with accounts left it stays on them, on another if the one at hand went; with none, back to sign in
+				if (left.length > 0) {
+					if (leaving === account) setAccount(left[0]?.account ?? "");
+					setPhase("done");
+					return;
+				}
 				setAccount("");
 				setSelected([]);
-				setTrail([]);
 				setPhase("auth");
 			});
 		},
@@ -363,6 +377,7 @@ export function McpSetupView({ state, actions }: { state: McpSetupState; actions
 	const held = accounts.find((each) => each.account === account);
 	const active = anonymous ? (view?.agents ?? []) : (held?.agents ?? []);
 	const expired = view !== undefined && phase === "auth" && signInExpired(view);
+	const [leaving, setLeaving] = useState<AccountView>();
 	const previous = useRef(phase);
 	useEffect(() => {
 		if (previous.current !== phase) heading.current?.focus();
@@ -511,20 +526,57 @@ export function McpSetupView({ state, actions }: { state: McpSetupState; actions
 					) : (
 						<Field>
 							<FieldLabel htmlFor={`${id}-account`}>Account</FieldLabel>
-							<Select value={account} onValueChange={actions.setAccount} disabled={busy}>
-								<SelectTrigger id={`${id}-account`}>
-									<SelectValue placeholder="Choose an account" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectGroup>
-										{accounts.map((each) => (
-											<SelectItem key={each.account} value={each.account}>
-												{each.label}
-											</SelectItem>
-										))}
-									</SelectGroup>
-								</SelectContent>
-							</Select>
+							<div className="flex items-center gap-1.5">
+								<Select value={account} onValueChange={actions.setAccount} disabled={busy}>
+									<SelectTrigger id={`${id}-account`} className="min-w-0 flex-1">
+										<SelectValue placeholder="Choose an account" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectGroup>
+											{accounts.map((each) => (
+												<SelectItem key={each.account} value={each.account}>
+													{each.label}
+												</SelectItem>
+											))}
+										</SelectGroup>
+									</SelectContent>
+								</Select>
+								{/* the review hides the list of accounts: the one under review carries its menu here */}
+								{phase === "review" && held !== undefined ? (
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												className="pointer-coarse:size-11"
+												disabled={busy}
+												aria-label={`More for ${held.label}`}
+											>
+												<EllipsisIcon />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent align="end">
+											<DropdownMenuItem variant="destructive" onSelect={() => setLeaving(held)}>
+												Sign out
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
+								) : null}
+							</div>
+							{phase === "review" ? (
+								<div>
+									<Button
+										variant="ghost"
+										size="sm"
+										className="pointer-coarse:min-h-11"
+										disabled={busy}
+										onClick={actions.signInAnother}
+									>
+										<PlusIcon data-icon="inline-start" />
+										Add account
+									</Button>
+								</div>
+							) : null}
 						</Field>
 					)}
 					{phase === "review" && held?.numbered ? (
@@ -553,6 +605,9 @@ export function McpSetupView({ state, actions }: { state: McpSetupState; actions
 						onSetTools={actions.setTools}
 						agents={agents}
 						busy={busy || view.state !== "connected"}
+						accountsBusy={busy}
+						onSignOut={phase === "done" && !anonymous ? (each) => actions.signOut(each.account) : undefined}
+						onAddAccount={phase === "done" && !anonymous ? actions.signInAnother : undefined}
 						agentsFor={
 							anonymous || (accounts.length > 0 && account !== "")
 								? [
@@ -585,30 +640,29 @@ export function McpSetupView({ state, actions }: { state: McpSetupState; actions
 							Review tool permissions
 						</Button>
 					)}
-					<div className="flex flex-wrap gap-2">
-						{!anonymous ? (
-							<Button variant="ghost" size="sm" disabled={busy} onClick={actions.signInAnother}>
-								Add account
-							</Button>
-						) : null}
+					{/* a server with no sign-in has no account to sign out of: it is removed whole */}
+					{anonymous ? (
 						<Confirm
-							title={anonymous ? `Remove ${service}?` : `Sign out of ${service}?`}
-							body={
-								anonymous
-									? "Agents lose access to it. You can add it again later."
-									: active.length === 0
-										? "Its sign-in is forgotten. You can sign in again any time."
-										: `${active.map((id) => agents.find((each) => each.id === id)?.name ?? id).join(", ")} will lose it. You can sign in again any time.`
-							}
-							action={anonymous ? "Remove" : "Sign out"}
-							keep={anonymous ? "Keep it" : "Stay signed in"}
-							onConfirm={actions.signOut}
+							title={`Remove ${service}?`}
+							body="Agents lose access to it. You can add it again later."
+							action="Remove"
+							keep="Keep it"
+							onConfirm={() => actions.signOut()}
 						>
-							<Button variant="destructive" size="sm" disabled={busy || (!anonymous && account === "")}>
-								{anonymous ? "Remove" : "Sign out"}
+							<Button variant="destructive" size="sm" className="self-start" disabled={busy}>
+								Remove
 							</Button>
 						</Confirm>
-					</div>
+					) : null}
+					{leaving === undefined ? null : (
+						<SignOutConfirm
+							service={service}
+							account={leaving}
+							agents={agents}
+							onConfirm={() => actions.signOut(leaving.account)}
+							onClose={() => setLeaving(undefined)}
+						/>
+					)}
 				</>
 			) : null}
 		</div>

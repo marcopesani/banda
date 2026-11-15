@@ -4,8 +4,8 @@
  * same component is the review when a connection is added, where nothing changes until Save, and the place to check and
  * change it afterwards, where each change is at once.
  */
-import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon, PlusIcon } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -353,8 +353,10 @@ export function ConnectionDetailsView({
 	access,
 	onChangeAccess,
 	onSignOut,
+	onAddAccount,
 	onRemove,
 	busy = false,
+	accountsBusy = busy,
 	error = "",
 }: {
 	view: ConnectionView;
@@ -368,12 +370,28 @@ export function ConnectionDetailsView({
 	agentsFor: readonly AgentsFor[];
 	access?: ScopeChoices | undefined;
 	onChangeAccess?: ((account: AccountView) => void) | undefined;
+	/** Sign out of an account, once the owner said so: the details ask first, saying who loses it. */
 	onSignOut?: ((account: AccountView) => void) | undefined;
+	/** Sign in to one more account: offered under the list of them. */
+	onAddAccount?: (() => void) | undefined;
 	/** Remove the connection whole; absent in the review on adding, where there is nothing yet to remove. */
 	onRemove?: (() => void) | undefined;
 	busy?: boolean | undefined;
+	/** Whether the accounts wait too: `busy`, unless said. Signing out needs no server, so it stays in reach when one fails. */
+	accountsBusy?: boolean | undefined;
 	error?: string | undefined;
 }) {
+	const [leaving, setLeaving] = useState<AccountView>();
+	// the account signed out of takes its row, and the menu button the focus was on, with it: the focus goes to the
+	// list of those left, so a keyboard or a screen reader stays where the owner was
+	const left = useRef<string>(undefined);
+	const list = useRef<HTMLUListElement>(null);
+	const here = view.accounts?.some((each) => each.account === left.current) ?? false;
+	useEffect(() => {
+		if (left.current === undefined || here) return;
+		left.current = undefined;
+		if (document.activeElement === null || document.activeElement === document.body) list.current?.focus();
+	}, [here]);
 	const review = mode === "review";
 	const settingOf = (tool: Settable): Setting => (review ? (chosen[tool.title] ?? tool.setting) : tool.setting);
 	const onTools = (settings: { readonly [tool: string]: Setting }, group?: boolean) =>
@@ -422,7 +440,12 @@ export function ConnectionDetailsView({
 			</Part>
 			{view.accounts === undefined || view.accounts.length === 0 || review ? null : (
 				<Part title="Accounts" note="Each account you signed in to, with the access it was given.">
-					<ul className="flex flex-col divide-y divide-line-soft rounded-field border border-line-soft">
+					<ul
+						ref={list}
+						tabIndex={-1}
+						aria-label="Accounts"
+						className="flex flex-col divide-y divide-line-soft rounded-field border border-line-soft outline-none"
+					>
 						{view.accounts.map((account) => (
 							<li
 								key={account.account}
@@ -434,7 +457,10 @@ export function ConnectionDetailsView({
 										{account.label}
 										{account.stale ? <Badge variant="secondary">Sign in again</Badge> : null}
 									</span>
-									<span className="text-meta text-ink-2">{accessWords(account, access)}</span>
+									<span className="text-meta text-ink-2">
+										{accessWords(account, access)}
+										{account.agents.length === 0 ? null : ` · Used by ${namesOf(account.agents, agents)}`}
+									</span>
 									{account.missing ? (
 										<span className="text-meta text-ink-2">Needs more access for some tools</span>
 									) : null}
@@ -442,7 +468,7 @@ export function ConnectionDetailsView({
 								<span className="flex items-center gap-1.5">
 									{/* a sign-in that lapsed is the row's one visible action; the rest is its menu */}
 									{onChangeAccess === undefined || !account.stale ? null : (
-										<Button variant="outline" size="xs" disabled={busy} onClick={() => onChangeAccess(account)}>
+										<Button variant="outline" size="xs" disabled={accountsBusy} onClick={() => onChangeAccess(account)}>
 											Sign in again
 										</Button>
 									)}
@@ -453,7 +479,7 @@ export function ConnectionDetailsView({
 													variant="ghost"
 													size="icon-xs"
 													className="pointer-coarse:size-11"
-													disabled={busy}
+													disabled={accountsBusy}
 													aria-label={`More for ${account.label}`}
 												>
 													<EllipsisIcon />
@@ -464,7 +490,7 @@ export function ConnectionDetailsView({
 													<DropdownMenuItem onSelect={() => onChangeAccess(account)}>Change access</DropdownMenuItem>
 												)}
 												{onSignOut === undefined ? null : (
-													<DropdownMenuItem variant="destructive" onSelect={() => onSignOut(account)}>
+													<DropdownMenuItem variant="destructive" onSelect={() => setLeaving(account)}>
 														Sign out
 													</DropdownMenuItem>
 												)}
@@ -475,7 +501,32 @@ export function ConnectionDetailsView({
 							</li>
 						))}
 					</ul>
+					{/* what adds an account is under the list of them; what acts on one is in its row's menu */}
+					{onAddAccount === undefined ? null : (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="self-start pointer-coarse:min-h-11"
+							disabled={accountsBusy}
+							onClick={onAddAccount}
+						>
+							<PlusIcon data-icon="inline-start" />
+							Add account
+						</Button>
+					)}
 				</Part>
+			)}
+			{leaving === undefined || onSignOut === undefined ? null : (
+				<SignOutConfirm
+					service={service}
+					account={leaving}
+					agents={agents}
+					onConfirm={() => {
+						left.current = leaving.account;
+						onSignOut(leaving);
+					}}
+					onClose={() => setLeaving(undefined)}
+				/>
 			)}
 			{agentsFor.length === 0 ? null : (
 				<Part title="Who can use it?" note="Only the agents you pick can use it.">
@@ -517,6 +568,53 @@ export function ConnectionDetailsView({
 				{busy ? "Saving" : ""}
 			</p>
 		</div>
+	);
+}
+
+/** Agents by name, as a sentence lists them: "Mara", "Mara and Sancho". */
+const namesOf = (ids: readonly string[], agents: readonly (Who & { id: string })[]): string =>
+	new Intl.ListFormat("en", { type: "conjunction" }).format(
+		ids.map((id) => agents.find((each) => each.id === id)?.name ?? id),
+	);
+
+/** What signing out of an account takes away, in plain words: which agents lose it. */
+export function signOutWords(
+	account: Pick<AccountView, "label" | "agents">,
+	agents: readonly (Who & { id: string })[],
+): string {
+	if (account.agents.length === 0) return `No agent uses ${account.label}. You can sign in again.`;
+	return `${namesOf(account.agents, agents)} ${account.agents.length === 1 ? "loses" : "lose"} access to ${account.label}. You can sign in again.`;
+}
+
+/**
+ * Signing out of an account asks first, wherever it is offered: it says who loses the account, its one red button
+ * carries the verb, and the way out keeps the account.
+ */
+export function SignOutConfirm({
+	service,
+	account,
+	agents,
+	onConfirm,
+	onClose,
+}: {
+	service: string;
+	account: Pick<AccountView, "label" | "agents">;
+	agents: readonly (Who & { id: string })[];
+	onConfirm: () => void;
+	onClose: () => void;
+}) {
+	return (
+		<Confirm
+			open
+			onOpenChange={(open) => {
+				if (!open) onClose();
+			}}
+			title={`Sign out of ${service} as ${account.label}?`}
+			body={signOutWords(account, agents)}
+			action="Sign out"
+			keep="Stay connected"
+			onConfirm={onConfirm}
+		/>
 	);
 }
 

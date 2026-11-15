@@ -296,11 +296,49 @@ it.skipIf(!hasChrome())(
 				await page.until(`document.querySelector('[data-account="bob"]')`);
 				// what acts on an account is in its row's menu, which opens on the pointer going down
 				const more = (who: string) => `document.querySelector('[data-account="${who}"] button[aria-haspopup="menu"]')`;
-				await page.run(
-					`${more("ana")}.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, pointerType: 'mouse'}))`,
-				);
+				const open = (who: string) =>
+					page.run(
+						`${more(who)}.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, pointerType: 'mouse'}))`,
+					);
 				const item = (text: string) =>
 					`[...document.querySelectorAll('[role="menuitem"]')].find(el => el.textContent.trim() === ${JSON.stringify(text)})`;
+				const named = (text: string) =>
+					`[...document.querySelectorAll('button')].find(el => el.textContent.trim() === ${JSON.stringify(text)})`;
+				const asked = `document.querySelector('[role="alertdialog"]')`;
+				const accounts = async () =>
+					((await (await fetch(`${base}/api/capabilities`, { headers })).json()) as CapabilitiesView).connections
+						.find((each) => each.name === "cal")
+						?.accounts?.map((each) => each.account);
+				// signing out asks first, saying what goes; the way out keeps the account
+				await open("bob");
+				await page.until(item("Sign out"));
+				await page.run(`${item("Sign out")}.click()`);
+				await page.until(asked);
+				expect(await page.run(`${asked}.textContent`)).toMatch(/Sign out of Cal as .*bob\?/);
+				expect(await page.run(`${asked}.textContent`)).toContain("You can sign in again.");
+				await page.run(`${named("Stay connected")}.click()`);
+				await page.until(`!${asked}`);
+				expect(await accounts()).toEqual(["ana", "bob"]);
+				await open("bob");
+				await page.until(item("Sign out"));
+				await page.run(`${item("Sign out")}.click()`);
+				await page.until(asked);
+				await page.run(
+					`[...${asked}.querySelectorAll('button')].find(el => el.textContent.trim() === 'Sign out').click()`,
+				);
+				await page.until(`!document.querySelector('[data-account="bob"]')`);
+				expect(await accounts()).toEqual(["ana"]);
+				// what adds an account is under the list of them, and opens the sign-in
+				expect(
+					await page.run(
+						`Boolean(document.querySelector('[data-account="ana"]').closest('ul').compareDocumentPosition(${named("Add account")}) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+					),
+				).toBe(true);
+				await page.run(`${named("Add account")}.click()`);
+				await page.until(`document.querySelector('[role="dialog"]')?.textContent.includes('Cal')`);
+				await page.run(`document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))`);
+				await page.until(`!document.querySelector('[role="dialog"]')`);
+				await open("ana");
 				await page.until(item("Sign out"));
 				await page.until(item("Change access"));
 				await page.run(`${item("Change access")}.click()`);
