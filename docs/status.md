@@ -2,16 +2,19 @@
 
 ## Current work
 
-0.1.0-alpha.14 is published as a pre-release for Apple silicon Macs and Linux x64 (.deb), with both CLI archives
-and the Android APK; a version tag now builds and publishes it, and the landing links its downloads. The installed
-release opened the owner's alpha.12-era home on a Mac, after the upgrade fix for same-named computer images. On the
-alpha.14 commit, Linux x64 passes native computer use through the app on a KVM runner, clean Debian installation
-and the installed shell's start and quit; the package was tried locally on Debian 12 and 13 and Ubuntu 22.04, 24.04
-and 26.04 under X11 and Wayland (arm64, no VM). The computer banda ships is the default box on Mac and Linux; Docker
-is used only by name, on Windows, and once to bring an earlier home's files. alpha.13 was tagged but published
-nothing. Open: a person installing the x64 .deb on a physical Linux machine. alpha.14 was published without source
-and notice assets. A tag now assembles them from its own builds and publishes nothing without them; that job has run
-only on a development Mac against alpha.14's downloads, never on a runner, and nobody has reviewed a set it made.
+0.1.0-alpha.18 is published as a pre-release for Apple silicon Macs and Linux x64 (.deb), with both command-line
+archives, the Android APK, and the source and notice archives its own tag run assembled; the landing links its
+downloads. `release acceptance` passed on what it published: clean installs on a Mac runner and on Ubuntu 22.04 and
+the newest Ubuntu runner, and an upgrade from alpha.14 on Mac and Linux that kept the home. The published Mac app
+opened the owner's home (format 4) and is in daily use there. The computer banda ships is the default box on Mac and
+Linux; Docker is used only by name, on Windows, and once to bring an earlier home's files. alpha.13, alpha.15 and
+alpha.16 were tagged but published nothing.
+
+Open before 0.1.0: the owner's walk through the six launch workflows on the candidate; the computer starting on a
+Mac that never ran banda, and a person installing the x64 .deb on a physical Linux machine (no runner shows either);
+and how the owner's review of a release's sources and notices is recorded, since every release so far says nobody
+reviewed its set. The launch budgets hold on what was measured: artifacts, the browser and a fresh home's first
+answer were measured on one provider's small tier only, and `test/launch-budgets.json` names the rest as unmeasured.
 
 The native-computer candidate is rebased onto current main. Routine requests now retain their original agent and
 execution after the run ends, and their existing approvals appear in that agent's chat. Archiving cancels retained
