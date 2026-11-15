@@ -208,7 +208,7 @@ async function main() {
 	const opened = await check("opens its window on the daemon", async () => {
 		window = await page();
 		if (!window.url.startsWith("http://")) {
-			const said = await window.evaluate("document.body.innerText");
+			const said = await window.evaluate("document.body?.innerText ?? ''");
 			throw new Error(`the app showed its failure page: ${said.slice(0, 600)}`);
 		}
 		daemon = JSON.parse(readFileSync(join(home, "daemon.json"), "utf8"));
@@ -225,11 +225,11 @@ async function main() {
 	if (opened) {
 		await check("shows its first screen at desktop and phone width", async () => {
 			const text = await until("the first screen", async () => {
-				const said = (await window.evaluate("document.body.innerText")).trim();
+				const said = (await window.evaluate("document.body?.innerText ?? ''")).trim();
 				return said.length > 20 ? said : undefined;
 			});
 			const said = text.replace(/\s+/g, " ").slice(0, 120);
-			writeFileSync(join(out, "first-screen.txt"), `${await window.evaluate("document.body.innerText")}\n`);
+			writeFileSync(join(out, "first-screen.txt"), `${await window.evaluate("document.body?.innerText ?? ''")}\n`);
 			try {
 				await pause(1500);
 				await window.shot("desktop.png");
@@ -284,7 +284,7 @@ async function main() {
 			if (again.token !== daemon.token) throw new Error("the home's token changed");
 			await until(
 				"the first screen",
-				async () => (await window.evaluate("document.body.innerText")).trim().length > 20,
+				async () => (await window.evaluate("document.body?.innerText ?? ''")).trim().length > 20,
 			);
 			window.close();
 			await quit(shell, again);
