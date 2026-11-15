@@ -3,7 +3,7 @@
  * or more sections; the registry test holds the two orders together.
  */
 import type { ComponentType } from "react";
-import { ActivitySection } from "./agent/activity.tsx";
+import { ActivityOpenSection, ActivitySection } from "./agent/activity.tsx";
 import { AvatarCandidateSpecimen } from "./agent/avatar-candidate.tsx";
 import { AvatarCreator } from "./agent/avatar-creator.tsx";
 import { DevicesSection } from "./agent/devices.tsx";
@@ -58,6 +58,7 @@ export const CONTENTS: Readonly<Record<GroupId, readonly (readonly [string, Comp
 		["skills", SkillsSection],
 		["toolsets", ToolsetsSection],
 		["activity", ActivitySection],
+		["activity-open", ActivityOpenSection],
 		["settings", SettingsSections],
 		["devices", DevicesSection],
 	],

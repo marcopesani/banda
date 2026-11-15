@@ -196,7 +196,10 @@ async function open(page: Page, hash: string) {
 }
 async function drill(page: Page) {
 	await page.until(`document.querySelector('[data-activity-timeline]')`);
-	await page.run(`document.querySelector('[aria-label^="Inspect "]').click()`);
+	// the sheet's other depth: the same work as a conversation
+	await page.run(
+		`(()=>{const tab=[...document.querySelectorAll('[role="dialog"] [aria-label="Depth"] [role="tab"]')].find(el=>el.textContent.trim()==='Transcript');tab.focus();})()`,
+	);
 	await page.until(`document.querySelector('[aria-label="Tools"]')`);
 }
 async function close(page: Page) {
@@ -221,11 +224,11 @@ for (const width of [1440, 390, 320])
 				await page.until(`document.querySelector('[data-entry="${firstMessage}"] [data-message-transcript]')`);
 				const action = `document.querySelector('[data-entry="${firstMessage}"] [data-message-transcript]')`;
 				if (width < 768) await page.until(`getComputedStyle(${action}).opacity==='1'`);
-				await chooseMessageAction(page, action, "Activity & transcript");
+				await chooseMessageAction(page, action, "Activity");
 				await page.until(`document.querySelector('[data-activity-timeline]')?.textContent.includes('BROWSER_SEED_0')`);
 				expect(
 					await page.run(
-						`document.querySelector('[data-activity-timeline]').textContent.includes('Running a command')`,
+						`[...document.querySelectorAll('[data-activity-timeline] [data-step]')].some(el => el.textContent.startsWith('Ran'))`,
 					),
 				).toBe(true);
 				await drill(page);
@@ -253,7 +256,7 @@ for (const width of [1440, 390, 320])
 					await page.run(`document.querySelector('[data-raw-content]')?.textContent.includes('BROWSER_SEED_0')`),
 				).toBe(true);
 				await page.run(
-					`[...document.querySelectorAll('[role="dialog"] button')].find(button=>button.textContent.trim()==='Activity').click()`,
+					`(()=>{const tab=[...document.querySelectorAll('[role="dialog"] [aria-label="Depth"] [role="tab"]')].find(el=>el.textContent.trim()==='Activity');tab.focus();})()`,
 				);
 				await page.until(`document.querySelector('[data-activity-timeline]')`);
 				await close(page);
@@ -287,14 +290,14 @@ it.skipIf(!hasChrome())(
 				release();
 				gate = undefined;
 				await idle();
-				await page.until(`document.querySelector('[data-raw-content]')?.textContent.includes('bash result')`);
+				await page.until(`document.querySelector('[data-raw-content] [data-tool] [data-tool-state="done"]')`);
 				expect(await page.run(`document.activeElement===document.querySelector('[data-slot="sheet-title"]')`)).toBe(
 					true,
 				);
 				await page.run(
-					`[...document.querySelectorAll('[data-raw-title]')].find(el=>el.textContent==='bash result').closest('button').click()`,
+					`(()=>{const card=[...document.querySelectorAll('[data-tool] [data-raw-title]')].find(el=>el.textContent==='bash').closest('button');if(card.getAttribute('aria-expanded')!=='true')card.click();})()`,
 				);
-				await page.until(`document.querySelector('[data-raw-content]').textContent.includes('activity-output')`);
+				await page.until(`document.querySelector('[data-terminal-output]')?.textContent.includes('activity-output')`);
 				await noOverflow(page);
 				await post("BROWSER_AFTER_LIVE");
 				await settled("BROWSER_AFTER_LIVE");
@@ -358,7 +361,7 @@ it.skipIf(!hasChrome())(
 		await withPage(`${base}/#token=${token}`, { width: 320, height: 900 }, async (page) => {
 			await open(page, `#/g/${room}`);
 			await page.until(`document.querySelectorAll('[data-message-transcript]').length===4`);
-			await chooseMessageAction(page, `document.querySelector('[data-message-transcript]')`, "Activity & transcript");
+			await chooseMessageAction(page, `document.querySelector('[data-message-transcript]')`, "Activity");
 			await drill(page);
 			expect(
 				await page.run(
@@ -367,11 +370,7 @@ it.skipIf(!hasChrome())(
 			).toBe(true);
 			await noOverflow(page);
 			await close(page);
-			await chooseMessageAction(
-				page,
-				`[...document.querySelectorAll('[data-message-transcript]')].at(-1)`,
-				"Activity & transcript",
-			);
+			await chooseMessageAction(page, `[...document.querySelectorAll('[data-message-transcript]')].at(-1)`, "Activity");
 			await drill(page);
 			expect(
 				await page.run(

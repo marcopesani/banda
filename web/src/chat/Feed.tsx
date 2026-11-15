@@ -213,7 +213,7 @@ export function MessageActions({
 								}}
 							>
 								<ListTreeIcon aria-hidden="true" />
-								Activity &amp; transcript
+								Activity
 							</DropdownMenuItem>
 						)}
 					</DropdownMenuContent>

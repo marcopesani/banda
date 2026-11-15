@@ -1,33 +1,40 @@
-/** Contextual disclosure over the chat's existing entries and stream. Opening it never submits work. */
+/**
+ * Contextual disclosure over the chat's existing entries and stream. Opening it never submits work. Two depths: the
+ * activity, a chain of thought with one line a step; and the transcript, the same work as a conversation, its messages
+ * whole and each tool call a card to open.
+ */
 import {
-	ArrowLeftIcon,
 	BookOpenIcon,
+	BrainIcon,
 	CheckIcon,
-	ChevronRightIcon,
 	CircleAlertIcon,
 	ClockIcon,
-	MessageSquareIcon,
-	SparklesIcon,
+	MessagesSquareIcon,
+	PenLineIcon,
+	SquareIcon,
 } from "lucide-react";
-import { type CSSProperties, Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { Ends } from "@/lib/ends";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import type { AvatarFace } from "../../../src/core/avatar-face.ts";
 import { ModelContext, RawRow, RawValue } from "../chat/ActivityDetail.tsx";
+import { modelName, requestWords, span, took, toolHead, totalWords } from "../chat/activity-steps.ts";
+import { Face } from "../chat/Face.tsx";
+import { toggledStep } from "../chat/Harness.tsx";
 import { KeepEnd } from "../chat/KeepEnd.tsx";
+import { ProviderMark } from "../chat/ProviderMark.tsx";
 import { SkillToolPreview } from "../chat/Skill.tsx";
-import { shortPreview, ToolIcon, toolIcon, toolPreview, toolPreviewEnds } from "../chat/tool-presentation.tsx";
-import {
-	ChainOfThought,
-	ChainOfThoughtContent,
-	ChainOfThoughtHeader,
-	ChainOfThoughtStep,
-} from "../components/ai-elements/chain-of-thought.tsx";
+import { Step, type StepStatus, StepWords, WorkingIcon } from "../chat/Steps.tsx";
+import { shortPreview, ToolIcon, toolIcon, toolPreviewEnds } from "../chat/tool-presentation.tsx";
+import { ChainOfThought, ChainOfThoughtContent } from "../components/ai-elements/chain-of-thought.tsx";
 import { CodeBlock } from "../components/ai-elements/code-block.tsx";
 import {
 	Conversation,
 	ConversationContent,
 	ConversationScrollButton,
 } from "../components/ai-elements/conversation.tsx";
+import { Message, MessageContent, MessageResponse } from "../components/ai-elements/message.tsx";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "../components/ai-elements/reasoning.tsx";
 import { Terminal } from "../components/ai-elements/terminal.tsx";
+import { Tool, ToolContent, ToolHeader, type ToolState } from "../components/ai-elements/tool.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { Button } from "../components/ui/button.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../components/ui/sheet.tsx";
@@ -50,6 +57,7 @@ import {
 	type ToolCall,
 } from "../lib/api.ts";
 import { userFiles } from "../lib/chat.ts";
+import { cn } from "../lib/cn.ts";
 import { useReturnFocus } from "../lib/return-focus.ts";
 import { type Transcript, useTranscript } from "../lib/transcript.ts";
 import { FilePart } from "./FilePart.tsx";
@@ -57,12 +65,14 @@ import { FilePart } from "./FilePart.tsx";
 export type ActivityTarget = {
 	readonly chat: number;
 	readonly name: string;
+	/** The agent's face, beside its name over the transcript. */
+	readonly face?: AvatarFace | undefined;
 	readonly anchor?: ActivityAnchor;
 	readonly heading?: string;
 };
 /** A transcript given instead of read from the daemon (the specimen's), with the model context it was prompted with. */
 type Source = { readonly chat: number; readonly transcript: Transcript; readonly prompt?: ChatPrompt };
-type Depth = "activity" | "transcript";
+export type ActivityDepth = "activity" | "transcript";
 
 export function ActivitySheet({
 	targets,
@@ -80,17 +90,19 @@ export function ActivitySheet({
 	style?: CSSProperties;
 }) {
 	const [index, setIndex] = useState(0);
-	const [depth, setDepth] = useState<Depth>("activity");
+	const [depth, setDepth] = useState<ActivityDepth>("activity");
+	// the step the transcript was opened from: it arrives open, in view
+	const [at, setAt] = useState<string>();
 	// mounted open, from state, with no Radix trigger: closed, focus returns to what opened it
 	const returnFocus = useReturnFocus(true);
 	const heading = useRef<HTMLHeadingElement>(null);
 	const target = targets[index];
 	if (!target) return null;
-	const drill = (next: Depth) => {
+	const drill = (next: ActivityDepth, step?: string) => {
 		setDepth(next);
-		requestAnimationFrame(() => heading.current?.focus());
+		setAt(step);
 	};
-	const props = { target, depth, onDrill: () => drill("transcript") };
+	const props = { target, depth, at, onDrill: (step?: string) => drill("transcript", step) };
 	return (
 		<Sheet
 			open
@@ -115,26 +127,29 @@ export function ActivitySheet({
 					(returnTo.querySelector("button") ?? returnTo).focus();
 				}}
 			>
-				<SheetHeader className="gap-2 border-b border-line-soft pr-12">
-					{depth === "transcript" ? (
-						<Button variant="ghost" size="sm" className="-ml-2 w-fit" onClick={() => drill("activity")}>
-							<ArrowLeftIcon data-icon="inline-start" />
-							Activity
-						</Button>
-					) : null}
-					<SheetTitle ref={heading} tabIndex={-1} className="outline-none">
-						{depth === "activity" ? "Activity" : "Full transcript"}
+				<SheetHeader className="gap-0 border-b border-line-soft p-0">
+					{/* whose work it is, as the chat's own header says it: the face and the name */}
+					<SheetTitle
+						ref={heading}
+						tabIndex={-1}
+						className="flex min-w-0 items-center gap-2 px-5 pt-4 pr-12 pb-2 outline-none"
+					>
+						{target.face === undefined ? null : <Face face={target.face} name={target.name} size="message" />}
+						<span className="min-w-0 truncate">{target.name}</span>
 					</SheetTitle>
-					<SheetDescription>{target.name}</SheetDescription>
+					<SheetDescription className="sr-only">
+						{depth === "activity" ? "Activity: what it did, step by step" : "Transcript: the work as a conversation"}
+					</SheetDescription>
 					{targets.length > 1 ? (
 						<Tabs
 							value={String(index)}
 							onValueChange={(value) => {
 								setIndex(Number(value));
 								setDepth("activity");
+								setAt(undefined);
 							}}
 						>
-							<TabsList aria-label="Agent activity" className="h-auto max-w-full flex-wrap">
+							<TabsList aria-label="Agent activity" className="h-auto max-w-full flex-wrap border-b-0 px-5">
 								{targets.map((member, n) => (
 									<TabsTrigger key={member.chat} value={String(n)}>
 										{member.name}
@@ -143,9 +158,16 @@ export function ActivitySheet({
 							</TabsList>
 						</Tabs>
 					) : null}
+					{/* the two depths side by side: the steps, and the same work as a conversation */}
+					<Tabs value={depth} onValueChange={(value) => drill(value as ActivityDepth)}>
+						<TabsList aria-label="Depth" className="border-b-0 px-5">
+							<TabsTrigger value="activity">Activity</TabsTrigger>
+							<TabsTrigger value="transcript">Transcript</TabsTrigger>
+						</TabsList>
+					</Tabs>
 				</SheetHeader>
 				{source?.chat === target.chat ? (
-					<ActivityBody key={index} {...props} transcript={source.transcript} given={source.prompt} />
+					<ActivityView key={index} {...props} transcript={source.transcript} given={source.prompt} />
 				) : (
 					<FetchedActivity key={index} {...props} />
 				)}
@@ -154,20 +176,24 @@ export function ActivitySheet({
 	);
 }
 
-type BodyProps = {
+type ViewProps = {
 	target: ActivityTarget;
-	depth: Depth;
-	onDrill: () => void;
+	depth: ActivityDepth;
+	/** A step of the activity opens the transcript at it. */
+	onDrill?: ((step?: string) => void) | undefined;
+	/** The step the transcript opens at. */
+	at?: string | undefined;
 	transcript: Transcript;
 	/** The model context, when it came with the transcript instead of being fetched. */
 	given?: ChatPrompt | undefined;
 };
-function FetchedActivity(props: Omit<BodyProps, "transcript" | "given">) {
+function FetchedActivity(props: Omit<ViewProps, "transcript" | "given">) {
 	const transcript = useTranscript(props.target.chat);
-	return <ActivityBody {...props} transcript={transcript} />;
+	return <ActivityView {...props} transcript={transcript} />;
 }
 
-function ActivityBody({ target, depth, onDrill, transcript, given }: BodyProps) {
+/** One depth of a work's activity, with no sheet around it: the sheet's body, and what the specimen shows open. */
+export function ActivityView({ target, depth, onDrill, at, transcript, given }: ViewProps) {
 	const { items, input, busy, older, loaded, missing, loadOlder, partial, running } = transcript;
 	const works = useMemo(() => activityWork(items, input), [items, input]);
 	// Pin the first selected work: a new owner input must not retarget an open sheet.
@@ -246,6 +272,8 @@ function ActivityBody({ target, depth, onDrill, transcript, given }: BodyProps) 
 					{target.heading ?? work.title}
 				</p>
 				<ActivityTimeline
+					chat={target.chat}
+					running={live ? running : []}
 					work={work}
 					live={live}
 					partial={partial}
@@ -256,25 +284,29 @@ function ActivityBody({ target, depth, onDrill, transcript, given }: BodyProps) 
 		);
 	return (
 		<Conversation aria-label="Full transcript" aria-live="off" initial={false}>
-			<ConversationContent className="px-5 py-5" scrollClassName="overflow-y-auto" data-raw-content="">
-				{!requestAvailable ? (
-					<p className="text-ui text-ink-2">No model request recorded for this work.</p>
-				) : prompt ? (
-					<ModelContext prompt={prompt} />
-				) : promptError ? null : (
-					<p className="text-ui text-ink-2">Loading model context…</p>
-				)}
-				{promptError ? (
-					<div className="text-ui text-danger">
-						Couldn’t load the model context.
-						<Button variant="ghost" onClick={() => setRetry((n) => n + 1)}>
-							Try again
-						</Button>
-					</div>
-				) : null}
+			<ConversationContent className="gap-5 px-5 py-5" scrollClassName="overflow-y-auto" data-raw-content="">
+				<div className="flex min-w-0 flex-col" data-model-context="">
+					{!requestAvailable ? (
+						<p className="text-ui text-ink-2">No model request recorded for this work.</p>
+					) : prompt ? (
+						<ModelContext prompt={prompt} />
+					) : promptError ? null : (
+						<p className="text-ui text-ink-2">Loading model context…</p>
+					)}
+					{promptError ? (
+						<div className="text-ui text-danger">
+							Couldn’t load the model context.
+							<Button variant="ghost" onClick={() => setRetry((n) => n + 1)}>
+								Try again
+							</Button>
+						</div>
+					) : null}
+				</div>
 				<ActivityTranscript
 					chat={target.chat}
 					work={work}
+					live={live}
+					at={at}
 					partial={live ? partial : []}
 					running={live ? running : []}
 					waits={live ? transcript.waits : []}
@@ -288,374 +320,606 @@ function Empty({ children }: { children: React.ReactNode }) {
 	return <div className="flex flex-col gap-3 p-5 text-ui text-ink-2">{children}</div>;
 }
 
-const LABELS: Record<string, string> = {
-	message_user: "Sending a message",
-	message_group: "Posting to the group",
-	bash: "Running a command",
-	read: "Reading a file",
-	write: "Writing a file",
-	edit: "Editing a file",
-	web_fetch: "Reading a page",
-	browser_navigate: "Opening a page",
-	browser_snapshot: "Reading the browser",
-	browser_click: "Clicking",
-	browser_type: "Typing",
-	browser_select: "Selecting an option",
-	browser_scroll: "Scrolling",
-	browser_wait: "Waiting for the page",
-	browser_screenshot: "Taking a screenshot",
-	browser_send: "Sending from the browser",
-	browser_hand_over: "Handing over the browser",
-	schedule: "Setting a routine",
-	remember: "Saving a memory",
-	recall: "Looking up memories",
-	forget: "Removing a memory",
-	propose_key: "Requesting a credential",
+/** A step's place in its work, the same in the activity and the transcript, and from a streamed request to its record. */
+const stepKey = (request: number, part: string) => `r${request}:${part}`;
+const aborted = (result: Extract<Item, { role: "tool" }>) => result.notes?.some((note) => note.code === "aborted");
+const MESSAGES = new Set(["message_user", "message_group"]);
+
+type Row = {
+	key: string;
+	icon: Parameters<typeof Step>[0]["icon"];
+	verb: string;
+	object?: string;
+	code?: boolean;
+	ends?: Parameters<typeof StepWords>[0]["ends"];
+	status: StepStatus;
+	meta?: string;
+	/** What the line opens to, in place. */
+	detail?: ReactNode;
 };
-function titleOf(call: ToolCall) {
-	return Object.hasOwn(LABELS, call.name) ? (LABELS[call.name] ?? call.name) : call.name;
-}
-function Inspect({
-	title,
-	preview,
-	state,
-	onClick,
-}: {
-	title: string;
-	/** Text that wraps to two lines; or split, so that its end (a command's last step, a file's name) always shows. */
-	preview?: string | Ends | undefined;
-	state?: string;
-	onClick: () => void;
-}) {
-	const id = useId();
-	const shown = typeof preview === "string" ? preview : preview === undefined ? "" : preview.head + preview.end;
-	// the label names the step; what it ran on and how it went describe it, so a screen reader says them too
-	const described = [shown === "" ? "" : `${id}-preview`, state ? `${id}-state` : ""].filter(Boolean).join(" ");
+
+/** A step's text, whole, under its line. */
+function StepText({ children, muted = false }: { children: string; muted?: boolean }) {
 	return (
-		<button
-			type="button"
-			onClick={onClick}
-			className="flex min-h-11 w-full flex-col gap-1.5 rounded-field px-1 py-2 text-left hover:bg-paper-2"
-			aria-label={`Inspect ${title}`}
-			{...(described === "" ? {} : { "aria-describedby": described })}
-		>
-			<span className="flex w-full items-center justify-between gap-2">
-				<span>{title}</span>
-				<ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 text-ink-2" />
-			</span>
-			{shown === "" ? null : typeof preview === "object" && preview.end !== "" ? (
-				// one line whose head gives way, at any width: a clamp of two lines would take the end on a narrow screen
-				<span id={`${id}-preview`} data-tool-preview="" className="flex min-w-0 text-meta text-ink-2">
-					<KeepEnd ends={preview} />
-				</span>
-			) : (
-				<span
-					id={`${id}-preview`}
-					data-tool-preview=""
-					className="line-clamp-2 break-words text-meta text-ink-2 [overflow-wrap:anywhere]"
-				>
-					{shown}
-				</span>
+		<div
+			className={cn(
+				"max-h-80 min-w-0 overflow-y-auto overscroll-contain rounded-field bg-paper-2 px-3 py-2 text-ui [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+				muted ? "text-ink-2" : "text-ink",
 			)}
-			{state ? (
-				<span id={`${id}-state`} className="text-meta text-ink-2">
-					{state}
-				</span>
-			) : null}
-		</button>
+		>
+			<Markdown>{children}</Markdown>
+		</div>
 	);
 }
+
+/** What a call's line opens to: the command and its output, the change, what came back. The arguments are the transcript's. */
+function callDetail(
+	chat: number,
+	call: ToolCall,
+	result: Extract<Item, { role: "tool" }> | undefined,
+	running: RunningTool | undefined,
+): ReactNode {
+	const output = result?.text ?? running?.output ?? "";
+	const parts: ReactNode[] = [];
+	if (MESSAGES.has(call.name) && typeof call.args.text === "string")
+		parts.push(<StepText key="text">{call.args.text}</StepText>);
+	else if (result?.receipt?.kind === "skill")
+		parts.push(
+			<SkillToolPreview
+				key="skill"
+				skill={{
+					name: result.receipt.name,
+					description: result.receipt.description,
+					path: `skills/${result.receipt.name}/SKILL.md`,
+					body: result.text,
+					files: result.receipt.files,
+				}}
+			/>,
+		);
+	else if (call.name === "bash" && typeof call.args.command === "string")
+		parts.push(
+			<Terminal
+				key="run"
+				command={call.args.command}
+				output={output}
+				isStreaming={result === undefined && running !== undefined}
+			/>,
+		);
+	else if (output !== "" && !result?.patch)
+		parts.push(
+			<RawValue key="out" label={result?.error ? "Error" : result ? "Result" : "Output"}>
+				{output}
+			</RawValue>,
+		);
+	if (result?.patch) parts.push(<CodeBlock key="patch" title="Change" language="diff" code={result.patch} />);
+	if (result !== undefined)
+		for (let n = 0; n < (result.images ?? 0); n++)
+			parts.push(
+				<FilePart
+					key={`image:${n}`}
+					chat={chat}
+					file={{ kind: "item", item: result.id, n, image: true, name: `Image ${n + 1}` }}
+				/>,
+			);
+	return parts.length === 0 ? undefined : <div className="flex min-w-0 flex-col gap-2">{parts}</div>;
+}
+
+/**
+ * The work as a chain of thought: one line a step, in the owner's words, each opening in place to what it did, as a
+ * coding session's steps do. The transcript is one step further, from the foot.
+ */
 function ActivityTimeline({
+	chat,
 	work,
 	live,
 	partial,
+	running,
 	onDrill,
 	waits,
 }: {
+	chat: number;
 	work: ActivityWork;
 	live: boolean;
 	partial: readonly Block[];
+	running: readonly RunningTool[];
 	waits: readonly ShownWait[];
-	onDrill: () => void;
+	onDrill?: ((step?: string) => void) | undefined;
 }) {
+	const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+	const output = new Map(running.map((tool) => [tool.call, tool]));
 	const called = new Map(activityCalls(work).map((call) => [`${call.entry}:${call.call.id}`, call]));
 	const end = activityEnd(work);
-	const error = end === "Stopped" || end === "Failed" || end === "Cut off";
-	const waiting = new Set(waits.map((wait) => wait.call));
+	const waiting = new Set(waits.flatMap((wait) => (wait.call === undefined ? [] : [wait.call])));
+	const rows: Row[] = [];
+	const callRow = (key: string, call: ToolCall, result: Extract<Item, { role: "tool" }> | undefined): Row => {
+		const head = toolHead(call, result !== undefined);
+		const state: Pick<Row, "status" | "meta"> =
+			result === undefined
+				? live
+					? waiting.has(call.id)
+						? { status: "waiting", meta: "Waiting on you" }
+						: { status: "active" }
+					: { status: "pending", meta: "No result" }
+				: aborted(result)
+					? { status: "pending", meta: "Stopped" }
+					: result.error
+						? { status: "failed", meta: "Failed" }
+						: { status: "done", ...(result.durationMs === undefined ? {} : { meta: took(result.durationMs) }) };
+		const detail = callDetail(chat, call, result, output.get(call.id));
+		return { key, icon: toolIcon(call.name), ...head, ...state, ...(detail === undefined ? {} : { detail }) };
+	};
+	let request = 0;
+	for (const item of work.items) {
+		if (item.role === "assistant") {
+			const r = request++;
+			if (item.thinking)
+				rows.push({
+					key: stepKey(r, "think"),
+					icon: BrainIcon,
+					verb: "Thought",
+					object: shortPreview(item.thinking),
+					status: "done",
+					detail: <StepText muted>{item.thinking}</StepText>,
+					...(item.thinkingMs === undefined ? {} : { meta: took(item.thinkingMs) }),
+				});
+			if (item.text)
+				rows.push({
+					key: stepKey(r, "note"),
+					icon: PenLineIcon,
+					verb: "Wrote",
+					object: shortPreview(item.text),
+					status: "done",
+					detail: <StepText>{item.text}</StepText>,
+				});
+			for (const call of item.calls ?? [])
+				rows.push(callRow(stepKey(r, `call:${call.id}`), call, called.get(`${item.id}:${call.id}`)?.result));
+			if (item.error)
+				rows.push({
+					key: stepKey(r, "error"),
+					icon: item.stop === "aborted" ? SquareIcon : CircleAlertIcon,
+					verb: item.stop === "aborted" ? "Stopped" : "Model error",
+					object: shortPreview(item.error),
+					status: item.stop === "aborted" ? "pending" : "failed",
+					detail: <p className="whitespace-pre-wrap text-ui text-danger">{item.error}</p>,
+				});
+		} else if (item.role === "tool" && item.receipt?.kind === "skill")
+			rows.push({
+				key: `e${item.id}`,
+				icon: BookOpenIcon,
+				verb: "Loaded",
+				object: `/${item.receipt.name}`,
+				code: true,
+				status: "done",
+			});
+		else if (item.role === "notice")
+			rows.push({
+				key: `e${item.id}`,
+				icon: CircleAlertIcon,
+				verb: "Notice",
+				object: shortPreview(item.text),
+				status: "done",
+				detail: <StepText muted>{item.text}</StepText>,
+			});
+	}
+	if (live)
+		for (const block of partial) {
+			if (block.call) rows.push(callRow(stepKey(request, `call:${block.call.id}`), block.call, undefined));
+			else if (block.type === "thinking")
+				rows.push({
+					key: stepKey(request, "think"),
+					icon: BrainIcon,
+					verb: block.endedAt === undefined ? "Thinking" : "Thought",
+					object: shortPreview(block.text),
+					status: block.endedAt === undefined ? "active" : "done",
+					detail: <StepText muted>{block.text}</StepText>,
+					...(block.endedAt === undefined || block.startedAt === undefined
+						? {}
+						: { meta: took(block.endedAt - block.startedAt) }),
+				});
+			else if (block.text)
+				rows.push({
+					key: stepKey(request, "note"),
+					icon: PenLineIcon,
+					verb: "Writing",
+					object: shortPreview(block.text),
+					status: "active",
+					detail: <StepText>{block.text}</StepText>,
+				});
+		}
+	const total = span(work.items);
+	const failed = end === "Failed" || end === "Cut off";
+	// a step at work says so itself: the last line says "Working…" only while none does
+	const busy = rows.some((row) => row.status === "active" || row.status === "waiting");
 	return (
-		<ChainOfThought defaultOpen>
-			<ChainOfThoughtHeader>{live ? "Working" : "How the work was done"}</ChainOfThoughtHeader>
+		<ChainOfThought open>
 			<ChainOfThoughtContent>
-				{work.items.map((item) =>
-					item.role === "assistant" ? (
-						<Fragment key={item.id}>
-							{item.thinking ? (
-								<ChainOfThoughtStep
-									icon={SparklesIcon}
-									status="complete"
-									label={<Inspect title="Thinking" preview={shortPreview(item.thinking)} onClick={onDrill} />}
-								/>
-							) : null}
-							{item.text ? (
-								<ChainOfThoughtStep
-									icon={SparklesIcon}
-									status="complete"
-									label={<Inspect title="Model note" preview={shortPreview(item.text)} onClick={onDrill} />}
-								/>
-							) : null}
-							{item.calls?.map((call) => {
-								const result = called.get(`${item.id}:${call.id}`)?.result;
-								return (
-									<ChainOfThoughtStep
-										key={call.id}
-										icon={toolIcon(call.name)}
-										status={result ? "complete" : live ? "active" : "pending"}
-										label={
-											<Inspect
-												title={titleOf(call)}
-												preview={toolPreviewEnds(call.name, call.args)}
-												state={
-													result?.notes?.some((note) => note.code === "aborted")
-														? "Stopped"
-														: result?.error
-															? "Failed"
-															: result
-																? `Done${result.durationMs === undefined ? "" : ` · ${(result.durationMs / 1000).toFixed(1)}s`}`
-																: live
-																	? waiting.has(call.id)
-																		? "Waiting on you"
-																		: "Working"
-																	: "No recorded result"
-												}
-												onClick={onDrill}
-											/>
-										}
-									/>
-								);
-							})}
-							{item.error ? (
-								<ChainOfThoughtStep
-									icon={CircleAlertIcon}
-									status="complete"
-									label={
-										<Inspect
-											title={item.stop === "aborted" ? "Stopped" : "Model error"}
-											preview={shortPreview(item.error)}
-											onClick={onDrill}
-										/>
-									}
-								/>
-							) : null}
-						</Fragment>
-					) : item.role === "tool" && item.receipt?.kind === "skill" ? (
-						<ChainOfThoughtStep
-							key={item.id}
-							icon={BookOpenIcon}
-							status="complete"
-							label={
-								<Inspect title={`Loaded /${item.receipt.name}`} preview={item.receipt.description} onClick={onDrill} />
-							}
-						/>
-					) : item.role === "notice" ? (
-						<ChainOfThoughtStep
-							key={item.id}
-							icon={CircleAlertIcon}
-							status="complete"
-							label={<Inspect title="Notice" preview={shortPreview(item.text)} onClick={onDrill} />}
-						/>
-					) : null,
-				)}
-				{live
-					? partial.map((block, n) => (
-							<ChainOfThoughtStep
-								// biome-ignore lint/suspicious/noArrayIndexKey: content indices are the substrate's stable block identities.
-								key={n}
-								icon={block.call ? toolIcon(block.call.name) : SparklesIcon}
-								status="active"
-								label={
-									<Inspect
-										title={block.call ? titleOf(block.call) : block.type === "thinking" ? "Thinking" : "Model note"}
-										preview={block.call ? toolPreviewEnds(block.call.name, block.call.args) : shortPreview(block.text)}
-										onClick={onDrill}
-									/>
-								}
+				{rows.map((row) => (
+					<Step
+						key={row.key}
+						name={row.key}
+						icon={row.icon}
+						status={row.status}
+						meta={row.meta}
+						words={
+							<StepWords
+								verb={row.verb}
+								object={row.object ?? ""}
+								code={row.code ?? false}
+								ends={row.ends}
+								active={row.status === "active"}
 							/>
-						))
-					: null}
-				<ChainOfThoughtStep
-					icon={live ? ClockIcon : error ? CircleAlertIcon : CheckIcon}
-					status={live ? "active" : "complete"}
-					label={<Inspect title={live ? "Working…" : end} onClick={onDrill} />}
-				/>
+						}
+						detail={
+							row.detail === undefined ? undefined : (
+								<div className="flex min-w-0 flex-col items-start gap-1">
+									<div className="w-full min-w-0">{row.detail}</div>
+									{onDrill === undefined ? null : (
+										<Button variant="ghost" size="xs" className="-ml-2 text-ink-2" onClick={() => onDrill(row.key)}>
+											<MessagesSquareIcon data-icon="inline-start" />
+											In the transcript
+										</Button>
+									)}
+								</div>
+							)
+						}
+						open={open.has(row.key)}
+						onToggle={() => setOpen((prior) => toggledStep(prior, row.key))}
+					/>
+				))}
+				{live ? (
+					busy ? null : (
+						<Step name="end" icon={WorkingIcon} status="active" words={<StepWords verb="Working…" active />} />
+					)
+				) : (
+					<Step
+						name="end"
+						icon={failed ? CircleAlertIcon : end === "Stopped" ? SquareIcon : CheckIcon}
+						status={failed ? "failed" : "done"}
+						words={<span className={failed ? "text-danger" : "text-ink"}>{end}</span>}
+						meta={total === undefined ? undefined : took(total)}
+					/>
+				)}
 			</ChainOfThoughtContent>
 		</ChainOfThought>
 	);
 }
 
-function ModelRecord({
+/** A message as the chat draws one: the owner's at the right on its tint, an agent's outlined. */
+function Said({ from, children }: { from: "user" | "assistant"; children: ReactNode }) {
+	return (
+		<Message from={from} className="max-w-full">
+			<MessageContent
+				data-message-bubble=""
+				className={
+					from === "user"
+						? "text-body group-[.is-user]:max-w-[85%] group-[.is-user]:rounded-2xl group-[.is-user]:bg-paper-2 group-[.is-user]:px-3 group-[.is-user]:pt-1.5 group-[.is-user]:pb-2.5 group-[.is-user]:text-ink"
+						: "max-w-[85%] rounded-2xl border border-line-soft bg-paper px-3 pt-1.5 pb-2.5 text-body text-ink"
+				}
+			>
+				{children}
+			</MessageContent>
+		</Message>
+	);
+}
+
+/** Who a message that is not the owner's own came from, above it. */
+function Caption({ children }: { children: ReactNode }) {
+	return <span className="text-meta text-ink-3">{children}</span>;
+}
+
+const clock = (at: number) =>
+	new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+/** A tool call as a card: what it was called with, and what came back, once opened. */
+function ToolCard({
+	chat,
+	entry,
+	call,
+	result,
+	running,
+	state,
+	defaultOpen,
+}: {
+	chat: number;
+	entry: string;
+	call: ToolCall;
+	result?: Extract<Item, { role: "tool" }> | undefined;
+	running?: RunningTool | undefined;
+	state: ToolState;
+	defaultOpen: boolean;
+}) {
+	const preview = toolPreviewEnds(call.name, call.args);
+	const command = typeof call.args.command === "string" ? call.args.command : undefined;
+	const output = result?.text ?? running?.output ?? "";
+	return (
+		<Tool defaultOpen={defaultOpen} data-entry={entry} className="scroll-mt-4">
+			<ToolHeader
+				icon={<ToolIcon name={call.name} />}
+				title={call.name}
+				summary={preview === undefined ? undefined : <KeepEnd ends={preview} />}
+				state={state}
+				status={state === "done" && result?.durationMs !== undefined ? took(result.durationMs) : undefined}
+			/>
+			<ToolContent>
+				{result?.receipt?.kind === "skill" ? (
+					<SkillToolPreview
+						skill={{
+							name: result.receipt.name,
+							description: result.receipt.description,
+							path: `skills/${result.receipt.name}/SKILL.md`,
+							body: result.text,
+							files: result.receipt.files,
+						}}
+					/>
+				) : call.name === "bash" && command !== undefined ? (
+					<Terminal command={command} output={output} isStreaming={state === "running"} />
+				) : (
+					<>
+						<RawValue label="Arguments">{JSON.stringify(call.args)}</RawValue>
+						{output === "" ? null : (
+							<RawValue label={result?.error ? "Error" : result ? "Result" : "Output"}>{output}</RawValue>
+						)}
+					</>
+				)}
+				{result?.patch ? <CodeBlock title="Change" language="diff" code={result.patch} /> : null}
+				{result === undefined
+					? null
+					: Array.from({ length: result.images ?? 0 }, (_, n) => (
+							<FilePart
+								// biome-ignore lint/suspicious/noArrayIndexKey: immutable result image indices are their API identity.
+								key={`${result.id}:image:${n}`}
+								chat={chat}
+								file={{ kind: "item", item: result.id, n, image: true, name: `Image ${n + 1}` }}
+							/>
+						))}
+				{result?.notes?.length ? <RawValue label="Notes">{JSON.stringify(result.notes)}</RawValue> : null}
+				{running?.dropped ? (
+					<p className="text-meta text-ink-2">Earlier live output is outside the retained window.</p>
+				) : null}
+				{state === "pending" ? <p className="text-meta text-ink-2">No result was recorded.</p> : null}
+			</ToolContent>
+		</Tool>
+	);
+}
+
+/** What a request took, in a line under what it said: when, the model and whose it is, what it read and wrote, its cost. */
+function RequestMeta({ request }: { request: Extract<Item, { role: "assistant" }> }) {
+	const { model, usage, at } = request;
+	const provider = model?.includes("/") ? model.slice(0, model.indexOf("/")) : undefined;
+	const words = requestWords({ ...(usage === undefined ? {} : { usage }) });
+	if (model === undefined && words.length === 0 && at === undefined) return null;
+	return (
+		<p data-request-meta="" className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-meta text-ink-3 tabular-nums">
+			{at === undefined ? null : <span>{clock(at)}</span>}
+			{model === undefined ? null : (
+				<span className="flex min-w-0 items-center gap-1 before:mr-0.5 before:content-['·'] first:before:hidden">
+					{provider === undefined ? null : <ProviderMark provider={provider} className="size-3.5 opacity-70" />}
+					<span className="truncate">{modelName(model)}</span>
+				</span>
+			)}
+			{words.map((word) => (
+				<span key={word} className="before:mr-1.5 before:content-['·'] first:before:hidden">
+					{word}
+				</span>
+			))}
+		</p>
+	);
+}
+
+/** One model request as the agent's turn: what it thought, what it wrote, each call, and what the request took. */
+function ModelTurn({
+	chat,
+	request,
 	item,
 	partial = [],
+	live,
+	at,
+	results,
+	running,
+	waiting,
 }: {
+	chat: number;
+	request: number;
 	item?: Extract<Item, { role: "assistant" }>;
 	partial?: readonly Block[];
+	live: boolean;
+	at: string | undefined;
+	results: ReadonlyMap<string, Extract<Item, { role: "tool" }>>;
+	running: ReadonlyMap<string, RunningTool>;
+	waiting: ReadonlySet<string>;
 }) {
+	const block = partial.find((one) => one.type === "thinking");
 	const thinking =
 		item?.thinking ??
 		partial
-			.filter((block) => block.type === "thinking")
-			.map((block) => block.text)
+			.filter((one) => one.type === "thinking")
+			.map((one) => one.text)
 			.join("");
 	const text =
 		item?.text ??
 		partial
-			.filter((block) => block.type === "text" || block.type === "other")
-			.map((block) => block.text)
+			.filter((one) => one.type === "text" || one.type === "other")
+			.map((one) => one.text)
 			.join("");
-	const calls = item?.calls ?? partial.flatMap((block) => (block.call ? [block.call] : []));
-	const streaming = item ? {} : { state: "Streaming" };
+	const calls = item?.calls ?? partial.flatMap((one) => (one.call ? [one.call] : []));
+	const streaming = item === undefined;
+	// what a request took follows what it said to the owner; a request of calls alone counts in the work's total
+	const spoke = text !== "" || calls.some((call) => MESSAGES.has(call.name)) || item?.error !== undefined;
+	const meta = item === undefined || !spoke ? undefined : item;
+	const key = (part: string) => stepKey(request, part);
+	// a request that only ended the run (no words, no calls) has nothing to read
+	if (!thinking && !text && calls.length === 0 && item?.error === undefined) return null;
 	return (
-		<div className="flex min-w-0 flex-col gap-4">
+		<Message from="assistant" className="max-w-full gap-3" data-request={request}>
 			{thinking ? (
-				<RawRow title="Thinking" icon={<SparklesIcon className="size-4" />} defaultOpen {...streaming}>
-					<p data-thinking="" className="whitespace-pre-wrap text-ui text-ink-2">
-						{thinking}
-					</p>
-				</RawRow>
+				<Reasoning
+					isStreaming={streaming && block?.endedAt === undefined}
+					duration={
+						item?.thinkingMs ??
+						(block?.startedAt === undefined || block.endedAt === undefined
+							? undefined
+							: block.endedAt - block.startedAt)
+					}
+					defaultOpen={streaming || at === key("think")}
+					data-entry={key("think")}
+					className="scroll-mt-4"
+				>
+					<ReasoningTrigger />
+					<ReasoningContent>{thinking}</ReasoningContent>
+				</Reasoning>
 			) : null}
 			{text ? (
-				<RawRow title="Model note" icon={<SparklesIcon className="size-4" />} defaultOpen {...streaming}>
-					<Markdown>{text}</Markdown>
-				</RawRow>
+				<div data-entry={key("note")} className="min-w-0 scroll-mt-4 text-body text-ink">
+					<MessageResponse>{text}</MessageResponse>
+				</div>
 			) : null}
-			{calls.map((call) => (
-				<RawRow
-					key={call.id}
-					title={call.name}
-					icon={<ToolIcon name={call.name} />}
-					summary={toolPreview(call.name, call.args)}
-					defaultOpen={!item}
-					{...streaming}
-				>
-					<RawValue label="Arguments">{JSON.stringify(call.args)}</RawValue>
-				</RawRow>
-			))}
-			{item?.error ? <p className="whitespace-pre-wrap text-ui text-danger">{item.error}</p> : null}
-			{item ? (
-				<RawRow title="Request details" icon={<SparklesIcon className="size-4" />}>
-					<RawValue label="Request">
-						{JSON.stringify({
-							entry: item.id,
-							at: item.at,
-							model: item.model,
-							stop: item.stop,
-							thinkingMs: item.thinkingMs,
-							usage: item.usage,
-						})}
-					</RawValue>
-				</RawRow>
+			{calls.map((call) => {
+				const result = item === undefined ? undefined : results.get(`${item.id}:${call.id}`);
+				const state: ToolState =
+					result === undefined
+						? live
+							? waiting.has(call.id)
+								? "waiting"
+								: "running"
+							: "pending"
+						: aborted(result)
+							? "stopped"
+							: result.error
+								? "error"
+								: "done";
+				const entry = key(`call:${call.id}`);
+				// what it told the owner or the group reads as the message it was, not as a call
+				if (MESSAGES.has(call.name) && typeof call.args.text === "string" && (state === "done" || state === "running"))
+					return (
+						<div key={call.id} data-entry={entry} className="flex min-w-0 scroll-mt-4 flex-col gap-1">
+							<Caption>{call.name === "message_group" ? "To the group" : "To you"}</Caption>
+							<Said from="assistant">
+								<MessageResponse>{call.args.text}</MessageResponse>
+							</Said>
+						</div>
+					);
+				return (
+					<ToolCard
+						key={call.id}
+						chat={chat}
+						entry={entry}
+						call={call}
+						result={result}
+						running={running.get(call.id)}
+						state={state}
+						defaultOpen={at === entry || (streaming && call.name === "bash")}
+					/>
+				);
+			})}
+			{item?.error ? (
+				<p data-entry={key("error")} className="scroll-mt-4 whitespace-pre-wrap text-ui text-danger">
+					{item.error}
+				</p>
 			) : null}
-		</div>
+			{meta === undefined ? null : <RequestMeta request={meta} />}
+		</Message>
 	);
 }
 
+/** The work as a conversation: the owner's words, each of the agent's turns, and what the daemon said in between. */
 function ActivityTranscript({
 	chat,
 	work,
+	live,
+	at,
 	partial,
 	running,
 	waits,
 }: {
 	chat: number;
 	work: ActivityWork;
+	live: boolean;
+	at: string | undefined;
 	partial: readonly Block[];
 	running: readonly RunningTool[];
 	waits: readonly ShownWait[];
 }) {
 	const occurrences = activityCalls(work);
-	const calls = new Map(occurrences.flatMap((value) => (value.result ? [[value.result.id, value.call] as const] : [])));
-	const activeCalls = new Map(occurrences.filter((value) => !value.result).map((value) => [value.call.id, value.call]));
-	// One model request keeps its React identity from partial to committed, including open rows and focus.
+	const results = new Map(
+		occurrences.flatMap((value) => (value.result ? [[`${value.entry}:${value.call.id}`, value.result] as const] : [])),
+	);
+	const answered = new Set(occurrences.flatMap((value) => (value.result ? [value.result.id] : [])));
+	const output = new Map(running.map((tool) => [tool.call, tool]));
+	const waiting = new Set(waits.flatMap((wait) => (wait.call === undefined ? [] : [wait.call])));
+	const root = useRef<HTMLDivElement>(null);
+	// opened from a step: that step is what the reader came for, so it is in view, once
+	useEffect(() => {
+		if (at === undefined) return;
+		const step = root.current?.querySelector(`[data-entry="${CSS.escape(at)}"]`);
+		// only the transcript scrolls: the page around it (the specimen's) stays where it is
+		const scroller = root.current?.closest("[data-raw-content]")?.parentElement;
+		if (!step || !scroller) return;
+		scroller.scrollTop += step.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16;
+	}, [at]);
+	// One model request keeps its React identity from partial to committed, including open cards and focus.
 	let request = 0;
 	const rows = work.items.map((item) => {
 		if (item.role === "user" || item.role === "wake" || (item.role === "watch" && item.tell === undefined))
 			return (
-				<RawRow
-					key={item.id}
-					title={item.role === "user" ? "Your message" : item.role === "wake" ? "Routine" : "Watch"}
-					icon={<MessageSquareIcon className="size-4" />}
-					defaultOpen
-				>
-					<p className="whitespace-pre-wrap text-ui text-ink-2">{item.text}</p>
-					{item.role === "user"
-						? userFiles(item).map((file) => (
-								<FilePart
-									key={
-										file.kind === "blob"
-											? file.sha
-											: file.kind === "sent"
-												? `${file.call}:${file.n}`
-												: `${file.item}:${file.n}`
-									}
-									chat={chat}
-									file={file}
-								/>
-							))
-						: null}
-				</RawRow>
+				<div key={item.id} className="flex min-w-0 flex-col items-end gap-1" data-entry={`e${item.id}`}>
+					{item.role === "user" ? null : <Caption>{item.role === "wake" ? "Routine" : "Watch"}</Caption>}
+					<Said from="user">
+						<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{item.text}</p>
+						{item.role === "user"
+							? userFiles(item).map((file) => (
+									<FilePart
+										key={
+											file.kind === "blob"
+												? file.sha
+												: file.kind === "sent"
+													? `${file.call}:${file.n}`
+													: `${file.item}:${file.n}`
+										}
+										chat={chat}
+										file={file}
+									/>
+								))
+							: null}
+					</Said>
+				</div>
 			);
-		if (item.role === "assistant") return <ModelRecord key={`model:${request++}`} item={item} />;
-		if (item.role === "tool") {
-			const call = calls.get(item.id);
+		if (item.role === "assistant") {
+			const r = request++;
 			return (
-				<RawRow
+				<ModelTurn
+					key={`model:${r}`}
+					chat={chat}
+					request={r}
+					item={item}
+					live={live}
+					at={at}
+					results={results}
+					running={output}
+					waiting={waiting}
+				/>
+			);
+		}
+		if (item.role === "tool") {
+			// a result reads inside the call that asked for it; one with no call here (a skill the owner loaded) alone
+			if (answered.has(item.id)) return null;
+			return (
+				<ToolCard
 					key={item.id}
-					title={`${item.name} result`}
-					icon={<ToolIcon name={item.name} />}
-					state={item.notes?.some((note) => note.code === "aborted") ? "Stopped" : item.error ? "Failed" : "Done"}
-					summary={item.durationMs === undefined ? undefined : `${(item.durationMs / 1000).toFixed(1)}s`}
-				>
-					{item.receipt?.kind === "skill" ? (
-						<SkillToolPreview
-							skill={{
-								name: item.receipt.name,
-								description: item.receipt.description,
-								path: `skills/${item.receipt.name}/SKILL.md`,
-								body: item.text,
-								files: item.receipt.files,
-							}}
-						/>
-					) : item.name === "bash" && typeof call?.args.command === "string" ? (
-						<Terminal command={call.args.command} output={item.text} />
-					) : (
-						<RawValue label={item.error ? "Error" : "Result"}>{item.text}</RawValue>
-					)}
-					{item.patch ? <CodeBlock title="Change" language="diff" code={item.patch} /> : null}
-					<RawValue label="Result details">
-						{JSON.stringify({
-							entry: item.id,
-							call: item.call,
-							at: item.at,
-							durationMs: item.durationMs,
-							notes: item.notes,
-							receipt: item.receipt,
-						})}
-					</RawValue>
-					{Array.from({ length: item.images ?? 0 }, (_, n) => (
-						<FilePart
-							// biome-ignore lint/suspicious/noArrayIndexKey: immutable result image indices are their API identity.
-							key={`${item.id}:image:${n}`}
-							chat={chat}
-							file={{ kind: "item", item: item.id, n, image: true, name: `Image ${n + 1}` }}
-						/>
-					))}
-				</RawRow>
+					chat={chat}
+					entry={`e${item.id}`}
+					call={{ id: item.call, name: item.name, args: {} }}
+					result={item}
+					state={aborted(item) ? "stopped" : item.error ? "error" : "done"}
+					defaultOpen={at === `e${item.id}`}
+				/>
 			);
 		}
 		if (item.role === "instruction")
 			return (
-				<RawRow key={item.id} title="Daemon instruction" icon={<MessageSquareIcon className="size-4" />} defaultOpen>
+				<div key={item.id} className="flex min-w-0 flex-col gap-1 border-l border-line-soft pl-3">
+					<Caption>From banda</Caption>
 					<p className="whitespace-pre-wrap text-ui text-ink-2">{item.text}</p>
-				</RawRow>
+				</div>
 			);
 		const title =
 			item.role === "compaction"
@@ -671,9 +935,25 @@ function ActivityTranscript({
 			</RawRow>
 		);
 	});
-	if (partial.length) rows.push(<ModelRecord key={`model:${request}`} partial={partial} />);
+	if (partial.length)
+		rows.push(
+			<ModelTurn
+				key={`model:${request}`}
+				chat={chat}
+				request={request}
+				partial={partial}
+				live={live}
+				at={at}
+				results={results}
+				running={output}
+				waiting={waiting}
+			/>,
+		);
+	const requests = work.items.filter((item) => item.role === "assistant");
+	const total = totalWords(requests);
+	const lasted = span(work.items);
 	return (
-		<>
+		<div ref={root} className="flex min-w-0 flex-col gap-5">
 			{rows}
 			{waits.map((wait) => (
 				<RawRow
@@ -686,31 +966,13 @@ function ActivityTranscript({
 					<RawValue label="Ask">{JSON.stringify(wait)}</RawValue>
 				</RawRow>
 			))}
-			{running.map((tool) => (
-				<RawRow
-					key={`running:${tool.call}`}
-					title={`${tool.name} output`}
-					icon={<ToolIcon name={tool.name} />}
-					state="Running"
-					defaultOpen
-				>
-					{tool.name === "bash" ? (
-						<Terminal
-							command={
-								typeof activeCalls.get(tool.call)?.args.command === "string"
-									? String(activeCalls.get(tool.call)?.args.command)
-									: ""
-							}
-							output={tool.output}
-						/>
-					) : (
-						<RawValue label="Output">{tool.output}</RawValue>
+			{live || requests.length < 2 ? null : (
+				<p data-work-total="" className="border-t border-line-soft pt-3 text-meta text-ink-3 tabular-nums">
+					{[`${requests.length} requests`, ...total, ...(lasted === undefined ? [] : [`took ${took(lasted)}`])].join(
+						" · ",
 					)}
-					{tool.dropped ? (
-						<p className="text-meta text-ink-2">Earlier live output is outside the retained window.</p>
-					) : null}
-				</RawRow>
-			))}
-		</>
+				</p>
+			)}
+		</div>
 	);
 }

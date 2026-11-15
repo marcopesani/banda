@@ -3,7 +3,7 @@ import type { Page } from "./chrome.ts";
 export async function chooseMessageAction(
 	page: Pick<Page, "run" | "until">,
 	trigger: string,
-	action: "Copy" | "Activity & transcript",
+	action: "Copy" | "Activity",
 ) {
 	await page.until(trigger);
 	await page.run(`(() => {

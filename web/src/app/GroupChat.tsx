@@ -153,12 +153,12 @@ export function GroupChat({
 	).map((id) => ({ ...whoOf(known, id), id }));
 	const lineTargets = onLine.flatMap((member) => {
 		const chat = executions[member.id];
-		return chat === undefined ? [] : [{ chat, name: member.name, heading: name }];
+		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
 	});
 	const coding = useHarnessMenu(delegated.sessions, delegated.waiting);
 	const activityTargets = (working.length ? working : members).flatMap((member) => {
 		const chat = executions[member.id];
-		return chat === undefined ? [] : [{ chat, name: member.name, heading: name }];
+		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
 	});
 
 	const others = agents
@@ -257,7 +257,10 @@ export function GroupChat({
 								const inspect =
 									anchor === undefined || chat === undefined
 										? undefined
-										: () => setActivity([{ chat, name: member.name, anchor, heading: message.text || name }]);
+										: () =>
+												setActivity([
+													{ chat, name: member.name, face: member.face, anchor, heading: message.text || name },
+												]);
 								// what the member's message published to the Library, opened at that version
 								const artifacts = message.artifacts ?? [];
 								const objects = (

@@ -338,6 +338,19 @@ export const SECTIONS: readonly Entry[] = [
 		status: "app",
 		sources: ["web/src/app/Activity.tsx", "web/src/chat/ActivityDetail.tsx", HEADER, FEED],
 	},
+	{
+		id: "activity-open",
+		title: "Activity and transcript, open",
+		group: "agent",
+		status: "app",
+		sources: [
+			"web/src/app/Activity.tsx",
+			"web/src/chat/Steps.tsx",
+			"web/src/components/ai-elements/chain-of-thought.tsx",
+			"web/src/components/ai-elements/reasoning.tsx",
+			"web/src/components/ai-elements/tool.tsx",
+		],
+	},
 	{ id: "settings", title: "Settings", group: "agent", status: "app", sources: [SETTINGS] },
 	{
 		id: "settings-tabs",

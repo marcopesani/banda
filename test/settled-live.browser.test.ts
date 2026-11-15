@@ -279,16 +279,16 @@ for (const width of [320, 1440])
 				await chooseMessageAction(
 					page,
 					`[...document.querySelectorAll('button[data-message-transcript]')].at(-1)`,
-					"Activity & transcript",
+					"Activity",
 				);
-				const preview = `[...document.querySelectorAll('[data-tool-preview]')].find((p) => p.textContent.includes('pushed-to-origin-main'))`;
+				const preview = `[...document.querySelectorAll('[data-activity-timeline] [data-keep-end]')].find((p) => p.textContent.includes('pushed-to-origin-main'))`;
 				await page.until(`!!${preview}`);
+				// the step's line is its button's name: what a screen reader hears is the command, its end included
 				const kept = await page.run<{ end: string; whole: boolean; describes: boolean }>(`(() => {
 					const shown = ${preview};
-					const end = shown.querySelector('[data-keep-end]').lastElementChild;
-					const inspect = shown.closest('button');
-					const described = (inspect.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
-					return { end: end.textContent, whole: end.clientWidth > 0 && end.scrollWidth <= end.clientWidth + 1, describes: described.includes('pushed-to-origin-main') };
+					const end = shown.lastElementChild;
+					const named = shown.closest('button') ?? shown.closest('[data-step]');
+					return { end: end.textContent, whole: end.clientWidth > 0 && end.scrollWidth <= end.clientWidth + 1, describes: named.textContent.includes('pushed-to-origin-main') };
 				})()`);
 				expect(kept).toEqual({ end: "&& echo pushed-to-origin-main", whole: true, describes: true });
 				const shots = process.env.BANDA_SETTLED_SHOTS;

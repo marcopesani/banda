@@ -101,19 +101,21 @@ for (const width of [390, 1440])
 				const current = `document.querySelector('[aria-label="View current activity"]')`;
 				await page.until(`${transcriptAction} || ${current}`);
 				if (await page.run(`Boolean(${transcriptAction})`))
-					await chooseMessageAction(page, transcriptAction, "Activity & transcript");
+					await chooseMessageAction(page, transcriptAction, "Activity");
 				else await click(page, current);
 				await page.until(`document.querySelector('[role="dialog"]')`);
 				const activity = String(await page.run(`document.querySelector('[role="dialog"]')?.innerText`));
 				expect(activity).toContain("Activity");
-				await click(page, `document.querySelector('[aria-label="Inspect Loaded /research"]')`);
-				await page.until(`document.querySelector('[aria-label="Full transcript"]')`);
-				const transcript = String(await page.run(`document.querySelector('[role="dialog"]')?.innerText`));
-				expect(transcript).toContain("skill result");
-				await click(
-					page,
-					`[...document.querySelectorAll('[data-raw-content] button')].find(el => el.textContent.trim().startsWith('skill result'))`,
+				expect(activity).toContain("Loaded");
+				expect(activity).toContain("/research");
+				// a tab opens as it takes focus
+				await page.run(
+					`[...document.querySelectorAll('[role="dialog"] [aria-label="Depth"] [role="tab"]')].at(-1).focus()`,
 				);
+				await page.until(`document.querySelector('[aria-label="Full transcript"]')`);
+				const skillCall = `[...document.querySelectorAll('[data-raw-content] [data-tool] button')].find(el => el.querySelector('[data-raw-title]')?.textContent === 'skill')`;
+				await page.until(skillCall);
+				await click(page, skillCall);
 				await page.until(`document.querySelector('[role="dialog"]')?.textContent.includes('Cite your sources.')`);
 				await page.run(`location.hash='#/skills/research'`);
 				await page.until(`document.querySelector('[data-skill-detail]')`);

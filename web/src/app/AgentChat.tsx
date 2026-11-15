@@ -401,7 +401,7 @@ function Timeline({
 			/>
 			{activity === undefined ? null : (
 				<ActivitySheet
-					targets={[{ chat, name: who.name, ...activity }]}
+					targets={[{ chat, name: who.name, face: who.face, ...activity }]}
 					source={{ chat, transcript }}
 					returnTo={openedFrom.current}
 					onClose={() => {

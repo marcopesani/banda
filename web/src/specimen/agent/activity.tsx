@@ -8,7 +8,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/cn";
-import { ActivitySheet } from "../../app/Activity.tsx";
+import { ActivitySheet, ActivityView } from "../../app/Activity.tsx";
 import { Band } from "../../chat/Band.tsx";
 import { Bubble, DaySeparator, Run } from "../../chat/Feed.tsx";
 import type { Block, ChatPrompt, Item, RunningTool } from "../../lib/api.ts";
@@ -89,6 +89,18 @@ Use message_user to send the owner a concise recommendation. If a source is unav
 	],
 };
 
+/** What a request took: the context grows with each one, most of it read from the cache. */
+const REQUEST_COST = (id: number) => ({
+	model: "anthropic/claude-sonnet-5-5",
+	usage: {
+		input: 180 + id * 40,
+		output: 60 + id * 12,
+		cacheRead: 6200 + id * 420,
+		cacheWrite: 300,
+		cost: 0.0031 + id * 0.0004,
+	},
+});
+
 /** Friday 14 November 2026, 10:41:58, and the seconds after. */
 const T0 = Date.UTC(2026, 10, 13, 9, 41, 58);
 const at = (seconds: number) => T0 + seconds * 1000;
@@ -106,7 +118,8 @@ const round = (
 		text: "",
 		at: at(seconds),
 		calls: [call],
-		...(thinking ? { thinking } : {}),
+		...(thinking ? { thinking, thinkingMs: 2100 } : {}),
+		...REQUEST_COST(id),
 	},
 	{
 		id: id + 1,
@@ -175,7 +188,7 @@ const FINISHED: readonly Item[] = [
 		},
 	),
 	...round(12, 25, { id: "m2", name: "message_user", args: { text: REPLY } }, { text: "Sent." }),
-	{ id: 14, role: "assistant", stop: "stop", text: "", at: at(32) },
+	{ id: 14, role: "assistant", stop: "stop", text: "", at: at(32), ...REQUEST_COST(14) },
 ];
 const FAILED: readonly Item[] = [
 	...OPENING,
@@ -326,7 +339,7 @@ export function ActivityChat() {
 			</ChatScreen>
 			{open === undefined ? null : (
 				<ActivitySheet
-					targets={[{ chat: CHAT, name: MARA.name, ...open }]}
+					targets={[{ chat: CHAT, name: MARA.name, face: MARA.face, ...open }]}
 					source={{ chat: CHAT, transcript: scene.transcript, prompt: PROMPT }}
 					onClose={() => setOpen(undefined)}
 					style={{ colorScheme: scheme, ...(phone ? { maxWidth: 390 } : {}) }}
@@ -345,6 +358,50 @@ export function ActivitySection() {
 			wide
 		>
 			<ActivityChat />
+		</Section>
+	);
+}
+
+const OPEN: readonly { scenario: Scenario; label: string }[] = [
+	{ scenario: "working", label: "Working: a thought streaming, nothing opened" },
+	{ scenario: "finished", label: "Finished" },
+	{ scenario: "failed", label: "Failed: a page that did not load, and a model error that ended the run" },
+];
+
+/** The sheet's two depths with no sheet around them: the activity beside the transcript, in each state. */
+export function ActivityOpenSection() {
+	return (
+		<Section
+			id="activity-open"
+			note="The sheet's two depths, open: the activity, a chain of thought whose lines open in place; and the transcript, the same work as a conversation, each tool call a card."
+			wide
+		>
+			<div className="@container flex w-full min-w-0 flex-col gap-6">
+				{OPEN.map(({ scenario, label }) => {
+					const scene = scenario === "working" ? working(16) : SCENES[scenario];
+					return (
+						<div key={scenario} className="flex min-w-0 flex-col gap-2">
+							<p className="text-meta text-ink-2">{label}</p>
+							<div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
+								{(["activity", "transcript"] as const).map((depth) => (
+									<div
+										key={depth}
+										data-activity-open={`${scenario}:${depth}`}
+										className="flex h-[36rem] min-w-0 flex-col overflow-hidden rounded-field border border-line-soft bg-paper"
+									>
+										<ActivityView
+											target={{ chat: CHAT, name: MARA.name, face: MARA.face }}
+											depth={depth}
+											transcript={scene.transcript}
+											given={PROMPT}
+										/>
+									</div>
+								))}
+							</div>
+						</div>
+					);
+				})}
+			</div>
 		</Section>
 	);
 }

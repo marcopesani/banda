@@ -30,14 +30,12 @@ async function press(page: Page, selector: string) {
 /** A message's activity control, as the app has it: the first message's, or the newest's. */
 const first = `document.querySelector('[data-message-transcript]')`;
 const newest = `[...document.querySelectorAll('[data-message-transcript]')].at(-1)`;
-/** The nth step of the timeline that reads `title`, or the one whose state reads `state`. */
-const step = (title: string, n = 0) =>
-	`[...document.querySelectorAll('[role="dialog"] [aria-label="Inspect ${title}"]')][${n}]`;
-const stepWith = (text: string) =>
-	`[...document.querySelectorAll('[role="dialog"] [aria-label^="Inspect"]')].find(el => el.textContent.includes(${JSON.stringify(text)}))`;
-/** A row of the full transcript by its title: closed rows hold nothing, so a test opens one before reading it. */
+/** The step of the activity whose line reads `text`: its button, which opens it in place. */
+const step = (text: string, n = 0) =>
+	`[...document.querySelectorAll('[role="dialog"] [data-step] button[aria-expanded]')].filter(el => el.textContent.includes(${JSON.stringify(text)}))[${n}]`;
+/** A tool call's card in the transcript, by the tool's name: closed cards hold nothing, so a test opens one first. */
 const row = (title: string, n = 0) =>
-	`[...document.querySelectorAll('[data-raw-content] [data-raw-title]')].filter(el => el.textContent === ${JSON.stringify(title)})[${n}]?.closest('button')`;
+	`[...document.querySelectorAll('[data-raw-content] [data-tool] [data-raw-title]')].filter(el => el.textContent === ${JSON.stringify(title)})[${n}]?.closest('button')`;
 const button = (text: string) =>
 	`[...document.querySelectorAll('button')].find(el => el.textContent.trim() === ${JSON.stringify(text)})`;
 const tab = (text: string) =>
@@ -45,62 +43,69 @@ const tab = (text: string) =>
 const dialogText = `document.querySelector('[role="dialog"]')?.textContent`;
 
 for (const width of [320, 390, 1440]) {
-	it.skipIf(!hasChrome())(`activity has three local depths, completion and failure at ${width}px`, async () => {
+	it.skipIf(!hasChrome())(`activity has two depths, completion and failure at ${width}px`, async () => {
 		await withPage(url, { width, height: 900 }, async (page) => {
 			await page.until(first);
 			expect(await page.run(`document.body.textContent.includes('browser_navigate')`)).toBe(false);
 			await press(page, tab("Dark"));
-			await chooseMessageAction(page, first, "Activity & transcript");
-			await page.until(`${dialogText}?.includes('Working')`);
+			await chooseMessageAction(page, first, "Activity");
+			// the activity says the work in words, never in tool names
+			await page.until(`${dialogText}?.includes('Messaged you')`);
 			expect(await page.run(`getComputedStyle(document.querySelector('[role="dialog"]')).colorScheme`)).toBe("dark");
 			expect(await page.run(`${dialogText}.includes('browser_navigate')`)).toBe(false);
-			expect(await page.run(`${button("Full transcript")} === undefined`)).toBe(true);
-			// the step's whole row opens the transcript
-			await press(page, step("Opening a page", 1));
+			expect(await page.run(`${dialogText}.includes('renfe.com')`)).toBe(true);
+			// a step opens in place, to what it brought back
+			await press(page, step("thetrainline"));
+			await page.until(`${dialogText}?.includes('08:00')`);
+			expect(await page.run(`${step("thetrainline")}.getAttribute('aria-expanded')`)).toBe("true");
+			// and leads to itself in the transcript, where its call arrives open
+			await press(page, button("In the transcript"));
 			await page.until(`${dialogText}?.includes('browser_navigate')`);
 			expect(await page.run(`document.querySelectorAll('[role="dialog"]').length`)).toBe(1);
-			expect(await page.run(`${dialogText}.includes('renfe.com')`)).toBe(true);
-			await page.until(`document.activeElement?.textContent === 'Full transcript'`);
-			await press(page, row("browser_navigate result", 1));
-			await page.until(`${dialogText}?.includes('08:00')`);
-			await press(page, row("browser_navigate", 1));
+			expect(await page.run(`${tab("Transcript")}.getAttribute('aria-selected')`)).toBe("true");
 			await page.until(`document.querySelector('[data-code-block="json"] span[style*="--code-"]')`);
 			expect(
 				await page.run(`document.querySelector('[data-code-block="json"] pre').innerText.includes('  "url"')`),
 			).toBe(true);
+			expect(await page.run(`${row("browser_navigate", 1)}.getAttribute('aria-expanded')`)).toBe("true");
 			expect(
 				await page.run(
 					`(() => {const el=document.querySelector('[role="dialog"]'); return el.scrollWidth <= el.clientWidth;})()`,
 				),
 			).toBe(true);
-			await press(page, button("Activity"));
-			await page.until(`${dialogText}?.includes('Working')`);
+			await press(page, tab("Activity"));
+			await page.until(`${dialogText}?.includes('Messaged you')`);
 			await press(page, button("Close"));
 			await page.until(`!document.querySelector('[role="dialog"]')`);
 			await page.until(`document.activeElement?.getAttribute('aria-label') === 'Message actions'`);
 
 			await press(page, tab("Failure"));
 			await page.until(`document.querySelectorAll('[data-message-transcript]').length === 2`);
-			await chooseMessageAction(page, newest, "Activity & transcript");
+			await chooseMessageAction(page, newest, "Activity");
 			await page.until(`${dialogText}?.includes('Failed')`);
-			await press(page, stepWith("Failed"));
-			await page.until(row("browser_navigate result", 2));
-			await press(page, row("browser_navigate result", 2));
+			// the step that failed says why, in place
+			await press(page, step("Failed"));
 			await page.until(`${dialogText}?.includes('ERR_CONNECTION_RESET')`);
+			await press(page, tab("Transcript"));
+			await page.until(`document.querySelector('[data-tool-state="error"]')`);
 			await press(page, button("Close"));
 			await page.until(`!document.querySelector('[role="dialog"]')`);
 
 			await press(page, tab("Finished"));
 			await page.until(`document.querySelector('[data-message-transcript]')`);
-			await chooseMessageAction(page, newest, "Activity & transcript");
-			await page.until(`${dialogText}?.includes('How the work was done')`);
-			await press(page, step("Opening a page"));
+			await chooseMessageAction(page, newest, "Activity");
+			await page.until(`${dialogText}?.includes('Finished')`);
+			await press(page, tab("Transcript"));
 			await page.until(`document.querySelector('[aria-label="Tools"]')`);
+			// the model's context first, folded; then the conversation, the owner's words first
 			expect(
 				await page.run(
-					`(() => {const content=document.querySelector('[data-raw-content]'); return [...content.children].slice(0,3).map(el=>el.querySelector('button,h3')?.textContent.trim());})()`,
+					`[...document.querySelector('[data-model-context]').children].map(el=>el.querySelector('button,h3')?.textContent.trim())`,
 				),
-			).toEqual(["System prompt", "Tools3", "Your message"]);
+			).toEqual(["System prompt", "Tools3"]);
+			expect(
+				await page.run(`document.querySelector('[data-raw-content] [data-message-bubble]').textContent.trim()`),
+			).toContain("Find me a direct train");
 			expect(await page.run(`${button("System prompt")}.getAttribute('aria-expanded')`)).toBe("false");
 			expect(await page.run(`${button("Tools3")}.getAttribute('aria-expanded')`)).toBe("false");
 			await press(page, button("Tools3"));
@@ -111,8 +116,18 @@ for (const width of [320, 390, 1440]) {
 			await page.until(`${dialogText}?.includes('You are Mara')`);
 			await press(page, button("System prompt"));
 			expect(await page.run(`${dialogText}.includes('browser_navigate')`)).toBe(true);
-			expect(await page.run(`${dialogText}.includes('message_user')`)).toBe(true);
-			await press(page, row("bash result"));
+			// what it told the owner reads as a message, and what the request took follows it
+			expect(
+				await page.run(
+					`[...document.querySelectorAll('[data-raw-content] [data-tool] [data-raw-title]')].some(el => el.textContent === 'message_user')`,
+				),
+			).toBe(false);
+			expect(await page.run(`document.querySelector('[data-request-meta]').textContent`)).toContain(
+				"claude-sonnet-5-5",
+			);
+			expect(await page.run(`document.querySelector('[data-request-meta]').textContent`)).toContain("% cached");
+			expect(await page.run(`document.querySelector('[data-work-total]').textContent`)).toContain("7 requests");
+			await press(page, row("bash"));
 			await page.until(`document.querySelector('[data-terminal] code span[style*="--code-"]')`);
 			expect(
 				await page.run(
@@ -133,9 +148,10 @@ for (const width of [320, 390, 1440]) {
 it.skipIf(!hasChrome())("streaming preserves inspection and keeps the sheet open when work completes", async () => {
 	await withPage(url, { width: 390, height: 740 }, async (page) => {
 		await page.until(first);
-		await chooseMessageAction(page, first, "Activity & transcript");
+		await chooseMessageAction(page, first, "Activity");
 		await page.until(step("Thinking"));
-		await press(page, step("Thinking"));
+		await press(page, tab("Transcript"));
+		// a thought being written is open, as it comes
 		await page.until(`document.querySelector('[data-thinking]')`);
 		await press(page, row("browser_navigate"));
 		// Fonts and async highlighting can resize the transcript after the sheet first opens.
@@ -151,9 +167,13 @@ it.skipIf(!hasChrome())("streaming preserves inspection and keeps the sheet open
 		await page.run(`${button("Play stream")}.click()`);
 		await page.until(`document.querySelector('[data-thinking]').textContent.length > ${before}`);
 		expect(await page.run(`document.querySelector('[data-raw-content]').parentElement.scrollTop`)).toBe(0);
-		// the run ends: the transcript is the recorded one, in the same open sheet
-		await page.until(`${dialogText}?.includes('Request details') && !${dialogText}?.includes('Streaming')`, 30_000);
+		// the run ends: the transcript is the recorded one, in the same open sheet, what was open still open
+		await page.until(
+			`document.querySelector('[data-work-total]') && !document.querySelector('[data-tool-state="running"]')`,
+			30_000,
+		);
 		expect(await page.run(`document.querySelectorAll('[role="dialog"]').length`)).toBe(1);
+		expect(await page.run(`${row("browser_navigate")}.getAttribute('aria-expanded')`)).toBe("true");
 		expect(await page.run(`document.querySelector('[data-raw-content]').parentElement.scrollTop`)).toBe(0);
 		await press(page, button("Latest"));
 		await page.until(
