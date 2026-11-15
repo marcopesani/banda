@@ -30,11 +30,11 @@ export function PaneHeader({
 }) {
 	const heading =
 		onTitle === undefined ? (
-			<h1 data-page-title="" tabIndex={-1} className="truncate text-ui font-semibold text-ink focus:outline-none">
+			<h1 data-page-title="" tabIndex={-1} className="truncate text-body font-semibold text-ink focus:outline-none">
 				{title}
 			</h1>
 		) : (
-			<h1 aria-label={title} className="text-ui font-semibold text-ink">
+			<h1 aria-label={title} className="text-body font-semibold text-ink">
 				<button
 					type="button"
 					aria-label={`${title}: open its panel`}
@@ -51,7 +51,7 @@ export function PaneHeader({
 			<span
 				data-pane-icon=""
 				aria-hidden="true"
-				className="inline-flex size-6 shrink-0 items-center justify-center text-ink-2 [&>svg]:size-4"
+				className="inline-flex size-7 shrink-0 items-center justify-center text-ink-2 [&>svg]:size-5"
 			>
 				{icon}
 			</span>
@@ -64,7 +64,7 @@ export function PaneHeader({
 							<li className="min-w-0 max-w-[40%]">
 								<a
 									href={parent.href}
-									className="block truncate rounded-field text-ui text-ink-2 hover:text-ink hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-focus"
+									className="block truncate rounded-field text-body text-ink-2 hover:text-ink hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-focus"
 								>
 									{parent.title}
 								</a>
@@ -116,11 +116,11 @@ export function Header({
 	const first = face ?? faces[0]?.face;
 	const icon =
 		faces.length > 1 ? (
-			<FaceStack faces={faces} name={name} size="mention" />
+			<FaceStack faces={faces} name={name} size="message" />
 		) : first === undefined ? (
 			<UsersIcon />
 		) : (
-			<Face face={first} name={name} size="mention" />
+			<Face face={first} name={name} size="message" />
 		);
 	return (
 		<PaneHeader

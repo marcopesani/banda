@@ -143,7 +143,7 @@ const lineButton = `document.querySelector('[data-working-line] button')`;
 const dialog = `document.querySelector('[role="dialog"]')`;
 const chatHeading = (title: string) => `document.querySelector('header h1[aria-label=${JSON.stringify(title)}]')`;
 const headerQuiet = (title: string) =>
-	`(() => {const header = ${chatHeading(title)}?.closest('header'); return header?.getBoundingClientRect().height === 48 && !/working/i.test(header.innerText) && !header.querySelector('[data-state="working"]') && header.querySelector('[data-pane-icon]')?.getBoundingClientRect().width === 24;})()`;
+	`(() => {const header = ${chatHeading(title)}?.closest('header'); return header?.getBoundingClientRect().height === 48 && !/working/i.test(header.innerText) && !header.querySelector('[data-state="working"]') && header.querySelector('[data-pane-icon]')?.getBoundingClientRect().width === 28;})()`;
 async function open(page: Page, hash: string) {
 	await page.until(`localStorage.getItem('banda.token')`);
 	await page.run(`location.hash=${JSON.stringify(hash)}`);
