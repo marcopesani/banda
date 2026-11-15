@@ -640,7 +640,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-  # A tag publishes the pre-release: the supported targets' downloads from this run's own builds, with their sums. The
+  # A tag publishes the release (a pre-release when its version has a suffix): the supported targets' downloads from this run's own builds, with their sums. The
   # browser archives ride along, since each bundled computer fetches its browser from this release by hash. Targets that
   # are built but not offered (Windows, Linux ARM64) do not hold a release back; a supported one that failed does, and
   # so does a source or notice that is missing or does not match the downloads being published.
@@ -699,7 +699,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           node scripts/release-sources.ts --verify upload
-      - name: Publish the pre-release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -708,8 +708,11 @@ jobs:
             echo "Release exists; its artifacts are unchanged."
             exit 0
           fi
+          # a version with a suffix (v0.1.0-alpha.15, v0.1.0-rc.1) is a pre-release; v0.1.0 is the latest release
+          kind=--latest
+          case "$GITHUB_REF_NAME" in *-*) kind=--prerelease ;; esac
           gh release create "$GITHUB_REF_NAME" upload/* \
-            --prerelease --verify-tag \
+            "$kind" --verify-tag \
             --title "banda $GITHUB_REF_NAME" \
             --notes-file .github/release-notes.md
       # a release this workflow's token publishes raises no release event, so the landing is told directly
