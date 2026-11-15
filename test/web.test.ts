@@ -1309,4 +1309,33 @@ describe("web", () => {
 			await daemon.close();
 		}
 	});
+
+	it("the hosted app's files carry the headers the daemon sends them with", async () => {
+		const { daemon, url } = await start();
+		try {
+			const { headers: rules } = JSON.parse(await readFile(new URL("../web/vercel.json", import.meta.url), "utf8")) as {
+				headers: { source: string; headers: { key: string; value: string }[] }[];
+			};
+			// a source matches a whole path; the two written there mean the same as patterns and as regular expressions.
+			// No two rules that match one path name the same header: which would win is not Vercel's to say
+			const hosted = (path: string) =>
+				rules
+					.filter((rule) => new RegExp(`^${rule.source}$`).test(path))
+					.flatMap((rule) => rule.headers.map(({ key, value }) => [key, value] as const));
+			const guards = ["content-security-policy", "referrer-policy", "x-content-type-options"];
+			// what is not a build's own file is left to Vercel, which has a browser ask again before each use
+			for (const [path, keys] of [
+				["/", guards],
+				["/sw.js", guards],
+				["/assets/app.js", ["cache-control", ...guards]],
+			] as const) {
+				const served = await fetch(`${url}${path}`);
+				const sent = hosted(path);
+				expect(sent.map(([key]) => key).sort(), path).toEqual(keys);
+				for (const [key, value] of sent) expect(value, `${key} of ${path}`).toBe(served.headers.get(key));
+			}
+		} finally {
+			await daemon.close();
+		}
+	});
 });
