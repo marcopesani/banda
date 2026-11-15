@@ -126,9 +126,13 @@ export function PullRequestCard({ pr, actions }: { pr: PullRequest; actions?: Re
 			>
 				{pr.repo} #{pr.number}
 			</Where>
-			<span className="text-body font-semibold text-ink [overflow-wrap:anywhere]">
+			<Original
+				url={pr.url}
+				name={pr.title || `${pr.repo} #${pr.number}`}
+				className={cn("text-body font-semibold text-ink [overflow-wrap:anywhere]", ORIGINAL_WORDS)}
+			>
 				{pr.title || "Title unavailable"}
-			</span>
+			</Original>
 			<span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ink-2">
 				<StatePill icon={Icon} word={word} live={pr.state === "open" || pr.state === "merged"} />
 				<span className="min-w-0 max-w-full truncate" title={pr.author}>
@@ -266,12 +270,15 @@ export function RepositoryCard({ repository, actions }: { repository: Repository
 			>
 				Repository
 			</Where>
-			<span className="flex min-w-0 items-center gap-2">
+			<Original url={repository.url} name={repository.repo} className="flex min-w-0 items-center gap-2">
 				<BookMarkedIcon aria-hidden="true" className="size-4 shrink-0 text-ink-2" />
-				<span className="min-w-0 truncate text-body font-semibold text-ink" title={repository.repo}>
+				<span
+					className={cn("min-w-0 truncate text-body font-semibold text-ink", ORIGINAL_WORDS)}
+					title={repository.repo}
+				>
 					{repository.repo}
 				</span>
-			</span>
+			</Original>
 			<span className="flex flex-col gap-1.5 border-t border-line-soft pt-2.5 text-meta text-ink-2">
 				{rows.map((row) => (
 					<span key={row.key} data-repository-row={row.key} className="flex min-w-0 items-center gap-1.5">
@@ -286,7 +293,47 @@ export function RepositoryCard({ repository, actions }: { repository: Repository
 	);
 }
 
-/** The line every object starts with: the service, where the thing lives, and how old the reading is. */
+/**
+ * A card's title, with the icon beside it where it has one, opens the original in the service; a card without an
+ * address keeps the same words, unlinked.
+ */
+function Original({
+	url,
+	name,
+	className,
+	children,
+}: {
+	url: string | undefined;
+	/** What it opens, for the link's name. */
+	name: string;
+	className?: string;
+	children: ReactNode;
+}) {
+	const href = safeObjectUrl(url);
+	return href === undefined ? (
+		<span className={className}>{children}</span>
+	) : (
+		<a
+			href={href}
+			target="_blank"
+			rel="noopener noreferrer"
+			aria-label={`${name} on GitHub`}
+			data-object-open="title"
+			// no wider than its words, so the room beside a short title is not a link
+			className={cn(className, "group/original max-w-full self-start")}
+		>
+			{children}
+		</a>
+	);
+}
+
+/** The words of a title, underlined while its link is pointed at. */
+const ORIGINAL_WORDS = "decoration-line underline-offset-2 group-hover/original:underline";
+
+/**
+ * The line every object starts with: the service, where the thing lives, and how old the reading is. The service's
+ * mark opens the original too.
+ */
 function Where({
 	children,
 	asOf,
@@ -301,24 +348,24 @@ function Where({
 	const href = safeObjectUrl(url);
 	return (
 		<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink-2">
-			<GitHubMark className="size-3.5 shrink-0" />
+			{href === undefined ? (
+				<GitHubMark className="size-3.5 shrink-0" />
+			) : (
+				<a
+					href={href}
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label="Open on GitHub"
+					data-object-open="mark"
+					className="-m-1 shrink-0 rounded-field p-1 hover:bg-paper-3"
+				>
+					<GitHubMark className="size-3.5" />
+				</a>
+			)}
 			<span data-object-location="" className="min-w-0 flex-1 truncate">
 				{children}
 			</span>
-			<span className="ml-auto flex shrink-0 items-center gap-2">
-				{href === undefined ? null : (
-					<a
-						href={href}
-						target="_blank"
-						rel="noopener noreferrer"
-						aria-label="Open on GitHub"
-						className="-m-1 rounded-field p-1 text-ink-2 hover:bg-paper-3 hover:text-ink"
-					>
-						<ExternalLinkIcon className="size-3.5" />
-					</a>
-				)}
-				{actions}
-			</span>
+			<span className="ml-auto flex shrink-0 items-center gap-2">{actions}</span>
 			{asOf === undefined ? null : <span className="w-full">as of {asOf}</span>}
 		</span>
 	);
@@ -678,24 +725,33 @@ export function ObjectLink({
 		object.card === "check-run" || object.card === "repository" ? object.repo : `${object.repo} #${object.number}`;
 	const url = safeObjectUrl(href);
 	const label = name || location;
-	return (
-		<span data-object-inline="" className="inline-flex max-w-full items-baseline gap-1 align-baseline">
+	const marks = (
+		<>
 			<GitHubMark className="size-3.5 shrink-0 self-center fill-current" />
 			<state.icon aria-hidden="true" className="size-3.5 shrink-0 self-center" />
+		</>
+	);
+	return (
+		<span data-object-inline="" className="inline-flex max-w-full items-baseline gap-1 align-baseline">
 			{url === undefined ? (
-				<span className={INLINE_TEXT} title={label}>
-					{label}
-				</span>
+				<>
+					{marks}
+					<span className={INLINE_TEXT} title={label}>
+						{label}
+					</span>
+				</>
 			) : (
+				// one link, from the marks to the words
 				<a
 					href={url}
 					target="_blank"
 					rel="noopener noreferrer"
-					className={INLINE_LINK}
+					className="group/inline inline-flex min-w-0 max-w-full items-baseline gap-1"
 					title={label}
 					aria-label={`${label} on GitHub`}
 				>
-					{label}
+					{marks}
+					<span className={cn(INLINE_LINK, "group-hover/inline:decoration-ink")}>{label}</span>
 				</a>
 			)}
 		</span>
@@ -1590,9 +1646,13 @@ export function IssueCard({ issue, actions }: { issue: Issue; actions?: ReactNod
 			>
 				{issue.repo} #{issue.number}
 			</Where>
-			<span className="text-body font-semibold text-ink [overflow-wrap:anywhere]">
+			<Original
+				url={issue.url}
+				name={issue.title || `${issue.repo} #${issue.number}`}
+				className={cn("text-body font-semibold text-ink [overflow-wrap:anywhere]", ORIGINAL_WORDS)}
+			>
 				{issue.title || "Title unavailable"}
-			</span>
+			</Original>
 			<span className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-meta text-ink-2">
 				<StatePill {...state} />
 				<span>{issue.author ? `opened by ${issue.author}` : "Author unavailable"}</span>
@@ -1656,9 +1716,13 @@ export function DiscussionCard({ discussion, actions }: { discussion: Discussion
 			>
 				{discussion.repo} · discussion #{discussion.number}
 			</Where>
-			<span className="text-body font-semibold text-ink [overflow-wrap:anywhere]">
+			<Original
+				url={discussion.url}
+				name={discussion.title || `${discussion.repo} discussion #${discussion.number}`}
+				className={cn("text-body font-semibold text-ink [overflow-wrap:anywhere]", ORIGINAL_WORDS)}
+			>
 				{discussion.title || "Title unavailable"}
-			</span>
+			</Original>
 			<span className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-meta text-ink-2">
 				<StatePill {...state} />
 				{discussion.category === "" ? null : (
@@ -1728,15 +1792,19 @@ export function CheckRunCard({ run, actions }: { run: CheckRun; actions?: ReactN
 				{run.pr === undefined ? "" : ` #${run.pr}`} · {run.where ?? "checks"}
 			</Where>
 			<span className="flex items-center gap-2">
-				<state.icon
-					className={cn(
-						"size-4 shrink-0",
-						state.tone,
-						run.state === "running" && "animate-pulse motion-reduce:animate-none",
-					)}
-				/>
-				<span className="min-w-0 flex-1 truncate font-code text-ui font-medium text-ink">{run.name}</span>
-				<span className={cn("text-meta font-medium", state.tone)}>{state.word}</span>
+				<Original url={run.url} name={run.name || run.repo} className="flex min-w-0 items-center gap-2">
+					<state.icon
+						className={cn(
+							"size-4 shrink-0",
+							state.tone,
+							run.state === "running" && "animate-pulse motion-reduce:animate-none",
+						)}
+					/>
+					<span className={cn("min-w-0 truncate font-code text-ui font-medium text-ink", ORIGINAL_WORDS)}>
+						{run.name}
+					</span>
+				</Original>
+				<span className={cn("ml-auto shrink-0 text-meta font-medium", state.tone)}>{state.word}</span>
 			</span>
 			{run.step === undefined && run.took === undefined ? null : (
 				<span className="text-meta text-ink-2">

@@ -494,7 +494,9 @@ for (const width of [390, 1280])
 							await page.run(`(() => {
 							const ref = document.querySelector('[data-entry="1"] [data-object-inline]');
 							const icons = ref.querySelectorAll('svg');
-							return icons.length === 2 && icons[0].getAttribute('viewBox') === '0 0 16 16' && icons[1].classList.contains('lucide-git-pull-request');
+							// the link covers the mark and the icon, not the title alone
+							return icons.length === 2 && icons[0].getAttribute('viewBox') === '0 0 16 16' && icons[1].classList.contains('lucide-git-pull-request')
+								&& Array.from(icons).every(icon => icon.closest('a') === ref.querySelector('a'));
 						})()`),
 						).toBe(true);
 						expect(
@@ -503,9 +505,9 @@ for (const width of [390, 1280])
 							const range = document.createRange();
 							range.selectNodeContents(ref.parentElement.firstChild);
 							const prose = range.getBoundingClientRect();
-							range.selectNodeContents(ref.querySelector('a'));
+							range.selectNodeContents(ref.querySelector('a span'));
 							const title = range.getBoundingClientRect();
-							const line = ref.querySelector('a').getBoundingClientRect();
+							const line = ref.querySelector('a span').getBoundingClientRect();
 							return Math.abs(prose.top - title.top) <= 1 && Array.from(ref.querySelectorAll('svg')).every(icon => {
 								const box = icon.getBoundingClientRect();
 								return Math.abs((box.top + box.bottom) / 2 - (line.top + line.bottom) / 2) <= 1;
@@ -539,11 +541,29 @@ for (const width of [390, 1280])
 						await page.run(`document.querySelector('button[aria-label="Retry owner/repo #400"]').click()`);
 						await page.until(`document.querySelector('[data-entry="6"]').textContent.includes('Read after retry')`);
 						expect(answers).toHaveLength(0); // reads and outbound links never approve a write
+						// a card's title and its mark open the original; no button beside them does
 						expect(
 							await page.run(
-								`Array.from(document.querySelectorAll('a[aria-label="Open on GitHub"]')).every(a => a.href.startsWith('https://github.com/') && a.rel.includes('noreferrer') && a.target === '_blank')`,
+								`Array.from(document.querySelectorAll('a[data-object-open]')).every(a => a.href.startsWith('https://github.com/') && a.rel.includes('noreferrer') && a.rel.includes('noopener') && a.target === '_blank')`,
 							),
 						).toBe(true);
+						expect(
+							await page.run(`(() => {
+							const card = Array.from(document.querySelectorAll('[data-entry="2"] [data-object]')).find(e => e.querySelector('a[data-object-open="title"]')?.href === ${JSON.stringify(pr)});
+							const title = card?.querySelector('a[data-object-open="title"]');
+							const mark = card?.querySelector('a[data-object-open="mark"]');
+							return title?.textContent === 'Fresh daemon title' && title.getAttribute('aria-label') === 'Fresh daemon title on GitHub'
+								&& mark?.href === ${JSON.stringify(pr)} && mark.getAttribute('aria-label') === 'Open on GitHub'
+								&& mark.querySelector('svg[viewBox="0 0 16 16"]') !== null;
+						})()`),
+						).toBe(true);
+						expect(
+							await page.run(`(() => {
+							const check = Array.from(document.querySelectorAll('a[data-object-open="title"]')).find(a => a.textContent === 'Object-only check');
+							return check !== undefined && check.querySelector('svg') !== null;
+						})()`),
+						).toBe(true);
+						expect(await page.run(`document.querySelectorAll('[data-object] .lucide-external-link').length`)).toBe(0);
 						// the text reads as a block until the owner asks to edit it
 						expect(
 							await page.run(
@@ -958,7 +978,9 @@ it.skipIf(!hasChrome())(
 				"javascript:alert(1)",
 			);
 			expect(await page.run(`document.querySelectorAll('a[href^="javascript:"]').length`)).toBe(0);
-			expect(await page.run(`document.querySelectorAll('a[aria-label="Open on GitHub"]').length`)).toBe(0);
+			// a card whose address is not the service's keeps its title as words, with no link
+			expect(await page.run(`document.querySelectorAll('a[data-object-open]').length`)).toBe(0);
+			expect(await page.run(`document.body.textContent`)).toContain("Partial daemon reading");
 			expect(await page.run(`document.querySelector('[data-entry="104"]').textContent`)).toContain(
 				"Checks: Unavailable",
 			);
