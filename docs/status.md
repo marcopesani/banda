@@ -2,6 +2,16 @@
 
 ## Current work
 
+0.1.0-alpha.14 is published as a pre-release for Apple silicon Macs and Linux x64 (.deb), with both CLI archives
+and the Android APK; a version tag now builds and publishes it, and the landing links its downloads. The installed
+release opened the owner's alpha.12-era home on a Mac, after the upgrade fix for same-named computer images. On the
+alpha.14 commit, Linux x64 passes native computer use through the app on a KVM runner, clean Debian installation
+and the installed shell's start and quit; the package was tried locally on Debian 12 and 13 and Ubuntu 22.04, 24.04
+and 26.04 under X11 and Wayland (arm64, no VM). The computer banda ships is the default box on Mac and Linux; Docker
+is used only by name, on Windows, and once to bring an earlier home's files. alpha.13 was tagged but published
+nothing. Open: a person installing the x64 .deb on a physical Linux machine, and source and notice assets for
+releases a tag publishes.
+
 The native-computer candidate is rebased onto current main. Routine requests now retain their original agent and
 execution after the run ends, and their existing approvals appear in that agent's chat. Archiving cancels retained
 requests and queued result continuations. Captured tool authority prevents permissions and pending drafts from
@@ -26,7 +36,7 @@ publication remain in [Workspace](workspace.md).
 The bundled computer candidate targets Apple silicon Mac and Linux x64 desktops. The landing page advertises
 those desktops and command-line archives, with Android in its separate phone section. Windows, Intel Mac and Linux
 ARM downloads are no longer advertised. Local ordinary checks and independent desktop/phone-width landing review pass.
-The integration is on main. The next release version is 0.1.0-alpha.13; its tag waits for the remaining release gates.
+The integration is on main and shipped in 0.1.0-alpha.14.
 
 The published macOS ARM64 alpha.12 has packaged desktop/phone-width walkthrough evidence, including lazy browser
 preparation, guarded sends and restart persistence. Its public-download and source reconstruction checks pass.
