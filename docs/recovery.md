@@ -20,6 +20,8 @@ Entry points: ../src/core/blobs.ts, ../src/core/store.ts, ../src/home.ts, ../src
   restored home; do not overwrite the current home during validation. Rebuild derived state afterward.
 - Restore on a fresh home and fresh containers, then resume pending work. Unknown external outcomes still ask;
   restoration must not replay already completed sends merely because the backup predates them.
+- An upgrade that converts the home takes a backup first, and converts nothing when the backup fails. The backup is
+  of the home before any step: a start that goes on after a kill never takes it again over a home half converted.
 - Exit: recovery acceptance R1-R4 passes, including a corrupted or incomplete backup and pending approvals.
 
 Follow [Delivery](delivery.md) and the relevant gates in [Verification](verification.md).
@@ -31,3 +33,6 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 
 - [ ] Prove blob file and directory persistence ordering on the supported filesystem (recovery.md)
 - [ ] Provide consistent backup and validated restore of the store, blobs, workspace, auth and browser state (recovery.md)
+- [ ] Back up the home before an upgrade's first migration step, keep that backup until the owner lets it go, and
+  restore it when a step fails for good or the owner returns to the earlier build. The runner asks for it once per
+  upgrade, before any step and never after one began (operations.md)

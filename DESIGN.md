@@ -1063,8 +1063,16 @@ the daemon's answer to the pairing route, never from how a connection closed: a 
 only dialed again.
 
 ## Home
-`~/.banda` (`--home <dir>` or `BANDA_HOME`): `config.json`, `durable.db`, `search.db`, `blobs/`, `auth/`. The
+`~/.banda` (`--home <dir>` or `BANDA_HOME`): `config.json`, `durable.db`, `search.db`, `blobs/`, `auth/`, `format`. The
 workspace lives in the box.
+
+**An upgrade keeps the home.** `format` numbers the shape of everything the home stores, and a build opens every home
+made since 0.1.0-alpha.14. At its start, before anything reads the home, the daemon brings an earlier one to its own
+format, one step per format, in order. A step can stop anywhere, at a kill as at a failure, and the next start runs
+it again; the format moves only once its step is on disk. Until the last step ends the home says it is on its way, so
+no earlier build opens it half converted. A home from a newer build is refused and left as it was: going back to an
+earlier build means the home as it was before the first step, not the converted one. A home from before
+0.1.0-alpha.14 is refused, and the owner starts a fresh one.
 
 ## Open
 - A monitor: a command in the box whose output a watch-like file follows, waking when it changes; it needs its own
