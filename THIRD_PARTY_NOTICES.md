@@ -1,7 +1,8 @@
 # Third-party notices
 
 banda is licensed under the [AGPL-3.0](LICENSE). It bundles the following third-party material, which keeps its own
-license. Dependencies installed by npm carry their licenses in `node_modules`.
+license. A release carries the licenses of everything else inside it (npm packages, Node.js, the computer's runtime,
+firmware and guest images, Electron) in its `licenses` folder, where `README.txt` says which file covers what.
 
 | Material | Where | Source | License |
 |---|---|---|---|

@@ -3,7 +3,8 @@
  * platform and architecture, in `release/banda/`:
  *
  *   node/node[.exe]  the official Node.js binary, checked against the release's SHASUMS256.txt
- *   app/             the built daemon and web UI with their runtime dependencies only
+ *   app/             the built daemon and web UI with their runtime dependencies only, and in `app/licenses` the
+ *                    notices of everything the release carries (scripts/notices.ts)
  *   bin/banda        the launcher (`bin/banda.cmd` on Windows): the bundled Node runs the bundled CLI
  *
  * With `--archive` it also writes `release/banda-cli-<version>-<os>-<arch>.tar.gz` (`.zip` on Windows). The desktop app
@@ -16,6 +17,7 @@ import { chmod, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { stageMicrovmBundle } from "./microvm-bundle.ts";
+import { stageNotices } from "./notices.ts";
 
 /** The Node.js every release bundles: exact, an LTS of the major `engines` asks for. */
 export const NODE_VERSION = "26.13.0";
@@ -198,6 +200,8 @@ export async function stage(root: string, options: { archive?: boolean } = {}): 
 	await mkdir(out, { recursive: true });
 	await stageApp(root, out, target);
 	await stageNode(out, target, join(release, "cache"));
+	// last of what the tree holds: the notices are read from the dependencies and the computer just staged
+	await stageNotices({ root, out, target, node: NODE_VERSION });
 	await stageLaunchers(out, target);
 	const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { version: string };
 	console.log(`staged banda ${version} for ${name} in ${out}`);

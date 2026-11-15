@@ -2,10 +2,14 @@ import { createHash } from "node:crypto";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import {
+	chromiumFfmpeg,
 	debianFolder,
 	downloadKind,
 	dpkgPackages,
 	dscFiles,
+	ELECTRON_SOURCE,
+	electronChromium,
+	FFMPEG_MATERIAL,
 	FIRMWARE_SOURCE,
 	type FileIdentity,
 	LIMITS,
@@ -16,6 +20,7 @@ import {
 	tarEntries,
 	tarHeader,
 	tarPadding,
+	treeSha256,
 	verifyReleaseMaterials,
 } from "../scripts/release-materials.ts";
 import { MICROVM_SOURCE } from "../src/box/microvm-assets.ts";
@@ -100,6 +105,18 @@ function fixture(): { index: ReleaseMaterials; files: Map<string, FileIdentity> 
 				name: "linux",
 				version: FIRMWARE_SOURCE.kernel.version,
 				files: [material("materials/native/linux.tar.gz", FIRMWARE_SOURCE.kernel.sha256)],
+			},
+			{
+				kind: "electron",
+				name: "electron",
+				version: ELECTRON_SOURCE.version,
+				files: [material("materials/native/electron.tar.gz", ELECTRON_SOURCE.archiveSha256)],
+			},
+			{
+				kind: "ffmpeg",
+				name: "ffmpeg",
+				version: ELECTRON_SOURCE.ffmpeg.commit,
+				files: [material(FFMPEG_MATERIAL), material("materials/native/chromium-DEPS")],
 			},
 			{ kind: "crate", name: "a", version: "1.0.0", files: [material("materials/crates/a-1.0.0.crate")] },
 			{ kind: "crate", name: "b", version: "2.0.0", files: [material("materials/crates/b-2.0.0.crate")] },
@@ -218,7 +235,7 @@ describe("a release's sources and notices", () => {
 
 	it("refuses a set without the pinned native sources", () => {
 		const { index, files } = fixture();
-		for (const kind of ["microsandbox", "firmware", "kernel"] as const) {
+		for (const kind of ["microsandbox", "firmware", "kernel", "electron"] as const) {
 			const changed = structuredClone(index);
 			const path = changed.sources.find((source) => source.kind === kind)?.files[0];
 			for (const material of changed.materials) if (material.path === path) material.sha256 = sha("another tree");
@@ -281,6 +298,72 @@ describe("a release's sources and notices", () => {
 		expect(downloadKind(`banda-browser-${"a".repeat(64)}.tar`)).toEqual({ kind: "browser" });
 		for (const other of ["banda-0.1.0-alpha.14-android-arm64.apk", "SHA256SUMS", "banda-0.1.0-sources-01.tar"])
 			expect(downloadKind(other)).toBeUndefined();
+	});
+
+	it("refuses a set without the source of the FFmpeg library in the desktop packages", () => {
+		const { index, files } = fixture();
+		const problem = "The index must name exactly one ffmpeg source, at the commit Electron's Chromium pins.";
+		const missing = structuredClone(index);
+		missing.sources = missing.sources.filter((source) => source.kind !== "ffmpeg");
+		expect(verifyReleaseMaterials(missing, files)).toContain(problem);
+		const other = structuredClone(index);
+		for (const source of other.sources) if (source.kind === "ffmpeg") source.version = "b".repeat(40);
+		expect(verifyReleaseMaterials(other, files)).toEqual([problem]);
+		const renamed = structuredClone(index);
+		for (const source of renamed.sources)
+			if (source.kind === "ffmpeg") source.files = ["materials/native/chromium-DEPS"];
+		expect(verifyReleaseMaterials(renamed, files)).toContain(`The ffmpeg source lacks ${FFMPEG_MATERIAL}.`);
+	});
+
+	it("pins the FFmpeg source of the Electron the desktop app is built on", async () => {
+		const desktop = (await import("../desktop/package.json", { with: { type: "json" } })).default as {
+			devDependencies: Record<string, string>;
+		};
+		// a new Electron ships another FFmpeg: its commit, tree digest and Chromium are pinned again with the bump
+		expect(desktop.devDependencies.electron).toBe(ELECTRON_SOURCE.version);
+		expect(ELECTRON_SOURCE.ffmpeg.url).toContain(`/+archive/${ELECTRON_SOURCE.ffmpeg.commit}.tar.gz`);
+		expect(ELECTRON_SOURCE.chromium.depsUrl).toContain(`/refs/tags/${ELECTRON_SOURCE.chromium.version}/DEPS`);
+		expect(LIMITS.some((line) => line.includes("FFmpeg"))).toBe(true);
+	});
+
+	it("reads the Chromium an Electron builds on, and the FFmpeg that Chromium checks out", () => {
+		const electron = "vars = {\n  'chromium_version':\n    '156.0.8078.80',\n  'node_version':\n    'v24.1.0',\n}";
+		expect(electronChromium(electron)).toBe("156.0.8078.80");
+		expect(() => electronChromium("vars = {}")).toThrow(/no Chromium version/);
+		const commit = "9db86ce5b5b454dfc96c435f9f0723012980c37f";
+		const chromium = `vars = {\n  'ffmpeg_revision': '${commit}',\n}\ndeps = {\n  'src/third_party/ffmpeg':\n    Var('chromium_git') + '/chromium/third_party/ffmpeg.git' + '@' + Var('ffmpeg_revision'),\n}`;
+		expect(chromiumFfmpeg(chromium)).toBe(commit);
+		// a revision nothing checks out, or a checkout from somewhere else, is not the library's source
+		expect(() => chromiumFfmpeg(chromium.replace("third_party/ffmpeg.git", "third_party/other.git"))).toThrow(
+			/no FFmpeg revision/,
+		);
+		expect(() => chromiumFfmpeg(chromium.replace(commit, "main"))).toThrow(/no FFmpeg revision/);
+	});
+
+	it("digests an archive by its files, whatever order and times its host wrote", async () => {
+		const resum = (header: Buffer) => {
+			header.write("        ", 148, 8, "ascii");
+			const sum = [...header.subarray(0, 512)].reduce((total, byte) => total + byte, 0);
+			header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
+		};
+		const forward = Buffer.concat([member("a/one", "1"), member("two", "2"), Buffer.alloc(1024)]);
+		const backward = Buffer.concat([member("two", "2"), member("a/one", "1"), Buffer.alloc(1024)]);
+		const dated = Buffer.from(forward);
+		dated.write("14712345670\0", 136, 12, "ascii");
+		resum(dated);
+		const digest = await treeSha256([forward]);
+		expect(digest).toMatch(/^[a-f0-9]{64}$/);
+		expect(await treeSha256([backward])).toBe(digest);
+		expect(await treeSha256([dated])).toBe(digest);
+		const changed = Buffer.concat([member("a/one", "1"), member("two", "3"), Buffer.alloc(1024)]);
+		expect(await treeSha256([changed])).not.toBe(digest);
+		const moved = Buffer.concat([member("a/one", "1"), member("three", "2"), Buffer.alloc(1024)]);
+		expect(await treeSha256([moved])).not.toBe(digest);
+		await expect(treeSha256([Buffer.alloc(1024)])).rejects.toThrow(/no file/);
+		const link = tarHeader("link", 0);
+		link.write("2", 156, 1, "ascii");
+		resum(link);
+		await expect(treeSha256([Buffer.concat([link, Buffer.alloc(1024)])])).rejects.toThrow(/not a regular file/);
 	});
 
 	it("pins the kernel the accepted alpha.12 sources carried", () => {

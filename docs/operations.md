@@ -53,6 +53,18 @@ recorded in `scripts/computer-distribution.json` (the alpha.12 Mac bundle), and 
 since. The release's index can only say `unreviewed`. What the set leaves out is written in the index and in
 `RELEASE-SOURCES.md`, never implied.
 
+A notice travels with the copy it covers, so every download carries its own in `app/licenses`, written when the tree
+is staged from what was just staged: the npm packages' license texts from `node_modules`, the texts of every crate of
+the pinned Cargo.lock, and each guest package's copyright path inside its image, which is where the image carries it.
+`README.txt` there is the index and also names what lives elsewhere (Node.js, the computer's notices, Electron's
+files). A package with no license to show stops the staging; an npm package without a license file is listed by its
+declared license only once it is named in `scripts/notices.ts`. The desktop app's tray menu shows the folder.
+
+The desktop packages carry FFmpeg as Electron's own shared library, under the LGPL-2.1-or-later. Its source is in
+the release's set: Chromium's fork at the commit the DEPS file of Electron's Chromium names, and Electron's source,
+which holds the patches it applies. `ELECTRON_SOURCE` pins them to the Electron in `desktop/package.json`, and
+staging and the tests stop when the two differ, so a new Electron cannot ship with the old library's source.
+
 ## Open work
 
 - [ ] Qualify native recovery through host sleep/wake and prolonged outages, and reduce the preflight cost without
@@ -84,12 +96,21 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] alpha.14 is published without sources or notices. Attach the set this collector makes from its downloads, or
   replace it with a release that has one
 - [ ] Sources the set leaves out: CPython in the proxy image, pi-env and the guest agent's C library (permissive
-  licenses), and the FFmpeg library inside Electron, which Electron ships under the LGPL: the desktop packages carry
-  Electron's license files but neither that library's source nor an offer of it
+  licenses)
+- [ ] FFmpeg: its source is in the set, but two things are unproven. That Chromium's fork at the pinned commit with
+  Electron's `patches/ffmpeg` rebuilds the library Electron ships (it needs Chromium's build system, which the set
+  does not hold); and that a rebuilt library can replace the shipped one in the installed app, on a Mac in
+  particular, where the bundle is sealed by an ad hoc signature (LGPL-2.1 section 6)
+- [ ] Native addons inside npm packages: `@number0/iroh-*` and `@resvg/resvg-js-*` are compiled Rust, and their npm
+  packages carry no license file and no notices for the crates built into them. `npm-packages.txt` lists them by
+  declared license alone. Gather their notices from their upstream sources at the pinned versions; resvg is MPL-2.0,
+  which asks that a recipient be told where its source is
+- [ ] The seven `@earendil-works/*` packages and seven others ship no license file in their npm tarballs
+  (`NPM_WITHOUT_LICENSE_FILE`): ask upstream to include it, or carry the text from their repositories
+- [ ] The notices are reachable from the desktop tray and by path in the command-line archive. Nothing in the web
+  app shows them, so a phone or a browser has no way to them, and the tray item has not been tried in a packaged app
 - [ ] Verify the OpenPGP signature of each Debian source control file against Debian's keyrings; today a `.dsc` is
   trusted by the hash snapshot.debian.org's index gives over HTTPS
-- [ ] Third-party notices for the Rust crates and guest packages ship beside the downloads, not inside them. Put the
-  notices the MIT and Apache-2.0 licenses ask for into the application itself, as alpha.12's `licenses` folder did
 - [ ] Rootless box, and a supervisor that alone holds the Docker socket
 - [ ] Bring a qualified native runtime on every platform. The reviewed Apple-silicon bundle includes it; Windows
   keeps its existing backend and Linux native acceptance remains open
