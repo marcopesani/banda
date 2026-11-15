@@ -4,8 +4,8 @@
 
 <p align="center">A band of agents that work with you.<br><a href="https://banda.rocks">banda.rocks</a></p>
 
-Sancho is your first agent, and you can add more. Each one has a computer of its own to browse, write and run
-routines in. Connect GitHub or any MCP server and choose which agents may use it. Reading is free; anything that
+Sancho is your first agent, and you can add more. They have a computer of their own, apart from yours, to browse,
+write and run routines in. Connect GitHub or any MCP server and choose which agents may use it. Reading is free; anything that
 sends, posts or can't be undone waits for your OK.
 
 ![A group chat: Mara finds the trains, Sancho plans the food, and Otto turns both into a printable itinerary](docs/screenshots/group.png)
@@ -22,8 +22,8 @@ sends, posts or can't be undone waits for your OK.
 ## What it does
 
 - **Agents, each a chat.** Give each one a face, a name and a personality. Put several in a group and they work together.
-- **A computer of its own.** Each agent browses, writes and runs code in its own container. Watch its browser live,
-  take over, or stop it.
+- **A computer of their own.** Agents browse, write and run code in a virtual machine banda runs, apart from your own
+  files. Watch an agent's browser live, take over, or stop it.
 - **It asks before it acts.** Before anything that sends, posts or can't be undone, it shows you exactly what will
   happen, and you say yes or no.
 - **Routines.** Agents wake on a schedule, in your time zone, and report back.
@@ -41,19 +41,27 @@ sends, posts or can't be undone waits for your OK.
   Google, Cloudflare, Hugging Face and many more). Or run the model on your own computer or network with Ollama,
   LM Studio, llama.cpp or vLLM, or point banda at any OpenAI-, Anthropic- or Mistral-compatible server. banda finds
   the models it has, and what you ask never goes to a model provider.
-- **Desktop and phone.** The app runs on macOS, Linux and Windows. An Android app pairs with it.
+- **Desktop and phone.** The app runs on Apple silicon Macs and on Linux x64. An Android app pairs with it.
 
-> **Pre-release.** Expect rough edges and breaking changes, and run it on a machine you trust. The sandbox is not yet
-> hardened against hostile code or content ([open work](docs/README.md)).
+> **Pre-release.** Expect rough edges and breaking changes, and run it on a machine you trust. The agents' computer
+> is kept apart from yours, but all your agents share it, and nothing inside it keeps one from another: code one
+> agent runs can read the others' files, and can go out to the network as another chat, so it can send to a site you
+> allowed only for a different agent. A computer for each agent is future work. Do not rely on banda to contain
+> hostile code or content yet ([SECURITY.md](SECURITY.md), [open work](docs/README.md)).
 
 ## Get started
 
-banda runs on Apple silicon Macs (macOS 14 or newer) and on Linux x64 (Debian 12, Ubuntu 22.04 or newer). Each
-agent's computer is a small virtual machine banda ships, so there is nothing else to install; on Linux your account
-needs access to `/dev/kvm`. Windows is untested.
+banda runs on Apple silicon Macs (macOS 14 or newer) and on Linux x64 (Debian 12, Ubuntu 22.04 or newer), with an
+Android app (arm64) for your phone. The agents' computer is a small virtual machine banda ships, so there is nothing
+else to install; on Linux your account needs access to `/dev/kvm`. Intel Macs, Windows and Linux on ARM64 are not
+supported.
 
-The [releases page](https://github.com/purrgrammer/banda/releases) has a desktop app and a CLI. Builds are unsigned,
-and each release's notes say how to open them.
+The [releases page](https://github.com/purrgrammer/banda/releases) has a desktop app and a CLI, and each release's
+notes say how to install them. The Mac app is not signed with an Apple Developer ID and not notarized, so macOS
+refuses to open it the first time: open it as
+[Apple describes for an app from an unidentified developer](https://support.apple.com/en-us/102445) (System Settings,
+Privacy & Security, Open Anyway). banda does not update itself: to update, download the new release and install it
+over the old one. Your data in `~/.banda` stays; back it up first.
 
 To run from source you need [Node 26](https://nodejs.org) (`mise install` sets it up):
 
