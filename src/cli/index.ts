@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** The minimal CLI (DESIGN.md "Clients"): `serve` runs the daemon; the other commands talk to it over loopback. */
 import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { OpenWait, Status } from "../core/status.ts";
 import { type Ask, fieldLines } from "../core/wait.ts";
@@ -31,6 +32,15 @@ usage:
   banda deny <id>                   deny it
   banda answer <id> <text>          answer a question; for one with fields, <field>=<value>
                                      for each
+  banda backup [--to <dir>] [--no-computer] [--no-browser]
+                                     copy the home, whole and consistent, into a new
+                                     folder (default <home>-backups/<time>), while the
+                                     daemon runs or not; --no-browser leaves out the
+                                     sites the browser is signed in to, --no-computer
+                                     the computer's files, the workspace among them.
+                                     A backup holds the home's keys and sign-ins
+  banda restore <backup>            check a backup against its manifest and make it
+                                     the home, which must be empty, with no daemon
 
 options:
   --home <dir>   the home (default $BANDA_HOME or ~/.banda)`;
@@ -44,6 +54,9 @@ async function main(argv: string[]): Promise<number> {
 			port: { type: "string" },
 			box: { type: "string" },
 			thread: { type: "string" },
+			to: { type: "string" },
+			"no-computer": { type: "boolean" },
+			"no-browser": { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 	});
@@ -156,8 +169,48 @@ async function main(argv: string[]): Promise<number> {
 		console.log(`Open this link to connect ${id}:\n${started.url}\n\nThen run: banda providers`);
 		return 0;
 	}
+	if (command === "backup") {
+		if (rest.length > 0) throw new Error("backup takes no argument; --to names its folder");
+		const { backupHome } = await import("../core/backup.ts");
+		const to =
+			values.to ??
+			join(
+				`${resolve(home)}-backups`,
+				new Date()
+					.toISOString()
+					.replace(/\.\d+Z$/, "Z")
+					.replaceAll(":", "-"),
+			);
+		const { path, manifest } = await backupHome(home, to, {
+			...(values["no-computer"] ? { computer: false as const } : {}),
+			...(values["no-browser"] ? { browser: false as const } : {}),
+		});
+		console.log(`backed up ${home} into ${path}\n${held(manifest)}`);
+		return 0;
+	}
+	if (command === "restore") {
+		const [from, ...extra] = rest;
+		if (from === undefined || extra.length > 0) throw new Error("restore needs the backup's folder, and nothing else");
+		const { restoreHome } = await import("../core/backup.ts");
+		const { HOME_FORMAT } = await import("../core/store.ts");
+		const manifest = await restoreHome(from, home, { format: HOME_FORMAT });
+		console.log(
+			`restored ${from} (banda ${manifest.banda}, ${manifest.created}) as ${home}\n${held(manifest)}\nA sign-in renewed after the backup was taken may ask to sign in again.`,
+		);
+		return 0;
+	}
 	console.error(usage);
 	return 2;
+}
+
+/** What a backup holds, a line each. */
+function held(manifest: import("../core/backup.ts").Manifest): string {
+	const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+	return [
+		...Object.entries(manifest.files).map(([name, file]) => `  ${name}  ${mb(file.bytes)}`),
+		...Object.entries(manifest.trees).map(([name, tree]) => `  ${name}/  ${tree.files} files, ${mb(tree.bytes)}`),
+		...manifest.excluded.map((name) => `  ${name}/  left out`),
+	].join("\n");
 }
 
 /** An open ask, and the command that answers it. */
