@@ -1,6 +1,6 @@
 /**
- * Manual measurement of the owner's typing in a taken-over browser, on the bundled computer (a throwaway home, the faux
- * provider, the real VMs): where the time goes between a key and the frame that shows it. It speaks the app's own HTTP
+ * Manual measurement of the owner's typing, clicks and Enter in a taken-over browser, on the bundled computer (a
+ * throwaway home, the faux provider, the real VMs): where the time goes between an input and the frame that shows it. It speaks the app's own HTTP
  * API and browser stream, and stamps the daemon's side from outside (the request's arrival, each DevTools command and
  * its answer, each screencast frame, each run of the VM runtime's program), so it measures the code as it ships.
  *
@@ -9,10 +9,14 @@
  * It needs `computer/` (AGENTS.md), the built web app (`npm run build:web`), Chrome, the network (the page it types
  * into is public: BANDA_LATENCY_PAGE) and the browser's archive in `release/` or at BANDA_BROWSER_ARCHIVE. The report
  * and the last pictures go to BANDA_LATENCY_OUT. Rows counting runs or bytes print "ms" like the rest: read the name.
+ * BANDA_LATENCY_ONLY=sends measures the clicks and Enter alone (G, H). BANDA_LATENCY_STOP=1 ends with the proof that a
+ * lost proxy is still repaired (I): the proxy's VM is stopped as scripts/verify-computer.ts stops it (then its process
+ * alone is killed), typing then runs nothing and starts nothing, the next click brings the proxy back, and a form's
+ * POST goes out as the owner's.
  */
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -42,7 +46,9 @@ const realExecFile = childProcess.execFile;
 // biome-ignore lint/suspicious/noExplicitAny: a pass-through wrapper
 (childProcess as any).execFile = (file: string, args: readonly string[], ...rest: any[]) => {
 	const started = now();
-	const what = `msb ${args.slice(0, 2).join(" ")}`;
+	// a command run in a VM is named by what it runs there
+	const guest = args[0] === "exec" ? args.slice(args.indexOf("--") + 1).map((arg) => arg.split("/").at(-1)) : [];
+	const what = `msb ${(guest.length > 0 ? ["exec", ...guest.slice(0, 3)] : args.slice(0, 2)).join(" ")}`;
 	const callback = rest.at(-1);
 	if (typeof callback === "function")
 		// biome-ignore lint/suspicious/noExplicitAny: a pass-through wrapper
@@ -66,8 +72,11 @@ http.Server.prototype.emit = function (this: http.Server, event: string, ...args
 
 const { Cdp } = await import("../src/box/cdp.ts");
 const realSend = Cdp.prototype.send;
+/** The page's DevTools session, as the daemon last put an input to it: the script asks it where things are. */
+let pageSession: { cdp: InstanceType<typeof Cdp>; id: string } | undefined;
 Cdp.prototype.send = function (this: InstanceType<typeof Cdp>, method: string, ...rest: unknown[]) {
 	const started = now();
+	if (method.startsWith("Input.") && typeof rest[1] === "string") pageSession = { cdp: this, id: rest[1] };
 	// biome-ignore lint/suspicious/noExplicitAny: a pass-through wrapper
 	const sent = (realSend as any).call(this, method, ...rest) as Promise<unknown>;
 	const done = () => stamps.push({ at: started, what: `cdp ${method}`, ms: now() - started });
@@ -313,85 +322,256 @@ try {
 	const frameBytes = clientFrames.map((frame) => frame.bytes);
 	say(`# ${label}: ${PAGE}`);
 	say(row("frame size, base64 bytes", frameBytes));
-
-	// A. one key at a time, the page at rest between them
-	const alone: Sample[] = [];
-	for (let i = 0; i < 30; i++) {
-		const sample = await measured({ type: "text", text: "abcdefghij"[i % 10] ?? "a" });
-		await framed(sample);
-		alone.push(sample);
-		await delay(600);
-	}
-	table("A. 30 keys, one at a time (600 ms apart)", alone);
-	say(`first key's DevTools commands: ${alone[0]?.cdp.join(", ")}`);
-
-	/** Keys pressed every `gap` ms, sent one after another as the app's queue sends them. */
-	const typing = async (count: number, gap: number) => {
-		const samples: Promise<Sample>[] = [];
-		let queue: Promise<unknown> = Promise.resolve();
-		const started = now();
-		for (let i = 0; i < count; i++) {
-			const pressed = now();
-			const body = { type: "text", text: "0123456789"[i % 10] ?? "0" };
-			const next = queue.then(() => measured(body, pressed));
-			queue = next.catch(() => undefined);
-			samples.push(next);
-			if (gap > 0) await delay(gap);
-		}
-		const all = await Promise.all(samples);
-		const took = now() - started;
-		for (const sample of all) {
-			const frame = stamps.find((stamp) => stamp.what === "frame" && stamp.at > (sample.t2 ?? sample.t0));
-			if (frame !== undefined) sample.t4 = frame.at;
-		}
-		await delay(800);
-		for (const sample of all) {
-			if (sample.t4 === undefined) await framed(sample);
-			else sample.t5 = clientFrames.find((each) => each.at >= (sample.t4 ?? 0))?.at;
-		}
-		return { all, took };
+	const full = process.env.BANDA_LATENCY_ONLY !== "sends";
+	/** Where one of the page's elements is, asked of the page itself (outside what is measured). */
+	const where = async (selector: string) => {
+		assert.ok(pageSession !== undefined, "no input reached the page yet");
+		const answered = (await realSend.call(
+			pageSession.cdp,
+			"Runtime.evaluate",
+			{
+				expression: `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: "center" }); const b = el.getBoundingClientRect(); return JSON.stringify({ x: b.x + b.width / 2, y: b.y + b.height / 2 }); })()`,
+				returnByValue: true,
+			},
+			pageSession.id,
+		)) as { result: { value?: string | null } };
+		assert.ok(typeof answered.result.value === "string", `${selector} is not on ${PAGE}`);
+		return JSON.parse(answered.result.value) as { x: number; y: number };
 	};
-	// B. typing at a steady pace
-	await delay(1000);
-	const paced = await typing(30, 120);
-	table("B. 30 keys typed 120 ms apart (queued as the app queues them)", paced.all);
-	say(`the last key's POST answered ${(paced.took - 29 * 120).toFixed(0)} ms after it was pressed`);
-	// C. a burst
-	await delay(1000);
-	const burst = await typing(20, 0);
-	table("C. 20 keys at once (a burst)", burst.all);
-	say(`burst of 20 took ${burst.took.toFixed(0)} ms from first key to last POST answered`);
-	// D. the pointer hovering
-	await delay(1000);
-	const moves: Sample[] = [];
-	for (let i = 0; i < 30; i++) {
-		moves.push(await measured({ type: "mouse", action: "move", x: 300 + i * 5, y: 500 }));
-		await delay(80);
-	}
-	table("D. 30 pointer moves (80 ms apart)", moves);
-	// E. clicks on nothing, as the app sends them: a press, then its release
-	const clicks: Sample[] = [];
-	for (let i = 0; i < 10; i++) {
+	/** A click as the app sends it: a press, then its release; the sample is the release's, from the press. */
+	const click = async (at: { x: number; y: number }) => {
 		const pressed = now();
-		await measured({ type: "mouse", action: "down", x: 900, y: 700, button: "left" }, pressed);
-		const released = await measured({ type: "mouse", action: "up", x: 900, y: 700, button: "left" }, pressed);
-		clicks.push(released);
-		await delay(300);
+		const down = await measured({ type: "mouse", action: "down", ...at, button: "left" }, pressed);
+		const up = await measured({ type: "mouse", action: "up", ...at, button: "left" }, pressed);
+		up.msb += down.msb;
+		up.msbMs += down.msbMs;
+		up.cdp = [...down.cdp, ...up.cdp];
+		return up;
+	};
+	const sending = (title: string, samples: readonly Sample[]) => {
+		say(`\n## ${title}`);
+		const spans = (to: "done" | "t5") =>
+			samples.flatMap((sample) => (typeof sample[to] === "number" ? [(sample[to] as number) - sample.t0] : []));
+		say(row("input -> its (last) POST answered", spans("done")));
+		say(row("input -> next frame at the client (total)", spans("t5")));
+		say(
+			row(
+				"runs of the VM runtime's program per input",
+				samples.map((sample) => sample.msb),
+			),
+		);
+		say(
+			row(
+				"time in them per input",
+				samples.map((sample) => sample.msbMs),
+			),
+		);
+		say(`DevTools commands of the last input: ${samples.at(-1)?.cdp.join(", ")}`);
+	};
+
+	if (full) {
+		// A. one key at a time, the page at rest between them
+		const alone: Sample[] = [];
+		for (let i = 0; i < 30; i++) {
+			const sample = await measured({ type: "text", text: "abcdefghij"[i % 10] ?? "a" });
+			await framed(sample);
+			alone.push(sample);
+			await delay(600);
+		}
+		table("A. 30 keys, one at a time (600 ms apart)", alone);
+		say(`first key's DevTools commands: ${alone[0]?.cdp.join(", ")}`);
+
+		/** Keys pressed every `gap` ms, sent one after another as the app's queue sends them. */
+		const typing = async (count: number, gap: number) => {
+			const samples: Promise<Sample>[] = [];
+			let queue: Promise<unknown> = Promise.resolve();
+			const started = now();
+			for (let i = 0; i < count; i++) {
+				const pressed = now();
+				const body = { type: "text", text: "0123456789"[i % 10] ?? "0" };
+				const next = queue.then(() => measured(body, pressed));
+				queue = next.catch(() => undefined);
+				samples.push(next);
+				if (gap > 0) await delay(gap);
+			}
+			const all = await Promise.all(samples);
+			const took = now() - started;
+			for (const sample of all) {
+				const frame = stamps.find((stamp) => stamp.what === "frame" && stamp.at > (sample.t2 ?? sample.t0));
+				if (frame !== undefined) sample.t4 = frame.at;
+			}
+			await delay(800);
+			for (const sample of all) {
+				if (sample.t4 === undefined) await framed(sample);
+				else sample.t5 = clientFrames.find((each) => each.at >= (sample.t4 ?? 0))?.at;
+			}
+			return { all, took };
+		};
+		// B. typing at a steady pace
+		await delay(1000);
+		const paced = await typing(30, 120);
+		table("B. 30 keys typed 120 ms apart (queued as the app queues them)", paced.all);
+		say(`the last key's POST answered ${(paced.took - 29 * 120).toFixed(0)} ms after it was pressed`);
+		// C. a burst
+		await delay(1000);
+		const burst = await typing(20, 0);
+		table("C. 20 keys at once (a burst)", burst.all);
+		say(`burst of 20 took ${burst.took.toFixed(0)} ms from first key to last POST answered`);
+		// D. the pointer hovering
+		await delay(1000);
+		const moves: Sample[] = [];
+		for (let i = 0; i < 30; i++) {
+			moves.push(await measured({ type: "mouse", action: "move", x: 300 + i * 5, y: 500 }));
+			await delay(80);
+		}
+		table("D. 30 pointer moves (80 ms apart)", moves);
+		// E. clicks on nothing, as the app sends them: a press, then its release
+		const clicks: Sample[] = [];
+		for (let i = 0; i < 10; i++) {
+			const pressed = now();
+			await measured({ type: "mouse", action: "down", x: 900, y: 700, button: "left" }, pressed);
+			const released = await measured({ type: "mouse", action: "up", x: 900, y: 700, button: "left" }, pressed);
+			clicks.push(released);
+			await delay(300);
+		}
+		say("\n## E. 10 clicks (press + release)");
+		say(
+			row(
+				"press -> its release's POST answered",
+				clicks.map((sample) => (sample.done ?? 0) - sample.t0),
+			),
+		);
+		const one = stamps.filter((stamp) => stamp.what.startsWith("msb")).slice(-10);
+		say(
+			`the VM runtime's runs of one repair: ${one.map((stamp) => `${stamp.what.slice(4)} ${stamp.ms?.toFixed(0)}ms`).join(", ")}`,
+		);
 	}
-	say("\n## E. 10 clicks (press + release)");
-	say(
-		row(
-			"press -> its release's POST answered",
-			clicks.map((sample) => (sample.done ?? 0) - sample.t0),
-		),
-	);
-	const one = stamps.filter((stamp) => stamp.what.startsWith("msb")).slice(-10);
-	say(
-		`the VM runtime's runs of one repair: ${one.map((stamp) => `${stamp.what.slice(4)} ${stamp.ms?.toFixed(0)}ms`).join(", ")}`,
-	);
+
+	// G. clicks that change the picture (a checkbox ticked and unticked): press -> release -> the frame that shows it
+	const box = await where("input[type=checkbox]");
+	const ticks: Sample[] = [];
+	for (let i = 0; i < 30; i++) {
+		const sample = await click(box);
+		await framed(sample);
+		ticks.push(sample);
+		await delay(400);
+	}
+	sending("G. 30 clicks on a checkbox (press + release, 400 ms apart)", ticks);
+	// H. Enter in a text area (a new line, nothing submitted): the key -> the frame that shows it
+	await click(await where("textarea"));
+	await delay(600);
+	const enters: Sample[] = [];
+	for (let i = 0; i < 30; i++) {
+		const sample = await measured({ type: "key", key: "Enter" });
+		await framed(sample);
+		enters.push(sample);
+		await delay(400);
+	}
+	sending("H. 30 Enter keys in a text area (400 ms apart)", enters);
+
+	// I. the proof that a lost proxy is still repaired before anything is sent
+	if (process.env.BANDA_LATENCY_STOP !== undefined) {
+		const cache = join(
+			process.platform === "darwin" ? "/private/tmp" : "/tmp",
+			`banda-msb-${process.getuid?.() ?? 0}-${createHash("sha256").update(home).digest("hex").slice(0, 16)}`,
+		);
+		const runtime = (args: readonly string[]) =>
+			childProcess.execFileSync(assets.msb, [...args], {
+				encoding: "utf8",
+				env: {
+					PATH: "/usr/bin:/bin",
+					HOME: home,
+					MSB_HOME: cache,
+					MSB_PATH: assets.msb,
+					MSB_LIBKRUNFW_PATH: assets.firmware,
+				},
+				timeout: 30_000,
+				killSignal: "SIGKILL",
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+		/** This home's proxy VM, and no other's. */
+		const proxy = () => {
+			const listed = JSON.parse(runtime(["list", "--format", "json"])) as { name: string }[];
+			const found = listed.filter((vm) => vm.name.endsWith("-proxy"));
+			assert.equal(found.length, 1, "this home owns one proxy VM");
+			const vm = JSON.parse(runtime(["inspect", found[0]?.name ?? "", "--format", "json"])) as {
+				name: string;
+				status: string;
+				config: { labels: Record<string, string> };
+			};
+			assert.equal(vm.config.labels["banda.home"], home, "refusing a VM of another home");
+			return vm;
+		};
+		const listening = (name: string) =>
+			runtime(["exec", "--require-running", "--user", "1000:1000", name, "--", "python3", "/banda/ctl.py", "ping"])
+				.trim()
+				.split("\n")
+				.at(-1);
+		const runs = () => stamps.filter((stamp) => stamp.what.startsWith("msb"));
+		const field = await where("input:not([type=checkbox]):not([type=radio])");
+		say("\n## I. the proxy lost, then typing, then a click");
+		for (const how of ["vm", "process"]) {
+			const before = proxy();
+			assert.equal(before.status, "Running");
+			const well = await click(field);
+			say(`[${how}] a click while all is well: ${well.msb} runs of the runtime`);
+			if (how === "vm") runtime(["stop", before.name]);
+			else
+				runtime([
+					"exec",
+					"--require-running",
+					"--user",
+					"1000:1000",
+					before.name,
+					"--",
+					"/usr/local/bin/python3",
+					"-c",
+					"import os, signal\nfor p in os.listdir('/proc'):\n    try:\n        if p.isdigit() and int(p) != os.getpid() and b'mitmdump' in open(f'/proc/{p}/cmdline', 'rb').read():\n            os.kill(int(p), signal.SIGKILL)\n    except OSError:\n        pass",
+				]);
+			const lost = now();
+			const gone = () => (how === "vm" ? `its VM is ${proxy().status}` : `it answers ${listening(before.name)}`);
+			say(`[${how}] the proxy ${how === "vm" ? "VM was stopped" : "process was killed"}: ${gone()}`);
+			await delay(Number(process.env.BANDA_LATENCY_STOP_WAIT ?? 300));
+			const from = runs().length;
+			for (const text of "lost") await measured({ type: "text", text });
+			await measured({ type: "key", key: "Tab" });
+			await measured({ type: "mouse", action: "move", x: 300, y: 300 });
+			const during = runs().slice(from);
+			say(
+				`[${how}] 4 characters, a Tab and a pointer move with the proxy gone: ${during.length} runs of the runtime; ${gone()}`,
+			);
+			assert.equal(during.length, 0, "typing ran the runtime");
+			if (how === "vm") assert.equal(proxy().status, "Stopped", "typing started the proxy");
+			else assert.equal(listening(before.name), '{"up": false}', "typing started the proxy");
+			const repairing = await click(box);
+			const repair = runs().slice(from);
+			say(
+				`[${how}] the click ${(repairing.t0 - lost).toFixed(0)} ms after the loss took ${((repairing.done ?? 0) - repairing.t0).toFixed(0)} ms and repaired: ${repair.length} runs (${repair.map((stamp) => `${stamp.what.slice(4)} ${stamp.ms?.toFixed(0)}ms`).join(", ")})`,
+			);
+			assert.ok(repair.length >= 10, "the click after the loss ran the whole repair");
+			assert.ok(
+				repair.some((stamp) => stamp.what.startsWith(how === "vm" ? "msb start " : "msb exec ")),
+				"the repair brought the proxy back",
+			);
+			const after = proxy();
+			assert.equal(after.name, before.name);
+			assert.equal(after.status, "Running");
+			assert.equal(listening(after.name), '{"up": true}');
+			const again = await click(box);
+			say(`[${how}] the proxy is back (${listening(after.name)}); the next click: ${again.msb} runs of the runtime`);
+		}
+		// the form's POST goes out only through a proxy that was told the owner holds this tab
+		const submitted = now();
+		await click(field);
+		await measured({ type: "key", key: "Enter" });
+		await until("the form posted", () => new URL(view.url ?? PAGE).pathname !== new URL(PAGE).pathname, 30_000);
+		say(
+			`the form's POST went out as the owner's after the repairs: ${view.url} (${(now() - submitted).toFixed(0)} ms)`,
+		);
+	}
 
 	// F. through the app itself, in Chrome: real key events on the page's picture, to the paint that shows them
-	if (process.env.BANDA_LATENCY_APP !== "0") {
+	if (full && process.env.BANDA_LATENCY_APP !== "0") {
 		const { withPage } = await import("../test/smoke/chrome.ts");
 		// the field again: the clicks took the focus from it
 		await measured({ type: "key", key: "Tab" });

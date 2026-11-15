@@ -70,6 +70,12 @@ export type BoxSetup = {
 	readonly attachments: string;
 	/** Bring up the base runtime, reporting image preparation and accepting the box's shutdown signal. */
 	ensure(building?: () => void, shutdown?: AbortSignal): Promise<void>;
+	/**
+	 * Whether what leaves the box still goes through what the last bring-up left: a native computer's proxy, the one
+	 * that was told then and every time since, with no change to it under way. Asked at no cost, and false whenever
+	 * that is not known; absent for a box that has no such thing to say.
+	 */
+	intact?(): boolean;
 	/** The command that starts pi-env in the box, before its own `serve` arguments. */
 	readonly command: readonly string[];
 	/** Its egress proxy, when its network is closed but for one; a box without one is a test's. */
@@ -98,6 +104,7 @@ export type Box = {
 	/**
 	 * Repair it before a new effect on something already open in it, where part of it can go while the rest stays up
 	 * (a native computer's proxy); absent for a box whose loss ends its connection, which costs such an effect nothing.
+	 * A computer that is up and intact (`BoxSetup.intact`) is left as it is; any other is brought up again, whole.
 	 */
 	readonly recover?: () => Promise<void>;
 	/** The box as an `ExecutionEnv`, at `cwd` (default the workspace), with `env` added to every command's environment. */
@@ -208,7 +215,12 @@ export function openBox(setup: BoxSetup, log: (line: string) => void): Box {
 					},
 				}),
 		ensure,
-		...(setup.kind === "microvm" ? { recover: ensure } : {}),
+		// what its last bring-up left up, and stands as that left it, needs no repair
+		...(setup.kind === "microvm"
+			? {
+					recover: () => (!closed && state.state === "up" && setup.intact?.() === true ? Promise.resolve() : ensure()),
+				}
+			: {}),
 		env: (cwd, env) =>
 			new Environment({
 				connection,
