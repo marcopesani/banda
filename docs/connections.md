@@ -3,11 +3,9 @@
 Priority: **High**. Implementation status lives in [Status](status.md).
 
 Stored drafts, permissions and attempt admission use transactions. Credentials belong to accounts, never to the box;
-GitHub ships as a definition with its reads, scopes and objects, typed data read from the release
-([Connection definitions](connection-definitions.md)). DESIGN.md "Connections" defines accounts, one
+GitHub ships as a definition with its reads, scopes and objects, typed data read from the release. DESIGN.md "Connections" defines accounts, one
 connect flow and daemon-read objects; DESIGN.md "Watches" follows an object through the same declaration, reading and
-card. Agent-built connections and tools are gone; revisiting them is open work in
-[Connection definitions](connection-definitions.md).
+card. Agent-built connections and tools are gone; revisiting them is open work below.
 
 Gmail is a built-in daemon REST adapter: its definition declares scoped reads and approval-required writes, while
 the adapter calls Gmail's API directly. Its public desktop OAuth client id and client secret ship with Banda; both can be
@@ -69,25 +67,13 @@ in a throwaway home, at desktop and phone width.
 
 ## Open work
 
-- [x] Accounts: credentials, Settings, switches, the `account` parameter, bindings
+- [ ] Revisit connections and tools an owner or an agent defines themselves (DESIGN.md "Open"): a file an agent
+  writes and the owner accepts, beside the shipped definitions and passing the same schema, is the shape to start from
 - [ ] Replacement sign-in: CI fault qualification and owner acceptance for waiting drafts, reusable permissions and token refresh
-- [x] The connect card by code and by redirect; the callback page for a failed sign-in is plain HTML
-- [x] GitHub and Gmail scope choices live in a dialog; the card stays compact while the owner changes scopes and re-consents
-- [x] Agents using a real GitHub account, read-only in an isolated home
-- [ ] Slice 8's owner review
 - [ ] The `account` parameter is offered to every agent once one has two accounts of a connection: the registry has
   one schema per tool name; an agent with one account may leave it out
 - [ ] A connection whose definition names no `account` numbers its sign-ins and cannot tell one already known
-- [x] `objects:` and bounded account-bound readings; owner/agent/group unfurls; editable drafts on objects
-- [x] GitHub PRs, issues, Actions jobs and notification subjects, generated with the tool table
-- [x] Slice 9's final layout rechecks and full/deep qualification
-- [x] Owner-inline references: desktop/phone app walkthrough, with agent cards unchanged
-- [x] Owner-inline references: owner review
-- [ ] Slice 9's owner acceptance
 - [ ] Real notification-card acceptance with the hosted MCP server's required `notifications` scope
-- [x] Delete agent-built connections, `propose_connection`, extensions and agent-built tools
-- [ ] A connection is a definition banda ships and a choice the store holds, never a file in the workspace: built in
-  [Connection definitions](connection-definitions.md), waiting on its acceptance through the app
 - [ ] Logos as shipped assets on every card, event and draft of a connection; initials as the fallback
 - [ ] Drafts show hashes of referenced files: the first effect tool that refers to a box file stores it as a blob in its draft
 - [ ] Approvals on the floor confirmed with a passkey (DESIGN.md "Open"); today a tap approves them
@@ -97,47 +83,14 @@ in a throwaway home, at desktop and phone width.
 - [ ] Each call is a session of its own; no server notifications, resources or prompts
 - [ ] A server's notes reach the model as first listed; a disconnect forgets the listing
 - [ ] Reads by argument are exact values only; a prefix waits for a spike of how a real server routes it
-- [ ] Following in each followable kind's `objects:` entry, generated for GitHub's pull request and issue; a kind
-  without it cannot be followed and the card says so
-- [ ] One reading per (connection, account, object), kept fresh while a watch holds it, drawn by the card and read by
-  every watch on it; "as of" only when the daemon cannot look
-- [ ] Follow among the card's quiet actions; a followed card's line (who, until what); the followed states (following,
-  done, can't reach) in the specimen, light and dark, both widths
-- [ ] The event line's words from the kind's rules over the reading, the object card beneath, in the specimen
 - [ ] A feed with a cursor and a service's own subscription with its renewal, declared as data; GitHub has neither,
   and Slack's channel history is the first that needs it, as a paged list ([Slack](slack.md))
-- [x] Gmail REST: OAuth sign-in, profile, labels, search, message and thread reads; account-bound email objects and cards
-- [x] Gmail chat connection action: on the running throwaway app, Connect Gmail changed to Open Gmail / Waiting for Gmail; this verifies the chat action starts OAuth
-- [x] Gmail OAuth callback and account grant: the owner connected a real Google account and verified Gmail reads through the app
-- [ ] Gmail: complete the app walkthrough at desktop and phone widths, including the connection success toast and compact card; owner acceptance
-- [x] Gmail reads: bounded page tokens and canonical `gmail/<id>` references from search and thread reads; Banda email cards are the canonical view
-- [x] Gmail hardening: text attachment parts stay out of message bodies; long Unicode subjects use folded RFC 2047 words; redirect OAuth sign-in starts on the computer and connected accounts remain usable on paired devices
-- [ ] Gmail reads: try search pagination and thread cards through the running app; owner acceptance
-- [x] Gmail attachments: list metadata and retrieve bounded bytes through the daemon; never render HTML or expose credentials to the box
-- [x] Gmail send: show recipient, subject, body and held attachments in the existing approval draft; send only the approved content and account
-- [x] Gmail mailbox actions: archive, trash, read/unread and label changes as individually named, account-bound approvals
 - [ ] Gmail onboarding: Google OAuth verification and production publication for restricted/sensitive scopes remain external; the public client id ships with the adapter, least-privilege scope bundles and re-consent are wired
 - [ ] Gmail hardening: pagination limits, revoked/expired grants, and approved attachment content-hash verification are covered; bounded retry behavior, additional write/attachment fault coverage and review remain
 - [ ] Gmail: adversarial review and owner walkthrough of every shipped slice, including a throwaway account for send and mailbox changes
 - [ ] Google Calendar: reads (profile, calendars, events, one event, free/busy), `calendar/<id>` event cards, and approved writes (create with guests and a Meet link, change, answer, delete; `calendar.events` added by choice; made once across a crash by an event id from the effect's key) are in; a watch feed for changed events, recurring-event changes (this one or all), a real sign-in with the Calendar API enabled on the shipped client, and the owner walkthrough at desktop and phone widths remain
 - [ ] Google Contacts: reads (profile, search contacts and other contacts, one person) and `contacts/<id>` contact cards are in, and approved writes (add, change, delete a saved contact, with nothing for the owner to edit; `contacts` added by choice; a change sends nothing when the person already holds it and carries the person's etag; adding is not idempotent, so a crash asks the owner again); a real sign-in with the People API enabled on the shipped client and the write scope (confirming people/me shares the address under userinfo.email, the etag refusal's exact status and that createContact answers the new person), an agent resolving "email Ana" end to end, and the owner walkthrough at desktop and phone widths remain
-- [ ] Google Calendar: reads (profile, calendars, events, one event, free/busy) and `calendar/<id>` event cards are in; writes (create, RSVP, update), a watch feed for changed events, a real sign-in with the Calendar API enabled on the shipped client, and the owner walkthrough at desktop and phone widths remain
 - [ ] Google Drive: reads (profile, search, one file, a file's text: Docs as Markdown, every tab of a Sheet as CSV through the Sheets API, which takes the Drive scope but must be enabled on the shipped client's project (the first tab alone, said so, until it is), Slides and text files as text, bounded) and `drive/<id>` file cards are in; so are the changes an agent drafts and the owner approves exactly as drafted, with nothing to edit (create a Doc from Markdown or a Sheet from CSV, replace a Doc's text, rename, trash, and a Sheet's cells: add rows to a tab, write a range, add a tab, under the `spreadsheets` scope, the choice "Change your spreadsheets", sensitive rather than restricted, or either Drive write scope; a Doc's end: append paragraphs with headings and bullets through the Docs API, idempotent by the text already there, under `documents`, "Change your documents", or either Drive write scope; a file's comments are read with their anchors and replies, and a reply, resolving or not, is posted in the owner's name under a Drive write scope; no sharing, no permanent delete). The Sheets and Docs APIs must be enabled on the shipped client's project; the reads fall back to the first tab and say so until they are. A create carries a hash of its effect's key as an app property and looks for it first, so a run again after a crash makes no second file. `drive.readonly` stays the required scope; `drive.file` (files banda makes or the owner opens with it: non-sensitive) is the choice "Create files", and `drive` (every file: restricted) the choice "Change any of your files", for changing files banda did not make. Drive offers no precondition on an update, so a Doc's replace checks its modified time just before it writes. A real sign-in with the write scopes, the owner walkthrough at desktop and phone widths, and Google's security assessment before publishing beyond test users (`drive.readonly` and `drive` are restricted scopes) remain
-- [ ] Slack as a built-in connection, designed in [Slack](slack.md): the owner in one Slack team as the account (a user token by
-  PKCE on loopback), threads, channels, searches and people as objects, posting on the floor, following as paged lists within Slack's
-  history limit, reactions and files: built and tested through stage 3; the sweep in CI, `files:read` on the shipped app
-  and the owner's walkthrough remain (its open work)
-- [ ] Files: Drive and Docs adapters with scoped reads, rich file objects/previews, and approval-backed writes; no Google Workspace MCP token store
-- [x] Harnesses: ACP client, sessions, asks, notes, Stop, the wake; shipped files, banda's adapters and the owner's own; the fault sweep (detached commands included)
-- [x] Harnesses: Claude Code, Codex and pi each fixed a scratch repository through the app; Claude Code's background command was killed with its session
-- [x] Harnesses: an adversarial review (store growth, the home as a project, Stop before open, several asks, detached commands, blind asks) triaged and fixed
-- [x] Harnesses: desktop and phone app walkthrough of delegated status, concurrent sessions, approvals and Stop
-- [x] Harnesses: starts need no extra draft; enablement states host access and the harness's own permissions
-- [x] Harnesses: continuation and revocation regressions, native versus summary mode disclosure, real Codex native resumption through the app; owner authorized landing after final checks
-- [x] Harnesses: the session card, asks and steps sheet in the owner's words (DESIGN.md "Harnesses"): humanized step
-  lines, project name on the card, state in words and announced, folded steps sheet that follows the end, one ask
-  whole at a time with kind verbs and bounded "Show all", quiet ask notification; verified in the real app against a
-  throwaway daemon at desktop and phone width, with axe clean on every screen
 - [ ] Harnesses: Windows process supervision before offering execution on Windows
 - [ ] Harnesses: Gemini CLI, OpenCode, Cursor and Goose are not shipped: each failed or was missing here; they need a spike and a sign-in each
 - [ ] Harnesses: their asks reach the owner only in the web app, not on other gateways; the agent still hears the end

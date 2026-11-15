@@ -1,5 +1,5 @@
 /**
- * How long checking a hostile face takes, for the re-audit every open-bot-avatar upgrade needs (docs/agents.md).
+ * How long checking a hostile face takes, for the re-audit every open-bot-avatar upgrade needs (docs/agents-and-groups.md).
  * Each path fills the parser's caps (6,000 characters, 400 segments) with large curves behind fifteen thin subpaths,
  * the shape that makes upstream's raster scan slowest; the "within" rows stop at banda's point budget, the slowest a
  * face that is not refused can be. `banda` is validateBoundedAvatar, which a face's every read runs on the event loop;

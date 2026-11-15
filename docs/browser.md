@@ -28,7 +28,6 @@ Follow [Delivery](delivery.md) and the relevant gates in [Verification](verifica
 Recheck these items against current code before implementation; an unchecked item is not a freshly verified
 defect. Remove it only when its fix and acceptance evidence are recorded in a commit.
 
-- [x] One browser for the box: chats take it in turns, and each taking it blanks the page another left (now one browser per agent, a tab per chat)
 - [ ] An address opened or a link clicked reaches any public host, and what the agent types or a page writes there with no session of the owner's goes unasked: what a URL or a form carries out is bounded only by public-host reads
 - [ ] Site isolation is off in the box's browser (one tree to read and mask), and Chromium runs without its sandbox: the container and its uid are the boundary
 - [ ] Uploads (a file chooser) and downloads are refused; a multipart body Chromium does not report whole never matches its hash, and is held at the proxy as a ticket

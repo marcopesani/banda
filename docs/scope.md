@@ -47,5 +47,4 @@ Entry points: ../biome.json, ../mise.toml, ../package.json, ../src/server/routes
 Recheck these items against current code before implementation; an unchecked item is not a freshly verified
 defect. Remove it only when its fix and acceptance evidence are recorded in a commit.
 
-- [ ] Choosing the model provider (a local one) from the app: the chat names it, the config file sets it
 - [ ] Inventory the current feature/provider/platform support contract and make checks independent of nested worktrees (scope.md)

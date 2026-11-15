@@ -1,6 +1,6 @@
 # Slack
 
-Priority: **High**. Implementation status lives in [Status](status.md). The connection is built through stage 3
+Priority: **High**. Implementation status lives in [Status](status.md). The connection is built
 (the stages and what remains are below); what the spikes observed is in "What the spikes found", and what is still
 marked *spike* is not yet a DESIGN.md rule ([Delivery](delivery.md)). An adversarial review of the first draft is
 folded in; what it changed is in the commit that added this file.
@@ -446,8 +446,7 @@ What the Slack app needs, for whoever configures it:
 
 ## Stages
 
-One PR on `main` (begun on `watches`, PR #24, since merged), in ordered commits by stage, each with its own tests and
-app walkthrough ([the plan](slack-plan.md)). The spikes below are stage 0.
+Built in three stages, each with its own tests. The spikes below are stage 0.
 
 1. **Connect and read.** The file, the adapter's reads behind the per-account budget (every caller), sign-in by PKCE
    on loopback, the account's handle, the four kinds' cards drawn from held readings, unfurls in agent prose and the
@@ -498,18 +497,6 @@ AGENTS.md principle 6). Observed, not inferred:
 
 ## Open work
 
-- [x] Stage 0: the spikes, recorded by `scripts/spike-slack.ts`; a second team's limit, a shared channel and the
-  refresh token's 30 days remain
-- [ ] Stage 1: the file, the adapter's reads under the budget, PKCE sign-in, the handle, cards and unfurls,
-  `post_message` on the floor; fake Slack in tests; the owner's team through the app at both widths
-- [ ] Stage 2: the paged list as connection data, thread and channel followed, scenarios and the sweep's Slack
-  scenarios are built, three watches sharing one budget among them (test/watch-slack.test.ts,
-  test/slack-watch.browser.test.ts); the sweep run in CI and a real busy channel in a forked home remain
-- [ ] Stage 3: search and person followed, `add_reaction`, files through the daemon are built and tested; the
-  reaction's kill sweep run in CI, `files:read` added to the shipped app, and the owner's walkthrough (a search watch
-  over a day, a reaction approved for a task, a file opened at both widths) remain
-- [x] The queue spaces calls before Slack refuses: learned from Slack's first refusal (test/slack-limits.test.ts),
-  rather than a rate the definition declares
 - [ ] The names an account looked up (a person's handle, a channel's name) are kept for the daemon's life: a rename
   shows its old name in cards and a post's mentions until a restart; they want an age
 - [ ] A file whose own type is `text/html` is taken as Slack answered it, so without `files:read` Slack's sign-in page

@@ -8,7 +8,7 @@ skipped due time, the runs a day reached) is an error line that counts as unread
 a row opens the routine's detail in the same panel: Pause or Resume, Edit (the owner's own editor, in its place), and
 its runs. Each run is recorded on the routine's record in the commit that fired or skipped it, and the commit that
 ended its Turn says how it ended and where its wake is in the chat; what it said is read from the chat as the feed
-reads it, so a run that spoke opens its line there and a quiet one opens nothing. Watches and monitors wait for their own design (DESIGN.md "Open").
+reads it, so a run that spoke opens its line there and a quiet one opens nothing. Watches have their own section ([Watches](watches.md)); monitors wait for their design (DESIGN.md "Open").
 
 Entry points: ../src/core/routines.ts, ../src/core/schedule.ts, ../src/core/control.ts, ../src/server/routines.ts,
 ../web/src/app/routines.tsx and ../web/src/chat/RoutineEditor.tsx.
@@ -28,16 +28,5 @@ by asking and from the panel, leave, return to its event and reply, inspect its 
 
 ## Open work
 
-- [x] Wakes in the agent's chat; event lines; the Inbox deleted
-- [x] `job` becomes `routine` everywhere
-- [x] The panel's routine list and editor
-- [x] The panel's "next in …" is computed when the daemon pushes, so it does not tick on its own
-- [x] A routine's detail: its runs in words (said, said nothing, failed, skipped, waiting, running), ten and "Show
-  earlier", a run that spoke opening its line in the chat
 - [ ] The row says what the last run said ("Said: 2 PRs need you", "Said nothing"): the record now keeps each run, so
   the control view can say it; reading the chat on every push is the cost to weigh
-- [x] Tried through the app at phone and desktop width, light and dark: a routine's detail, its runs opening the
-  chat at their line (one the feed does not draw says so), Pause, Edit and Back (test/routine-detail-app.browser.test.ts;
-  screenshots in screenshots/routine-detail-review-*.png)
-- [x] Watches return on their design (DESIGN.md "Watches"); the object side is in [Connections](connections.md);
-  monitors wait for theirs (DESIGN.md "Open")

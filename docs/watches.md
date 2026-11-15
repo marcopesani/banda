@@ -7,9 +7,8 @@ A watch follows one object through a connection and wakes its agent when it chan
 is in [Connections](connections.md); this section owns the watch itself: its file, task, health, tool and the panel's
 Watching list. Monitors (a command's output in the box) wait for their own design (DESIGN.md "Open").
 
-Entry points, once built: src/core/watches.ts (the file, the task, the looks), src/server/watches.ts and the
-Watching list in web/src/app/. Commit 4613028 holds an earlier spike (watch.ts, the GitHub rules, a fault worker on a
-watched pull request) whose shapes predate routines, `objects:` and the readings doc: take from it, never restore it.
+Entry points: ../src/core/watches.ts (the file, the task, the looks), ../src/server/watches.ts,
+../web/src/app/watches.tsx and ../web/src/chat/Watch.tsx.
 
 ## Work and acceptance
 
@@ -68,8 +67,5 @@ returned to and merged, at desktop and phone width.
   change), should a home hold more watches than that leaves room for (the readings doc's growth with many watches,
   #40)
 - [ ] `npm run home:fork` carries no connection sign-ins, so a fork wants a sign-in per connection before a pass (#36)
-- [ ] Spike before slice 2: the readings doc keeps 300 and evicts the oldest first, so a held reading must be
-  skipped; GitHub's hosted MCP server still answers `pull_request_read`'s get, get_reviews, get_comments and
-  get_check_runs
 - [ ] With the mail connection: Gmail's history id as a `pages` read, and a service subscription with renewal, as
   data ([Connections](connections.md)); push through a relay stays in DESIGN.md "Open"

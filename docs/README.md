@@ -17,7 +17,7 @@ reaches them.
 | Order | Section | Main outcome |
 |---|---|---|
 | 1 | [Chat](chat.md) | The specimen of the whole app; then the shell, the panel, settings and the chat's polish, wired to the daemon |
-| 2 | [Agents and groups](agents.md) | Ordinary agents made by the owner; groups of equals in the band |
+| 2 | [Agents and groups](agents-and-groups.md) | Ordinary agents made by the owner; groups of equals in the band |
 | 3 | [Routines](routines.md) | Routines in their agent's chat, as events |
 | 4 | [Connections](connections.md) | Accounts, one connect flow, GitHub's objects in the chat |
 | 5 | [Watches](watches.md) | A watch on an object, its wakes in the chat, health, the panel's Watching list |
@@ -38,7 +38,8 @@ pulled forward when required to make an earlier mechanism safe.
 [Multimodality](multimodality.md) covers model capability visibility, attachments and browser screenshots.
 [Memory](memory.md) and [Substrate](substrate.md) hold memory's provenance work and upstream gaps. [Behavioral
 evals](evals.md) proposes longitudinal agent quality experiments alongside, not in place of, the verification gates.
-[Scope](scope.md) keeps the support matrix and reproducible checks.
+[Scope](scope.md) keeps the support matrix and reproducible checks. [Slack](slack.md) is a design
+that belongs to [Connections](connections.md).
 
 No section is complete merely because its checks exist: it must work through the running app, and the owner reviews
 each slice.
