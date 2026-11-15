@@ -79,15 +79,18 @@ for (const width of [390, 1440]) {
 				expect(await page.run(`document.querySelector('#download').href.endsWith('${extension}')`)).toBe(true);
 				expect(
 					await page.run(`new Set([...document.querySelectorAll('a[data-file][href]')].map(a => a.dataset.file)).size`),
-				).toBe(4);
+				).toBe(5);
 				expect(await page.run(`document.querySelectorAll('a[data-file*="/mac/x64/"]').length`)).toBe(0);
 				expect(
 					await page.run(
 						`[...document.querySelectorAll('a[data-file][href]')].every(a => a.href.includes('/releases/download/') && a.getBoundingClientRect().height > 0)`,
 					),
 				).toBe(true);
-				expect(await page.run(`document.querySelectorAll('a[data-file^="desktop/linux/"]').length`)).toBe(0);
-				expect(await page.run(`document.querySelectorAll('span[data-file="desktop/linux/x64/deb"]').length`)).toBe(2);
+				// the published page links the Linux desktop too, since 0.1.0-alpha.14 carries its .deb
+				expect(await page.run(`document.querySelectorAll('a[data-file="desktop/linux/x64/deb"][href]').length`)).toBe(
+					2,
+				);
+				expect(await page.run(`document.querySelectorAll('span[data-file="desktop/linux/x64/deb"]').length`)).toBe(0);
 				expect(await page.run(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
 			});
 		});
