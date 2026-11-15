@@ -15,3 +15,5 @@ Unsigned pre-release for Apple silicon Macs on macOS 14 or newer, and for Linux 
 The command-line archive includes Node.js. Unpack it and put `banda/bin` on your PATH. The desktop app and `banda serve` use the same home.
 
 `SHA256SUMS` covers every file here. The Mac and Linux downloads carry a virtual machine with a Linux kernel and Debian guest images. Their source code and license notices are the `banda-*-sources-*.tar` and `banda-*-notices.tar` files of this release, and `release-materials.json` binds them to each download by SHA-256. `RELEASE-SOURCES.md` says what they hold, what they leave out and how to check them. The release workflow assembled them; no person reviewed this set before publication.
+
+Each download also carries the third-party license notices for what is inside it: `banda/app/licenses` in the command-line archive, and the same folder inside the desktop app, which its tray menu opens (Third-party licenses). `README.txt` there says which file covers what. The desktop app includes FFmpeg as a shared library built by Electron, licensed under the LGPL, version 2.1 or later; its source code is in the `banda-*-sources-*.tar` files.
