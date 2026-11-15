@@ -37,15 +37,11 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] Credential swap for signing schemes (SigV4, HMAC bodies, OAuth refresh)
 - [ ] Credentials for the proxy's hosts are written by hand into `auth/egress.json`: the app adds connections' credentials, not these
 - [ ] A replayed response is cut at 1 MB; a held WebSocket is never sent from its ticket: only an allowed host opens one
-- [ ] An approved `git push` lands once, but git itself was answered 403 and reported failure: the agent hears the send
-  only when woken with how it ended
 - [ ] Rethink how a held request is shown to the owner (issue #49): the card is still its method, address, headers and
   body; one command can hold several requests, one card each; the `ask_hosts` card does not say that approving it also
   sends the held requests waiting for those hosts
 - [ ] Qualify the rebased routine-request recovery under CI faults at transfer, store commit, acknowledgement and send
   boundaries, including archive while waiting, archive during an admitted send and a kill before tool intake
-- [ ] A model that re-runs a held command opens a second card for the same request (a retried `git push`, a POST):
-  intake could find a live release of the same request hash and open none
 - [ ] A group member's hidden chat is woken with how its held requests ended straight in that chat, outside its group
   turn, so its reply never reaches the room
 - [ ] A release parked by the restart limit while it waits its turn holds up the younger ones of its chat; `revive()`

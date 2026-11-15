@@ -100,7 +100,8 @@ export type EgressControl = {
 };
 
 export type IntakeSource = "tool" | "recovery";
-export type NotSent = "websocket" | "limit" | "missing" | "inactive";
+/** `repeat`: the same request as one of its chat's already waiting on the owner (`sameRequest`). */
+export type NotSent = "websocket" | "limit" | "missing" | "inactive" | "repeat";
 export type KeptTicket = HeldRequest & { readonly kept: number; readonly notSent?: NotSent };
 export type Retained = { readonly ids: readonly string[]; readonly notSent: Readonly<Record<string, NotSent>> };
 
@@ -157,6 +158,26 @@ export function requestHash(request: Pick<HeldRequest, "method" | "host" | "port
 		.update(`${request.method.toUpperCase()}\n${host}:${request.port}\n${request.path}\n`)
 		.update(Buffer.from(request.body, "base64"))
 		.digest("hex");
+}
+
+/**
+ * Whether two held requests are one request held twice: the same chat's, and everything the box sent the same, byte
+ * for byte (the method, the scheme, the host and port, the path with its query, every header in order, a credential
+ * of its own among them, and the body), whatever their tickets and times. Nothing is normalized: a request that
+ * differs in any of it is another request, which the owner is asked about.
+ */
+export function sameRequest(a: HeldRequest, b: HeldRequest): boolean {
+	return (
+		a.chat === b.chat &&
+		a.method === b.method &&
+		a.scheme === b.scheme &&
+		a.host === b.host &&
+		a.port === b.port &&
+		a.path === b.path &&
+		a.body === b.body &&
+		a.headers.length === b.headers.length &&
+		a.headers.every(([key, value], i) => key === b.headers[i]?.[0] && value === b.headers[i]?.[1])
+	);
 }
 
 /**
@@ -501,12 +522,17 @@ export async function intake(
 							? "It writes, and too many of your requests already wait on the owner, so they were not asked about " +
 								"this one and it will not be sent. Wait for those, or ask the owner to allow the host with ask_hosts, " +
 								"then run the command again."
-							: "It writes, so the owner decides: they have been asked, or allowed it already. You will be told how " +
-								"it ended, with the response if it was sent. There is nothing to call: go on or end your turn, and do " +
-								"not send it again yourself." +
-								(ownCredential(held.headers, held.path)
-									? ""
-									: ` Before your next writes there, you can ask the owner to allow ${permittedHost(held)} with ask_hosts.`)),
+							: kept.notSent[held.ticket] === "repeat"
+								? "It is the same request as one of yours already waiting on the owner, so they were not asked again " +
+									"and this one will not be sent. The one waiting is sent once if they approve, and you will be told " +
+									"how it ended: do not send it again before that."
+								: "It writes, so the owner decides: they have been asked, or allowed it already. Your command was " +
+									"answered 403 in its place, so it may say it failed (a git push does): that is this hold, not its " +
+									"server refusing it. You will be told how it ended, with the response if it was sent. There is " +
+									"nothing to call: go on or end your turn, and do not send it again yourself." +
+									(ownCredential(held.headers, held.path)
+										? ""
+										: ` Before your next writes there, you can ask the owner to allow ${permittedHost(held)} with ask_hosts.`)),
 		);
 	}
 	return lines.length === 0 ? "" : `\n\n[banda] ${lines.join("\n[banda] ")}`;
