@@ -1,5 +1,17 @@
 import { expect, it } from "vitest";
-import { parseLinuxPackageResult } from "../scripts/verify-linux-package.ts";
+import { assertLinuxLoaderOutput, parseLinuxPackageResult } from "../scripts/verify-linux-package.ts";
+
+it("rejects loader dependency errors even when the loader exits zero", () => {
+	const stdout = "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f0000000000)\n";
+	expect(() => assertLinuxLoaderOutput({ stdout, stderr: "" })).not.toThrow();
+	for (const output of [
+		{ stdout: "", stderr: "" },
+		{ stdout: "\tlibnss3.so => not found\n", stderr: "" },
+		{ stdout, stderr: "/opt/banda/banda-desktop: /lib/libc.so.6: version `GLIBC_2.38' not found\n" },
+		{ stdout, stderr: "error while loading shared libraries: libnss3.so: cannot open shared object file\n" },
+	])
+		expect(() => assertLinuxLoaderOutput(output)).toThrow();
+});
 
 const identity = {
 	sourceCommit: "a".repeat(40),

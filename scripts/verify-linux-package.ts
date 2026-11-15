@@ -41,6 +41,12 @@ type Completion = Static<typeof Completion>;
 type Result = Static<typeof Result>;
 const succeeded = (command: Completion) => command.status === 0 && command.signal === null && command.error === null;
 
+export function assertLinuxLoaderOutput(output: { stdout: string; stderr: string }) {
+	assert.ok(output.stdout.trim(), "The loader did not report dependencies");
+	assert.doesNotMatch(output.stdout, /=>\s+not found(?:\r?\n|$)/, "The loader reported a missing library");
+	assert.equal(output.stderr, "", "The loader reported dependency errors");
+}
+
 export function parseLinuxPackageResult(value: unknown, expected: Static<typeof Identity>): Result {
 	assert.ok(Value.Check(Identity, expected), "Unknown expected package or source identity");
 	assert.ok(Value.Check(Result, value), "Invalid package dependency evidence");
@@ -206,8 +212,6 @@ dpkg-query -W -f='\${Package}\t\${Version}\n'
 				"--no-install-recommends",
 				"-o",
 				"Dpkg::Use-Pty=0",
-				"-o",
-				"Dpkg::Options::=--status-fd=1",
 				"install",
 				"/candidate.deb",
 			],
@@ -226,7 +230,7 @@ cat /var/log/dpkg.log /var/log/apt/history.log
 			["node", "/opt/banda/resources/banda/node/node"],
 			["electron", "/opt/banda/banda-desktop"],
 		]) {
-			const version = await run(role, [
+			const stdout = await run(role, [
 				"exec",
 				"--user",
 				"1000:1000",
@@ -236,10 +240,13 @@ cat /var/log/dpkg.log /var/log/apt/history.log
 				"HOME=/tmp",
 				"PATH=/usr/bin:/bin",
 				"LANG=C.UTF-8",
+				"/lib64/ld-linux-x86-64.so.2",
+				"--list",
 				binary,
-				"--version",
 			]);
-			assert.match(version, /^v\d+\.\d+\.\d+$/, `${role} did not print its version`);
+			const completion = result.commands.at(-1);
+			assert.ok(completion);
+			assertLinuxLoaderOutput({ stdout, stderr: await readFile(join(output, completion.stderr), "utf8") });
 		}
 		assert.equal(await sha256(candidate), identity.packageSha256, "Candidate changed during the check");
 	} catch (error) {

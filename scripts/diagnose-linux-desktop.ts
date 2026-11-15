@@ -218,10 +218,29 @@ const fields = [
 const cgroup = (unit: string) => `/system.slice/${unit}`;
 const passed = (completion: Completion) =>
 	completion.status === 0 && completion.signal === null && completion.error === null;
-function checked<T extends TSchema>(schema: T, value: unknown): Static<T> {
-	if (!Value.Check(schema, value)) throw new Error("Invalid diagnostic evidence.");
+function checked<T extends TSchema>(schema: T, value: unknown, context = "diagnostic evidence"): Static<T> {
+	if (!Value.Check(schema, value)) {
+		const errors = [...Value.Errors(schema, value)].map(({ instancePath, message }) => ({ instancePath, message }));
+		throw new Error(`Invalid ${context}: ${JSON.stringify(errors)}`);
+	}
 	return value;
 }
+export const linuxDesktopPageExpression = `({ width: innerWidth, height: innerHeight, origin: location.origin, heading: document.querySelector('h1')?.textContent ?? '', firstRun: document.body?.innerText.includes("Pick the model I think with") ?? false, requireType: typeof require, processType: typeof process, bridgeType: typeof window.bandaDesktop?.chooseFolder, bridgeFrozen: Object.isFrozen(window.bandaDesktop) })`;
+
+export function parseLinuxDesktopPage(response: unknown) {
+	const evaluated = checked(
+		Type.Object({
+			result: Type.Object({ value: Type.Optional(Type.Unknown()) }),
+			exceptionDetails: Type.Optional(Type.Unknown()),
+		}),
+		response,
+		"Runtime.evaluate response",
+	);
+	if (evaluated.exceptionDetails !== undefined)
+		throw new Error(`Runtime.evaluate threw: ${JSON.stringify(evaluated.exceptionDetails)}`);
+	return checked(Type.Omit(Page, ["screenshotSha256"]), evaluated.result.value, "Runtime.evaluate page");
+}
+
 function assertUnit(unit: Static<typeof Unit>, result: Result) {
 	assert.ok(result.original);
 	const original = parseDiagnosticIdentity(result.original.status);
@@ -676,7 +695,7 @@ function fixture(binary: string, args: string[], env: NodeJS.ProcessEnv, address
 		},
 	};
 }
-async function socket(url: string) {
+async function socket(url: string, output: string) {
 	assert.match(url, /^ws:\/\/127[.]0[.]0[.]1:[1-9][0-9]*\/devtools\/browser\/[a-f0-9-]+$/);
 	const ws = new WebSocket(url);
 	await new Promise<void>((done, fail) => {
@@ -720,7 +739,7 @@ async function socket(url: string) {
 					finish();
 					fail(new Error(`CDP timed out: ${method}`));
 				}, 10000);
-				const receive = (event: MessageEvent) => {
+				const receive = async (event: MessageEvent) => {
 					try {
 						assert.ok(typeof event.data === "string" && event.data.length < 16 << 20);
 						const response = checked(
@@ -730,9 +749,11 @@ async function socket(url: string) {
 								error: Type.Optional(Type.Unknown()),
 							}),
 							JSON.parse(event.data),
+							`CDP ${method} envelope`,
 						);
 						if (response.id !== id) return;
 						finish();
+						await save(output, `cdp-${id}.json`, { atNs: now(), method, sessionId: sessionId ?? null, response });
 						if (response.error) fail(new Error(JSON.stringify(response.error)));
 						else done(response.result);
 					} catch (error) {
@@ -926,6 +947,7 @@ async function main() {
 	let cdp: Awaited<ReturnType<typeof socket>> | undefined;
 	let owned = false;
 	let lastUnit: Static<typeof Unit> | null = null;
+	let phase = "prepare";
 	try {
 		result.original = await snapshot(process.pid);
 		const identity = parseDiagnosticIdentity(result.original.status);
@@ -1065,9 +1087,12 @@ async function main() {
 			args.every((argument) => !/[$%]/.test(argument)),
 			"Systemd expansion character in launch arguments.",
 		);
+		phase = "launch";
 		const startup = await command("/usr/bin/sudo", args);
 		await save(output, "startup.json", startup);
 		assert.ok(passed(startup));
+		lastUnit = await unitState(unit);
+		phase = "daemon-ready";
 		const daemon = await published.promise;
 		const endpoint = await debugging.promise;
 		const port = new URL(endpoint).port;
@@ -1075,8 +1100,10 @@ async function main() {
 		assert.equal(listener.split("\n").length, 1);
 		assert.equal(listener.split(/\s+/)[3], `127.0.0.1:${port}`, "CDP is not loopback-only.");
 		await save(output, "debug-listener.json", { endpoint, listener });
-		cdp = await socket(endpoint);
+		phase = "cdp-connect";
+		cdp = await socket(endpoint, output);
 		const active = cdp;
+		phase = "daemon-status";
 		await until(async () => {
 			const response = await fetch(`http://127.0.0.1:${daemon.port}/api/status`, {
 				headers: { authorization: `Bearer ${daemon.token}` },
@@ -1084,6 +1111,7 @@ async function main() {
 			}).catch(() => undefined);
 			return response?.ok ? true : undefined;
 		});
+		phase = "Target.getTargets";
 		const target = await until(async () => {
 			const response = checked(
 				Type.Object({ targetInfos: Type.Array(Type.Object({ type: Text, targetId: Text, url: Text })) }),
@@ -1093,32 +1121,31 @@ async function main() {
 				(target) => target.type === "page" && target.url.startsWith(`http://127.0.0.1:${daemon.port}/`),
 			);
 		});
+		phase = "Target.attachToTarget";
 		const { sessionId } = checked(
 			Type.Object({ sessionId: Text }),
 			await active.send("Target.attachToTarget", { targetId: target.targetId, flatten: true }),
 		);
 		const pages: Static<typeof Page>[] = [];
 		for (const width of [1440, 390]) {
+			phase = `Emulation.setDeviceMetricsOverride ${width}`;
 			await active.send(
 				"Emulation.setDeviceMetricsOverride",
 				{ width, height: 900, deviceScaleFactor: 1, mobile: false },
 				sessionId,
 			);
+			phase = `Runtime.evaluate ${width}`;
 			const page = await until(async () => {
-				const response = checked(
-					Type.Object({ result: Type.Object({ value: Type.Optional(Type.Unknown()) }) }),
+				const value = parseLinuxDesktopPage(
 					await active.send(
 						"Runtime.evaluate",
-						{
-							expression: `({ width: innerWidth, height: innerHeight, origin: location.origin, heading: document.querySelector('h1')?.textContent ?? '', firstRun: document.body.innerText.includes("Pick the model I think with"), requireType: typeof require, processType: typeof process, bridgeType: typeof window.bandaDesktop?.chooseFolder, bridgeFrozen: Object.isFrozen(window.bandaDesktop) })`,
-							returnByValue: true,
-						},
+						{ expression: linuxDesktopPageExpression, returnByValue: true },
 						sessionId,
 					),
 				);
-				const value = checked(Type.Omit(Page, ["screenshotSha256"]), response.result.value);
 				return value.heading === "Sancho" && value.firstRun && value.width === width ? value : undefined;
 			});
+			phase = `Page.captureScreenshot ${width}`;
 			const shot = checked(
 				Type.Object({ data: Type.String({ maxLength: 12 << 20 }) }),
 				await active.send("Page.captureScreenshot", { format: "png" }, sessionId),
@@ -1127,6 +1154,7 @@ async function main() {
 			await writeFile(file, Buffer.from(shot.data, "base64"), { mode: 0o600, flag: "wx" });
 			pages.push({ ...page, screenshotSha256: await hash(file) });
 		}
+		phase = "shell-evidence";
 		const state = await unitState(unit);
 		lastUnit = state;
 		const shell = await snapshot(Number(state.ExecMainPID));
@@ -1194,6 +1222,7 @@ async function main() {
 		};
 		await save(output, "started.json", result.started);
 		assertStarted(result);
+		phase = "native-quit";
 		const window = await requireCommand(
 			"/usr/bin/xdotool",
 			["search", "--onlyvisible", "--pid", String(shell.pid), "--name", "banda"],
@@ -1237,7 +1266,12 @@ async function main() {
 			input,
 		};
 	} catch (error) {
-		result.beforeRescue = { kind: "failed", error: message(error), lastUnit };
+		result.beforeRescue = { kind: "failed", error: `${phase}: ${message(error)}`, lastUnit };
+		await save(output, "failure.json", {
+			atNs: now(),
+			phase,
+			error: error instanceof Error ? error.stack : String(error),
+		});
 	} finally {
 		result.cleanup.atNs = now();
 		if (owned) {

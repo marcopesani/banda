@@ -87,8 +87,9 @@ jobs:
             package-lock.json
             desktop/package-lock.json
       - name: Cache verified native compiler inputs and Cargo intermediates
+        id: native-runtime-cache
         if: matrix.computer != ''
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: release/cache/computer/runtime
           key: native-runtime-${{ matrix.target }}-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
@@ -210,6 +211,12 @@ jobs:
       - run: npm run cli:pack
         env:
           BANDA_COMPUTER_IMAGES: ${{ matrix.computer != '' && format('{0}/computer-images', runner.temp) || '' }}
+      - name: Retain the verified native build before package diagnostics
+        if: matrix.computer != '' && steps.native-runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: release/cache/computer/runtime
+          key: native-runtime-${{ matrix.target }}-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
       - run: node scripts/smoke-release.ts
       - name: Verify the native Linux computer through the app
         if: inputs.native_computer && startsWith(matrix.target, 'linux-')
