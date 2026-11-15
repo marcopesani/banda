@@ -52,6 +52,26 @@ export function keepsPiEnv(file: string, { platform, arch }: Target): boolean {
 	return file.startsWith("pi-env-linux-") || file === `pi-env-${os}-${arch}` || file === `pi-env-${os}-${arch}.exe`;
 }
 
+/**
+ * What a release never loads from `node_modules`, by file name: source maps (Node reads them only under
+ * `--enable-source-maps`, which nothing passes) and TypeScript, declarations and sources alike (Node refuses to strip
+ * types from a file under `node_modules`, so none of it can run). Everything else stays, licenses included.
+ */
+export function neverLoaded(file: string): boolean {
+	return /\.(map|[cm]?tsx?)$/.test(file);
+}
+
+/** Removes every file under `directory` that `neverLoaded` names, and returns how many went. */
+export async function prune(directory: string): Promise<number> {
+	let removed = 0;
+	for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
+		if (!entry.isFile() || !neverLoaded(entry.name)) continue;
+		await rm(join(entry.parentPath, entry.name));
+		removed++;
+	}
+	return removed;
+}
+
 /** The POSIX launcher. It follows its own symlinks, so `ln -s …/bin/banda /usr/local/bin/banda` works. */
 export const POSIX_LAUNCHER = `#!/bin/sh
 # banda: the bundled Node.js runs the bundled CLI.
@@ -108,10 +128,17 @@ async function stageApp(root: string, out: string, target: Target): Promise<void
 		if (path === "computer") await stageMicrovmBundle({ root, out, target });
 		else await cp(join(root, path), join(app, path), { recursive: true });
 	}
+	await stageDependencies(app, target);
+}
+
+/** The runtime dependencies of the `package.json` and lockfile in `app`, with only what this target loads of them. */
+export async function stageDependencies(app: string, target: Target): Promise<void> {
 	run("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], app);
-	const bin = join(app, "node_modules", "@earendil-works", "pi-env", "bin");
+	const modules = join(app, "node_modules");
+	const bin = join(modules, "@earendil-works", "pi-env", "bin");
 	for (const file of await readdir(bin))
 		if (!keepsPiEnv(file, target)) await rm(join(bin, file), { recursive: true, force: true });
+	await prune(modules);
 }
 
 async function stageNode(out: string, target: Target, cache: string): Promise<void> {
