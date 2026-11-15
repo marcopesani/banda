@@ -2,7 +2,7 @@
  * `ask_hosts` (DESIGN.md "The box", Network): an agent asks the owner, in one approval, to allow it several hosts at
  * once (a relay list, an API and its CDN), names or patterns (`*.example.com`, `*`). Approved, each is a host permission
  * for the agent that asked, as if the owner had added it to its Hosts: its writes there, WebSockets included, go
- * straight through. The owner may trim the list before approving. It offers no scope: a permission covering it would let
+ * straight through, but for one carrying a credential of its own. The owner may trim the list before approving. It offers no scope: a permission covering it would let
  * an agent grant itself hosts, so every call asks.
  */
 import type { Context } from "@earendil-works/chord";
@@ -29,6 +29,11 @@ const parameters = Type.Object({
 	}),
 	why: Type.String({ minLength: 1, maxLength: 500, description: "What you need them for, in the owner's words." }),
 });
+
+/** What allowing a host does not cover, as the agent is told with it: running such a command again holds it again. */
+const CREDENTIALED =
+	"A request carrying a credential of its own (a Cookie, an Authorization or key header, a token in its address) " +
+	"is still held there and the owner asked each time: do not send that one again while it waits.";
 
 /** The hosts of a draft, one per line, as the owner may have edited them. */
 const linesOf = (text: unknown) =>
@@ -92,7 +97,8 @@ export function askHostsTool(): EffectTool<typeof parameters> {
 		description:
 			"Ask the owner to allow you hosts, several at once, before you need them: anything you send there (any method, " +
 			"WebSockets included, e.g. Nostr relays or a streaming API) then goes straight through, from any of your " +
-			"chats, until the owner takes it back. Reads never need this. Ask for what the task needs: exact names first, " +
+			"chats, until the owner takes it back; but a request carrying a credential of its own (a Cookie, an " +
+			"Authorization or key header, a token in its address) still waits for the owner each time. Reads never need this. Ask for what the task needs: exact names first, " +
 			"a pattern (*.example.com) when the names are many under one domain, * only when the owner asked for it.",
 		parameters,
 		effect: "idempotent",
@@ -143,7 +149,7 @@ export function askHostsTool(): EffectTool<typeof parameters> {
 				output: [
 					{
 						type: "text",
-						text: `The owner allowed ${done.hosts.join(", ")}: what you send there now goes straight through, WebSockets included. ${sending}`,
+						text: `The owner allowed ${done.hosts.join(", ")}: what you send there now goes straight through, WebSockets included. ${CREDENTIALED} ${sending}`,
 					},
 				],
 			};

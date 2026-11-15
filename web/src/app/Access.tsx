@@ -180,7 +180,7 @@ export function AccessTab({
 
 /**
  * Allow this agent a host as the owner, not answering an ask: anything it sends there goes straight through,
- * WebSockets included (a relay, a live API). `*.example.com` covers every name under it, `*` every host.
+ * WebSockets included (a relay, a live API), but for a request carrying a credential of its own. `*.example.com` covers every name under it, `*` every host.
  */
 function AllowHost({
 	agent,
@@ -196,7 +196,7 @@ function AllowHost({
 	return (
 		<Block
 			title="Hosts"
-			note={`Anything ${agent.name} sends there goes straight through, without asking you, WebSockets included. Use *.example.com for every name under it, or * for every host.`}
+			note={`Anything ${agent.name} sends there goes straight through, without asking you, WebSockets included; a request carrying a password, key or cookie of its own still asks you. Use *.example.com for every name under it, or * for every host.`}
 		>
 			{hosts.length === 0 ? (
 				<p className="rounded-field bg-paper-2 px-3.5 py-3 text-ui text-ink-2">

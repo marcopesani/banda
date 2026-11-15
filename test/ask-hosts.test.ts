@@ -129,7 +129,11 @@ describe("ask_hosts", () => {
 				["propose_send", { _host: "*.damus.io" }, "host", LEAD],
 			]);
 			expect(await permittedHosts(harness)).toEqual({ [String(first.chat)]: ["*.damus.io", "nos.lol"] });
-			expect((await results(harness, first.chat)).at(-1)).toContain("The owner allowed nos.lol, *.damus.io");
+			const allowed = (await results(harness, first.chat)).at(-1);
+			expect(allowed).toContain("The owner allowed nos.lol, *.damus.io");
+			// never a promise the proxy does not keep: what it still holds there is said with it
+			expect(allowed).toContain("A request carrying a credential of its own");
+			expect(allowed).toContain("is still held there and the owner asked each time");
 			// nothing held waited on the owner for them: what was held is run again
 			expect((await results(harness, first.chat)).at(-1)).toContain("Run the command again.");
 			const events = (await harness.snapshot(ActivityLog, context))!.events.map((e) => e.what);
