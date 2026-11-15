@@ -4,9 +4,14 @@ The release keeps the browser and current feature scope, including groups, memor
 connections and current provider choices. Qualify their existing supported behavior rather than
 hiding features to obtain a passing release. Keep the one-daemon architecture and product vocabulary.
 
-The desktop and CLI release targets are macOS on Apple silicon, Windows x64, and Linux x64 and ARM64.
-The phone release targets Android ARM64. Intel Macs are unsupported.
-The native Mac desktop requires macOS 14 or newer.
+0.1.0's desktop and CLI release targets are macOS 14 or newer on Apple silicon, and Linux x64 on Debian 12 or newer
+and Ubuntu 22.04 or newer (the desktop as a .deb). The phone release targets Android ARM64. Windows x64 and Linux
+ARM64 are built in CI and are not release targets. Intel Macs are unsupported.
+
+0.1.0 states two limits instead of fixing them. The agents share one computer, so the box does not separate one
+agent or chat from another ([Box isolation](isolation.md)); the README and SECURITY.md say so to the owner. The Mac
+app is signed ad hoc, not with a Developer ID, and nothing updates itself: releases are installed by hand
+([Operations](operations.md)).
 
 ## Work
 
@@ -31,7 +36,7 @@ The native Mac desktop requires macOS 14 or newer.
 6. Use the browser live, take over for sign-in, hand it back, approve supported sends, and sign out.
 
 Also accept existing memory, group and provider flows. Responsive phone-width review remains
-required; remote pairing and off-network access remain separate work in [Operations](operations.md).
+required; the phone app's remaining work is in [Operations](operations.md).
 
 ## Acceptance
 

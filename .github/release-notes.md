@@ -4,7 +4,9 @@ Unsigned pre-release for Apple silicon Macs on macOS 14 or newer, and for Linux 
 - The browser downloads on first use. General settings shows its preparation and running pages.
 - Files and installed tools persist under `~/.banda/computer`.
 
-**Mac.** Open the DMG and drag banda to Applications. This build is unsigned and not notarized. Follow [Apple's instructions for opening an unidentified app](https://support.apple.com/en-us/102445) if you choose to install it.
+**Mac.** Open the DMG and drag banda to Applications. This build is not signed with an Apple Developer ID and not notarized, so macOS refuses to open it the first time. Follow [Apple's instructions for opening an unidentified app](https://support.apple.com/en-us/102445) (System Settings, Privacy & Security, Open Anyway) if you choose to install it.
+
+**Updating.** banda does not update itself. To update, download the new release and install it over the old one.
 
 **Linux.** Install the package with `sudo apt install ./banda-*-linux-amd64.deb`. The computer needs hardware virtualization: your account must be able to read and write `/dev/kvm` (on most distributions, `sudo usermod -aG kvm $USER`, then sign in again). It runs under X11 and Wayland.
 

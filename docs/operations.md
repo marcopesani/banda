@@ -62,15 +62,13 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] Bring a qualified native runtime on every platform. The reviewed Apple-silicon bundle includes it; Windows
   keeps its existing backend and Linux native acceptance remains open
 - [ ] Sign and notarize the desktop app (Developer ID, Windows code signing), then add updates that back up first and
-  activate atomically. Pre-release binaries are unsigned and update by hand
+  activate atomically. Deferred by the owner's decision and not a gate for 0.1.0: there is no Apple Developer
+  account, so the Mac app ships signed ad hoc, opened as Apple describes for an unidentified developer, and every
+  platform updates by hand
 - [ ] Run the release workflow end to end and fix what each runner turns up (Windows fast tests, linux arm64 deb).
   Then install each artifact on a clean machine: the desktop app and the CLI archive are tried only on macOS arm64
 - [ ] Windows: a graceful daemon stop (Quit ends the process outright), and a pass over atomic renames and paths
 - [ ] A smaller release: bundle the daemon so provider SDKs and web-only packages don't ship whole
-- [ ] The phone on a real network: a real Android phone on cellular, the daemon on home Wi-Fi, across NAT through
-  n0's relays, pairs and chats, and survives sleep, backgrounding and a network change. The shell (`mobile/`) pairs,
-  chats, keeps its key across a daemon restart and pairs again once revoked on the arm64 emulator over n0; no real
-  phone has run it
 - [ ] A signed release APK: the release workflow builds the APK unsigned, then signs it as
   `banda-<version>-android-arm64.apk` in a job of its own that runs no npm or Gradle, and refuses to tag one without
   banda's key in the repository's secrets (BANDA_ANDROID_KEYSTORE_BASE64, _KEYSTORE_PASSWORD, _KEY_ALIAS,
