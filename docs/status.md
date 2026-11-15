@@ -7,8 +7,8 @@ execution after the run ends, and their existing approvals appear in that agent'
 requests and queued result continuations. Captured tool authority prevents permissions and pending drafts from
 crossing a tool's removal or definition replacement, while preserving same-definition sign-in and relisting.
 Focused backend checks, desktop/phone app walkthroughs and independent source review pass. Combined qualification
-covers the full ordinary suite, a fresh Mac package and candidate-ref fault CI. Native Linux work is held until
-this recovery slice is qualified; its startup abort remains undiagnosed.
+covers the full ordinary suite, an earlier candidate's Mac package and fresh candidate-ref fault and Docker CI.
+Linux x64 staged native use now passes. Installed Linux desktop and final release-artifact qualification remain open.
 
 Every pi-ai provider and servers of the owner's are in review on `feat/custom-providers` (#112): Add a provider in
 Settings and, searchable, at first run; cloud forms for Cloudflare, Bedrock, Vertex and Azure; Ollama, LM Studio,
@@ -46,24 +46,32 @@ Retained proxy requests now recover without another command, into a once-only ow
 resolution. Ordinary checks, typecheck, build and independent review pass after rebasing onto main. Native macOS ARM64
 restart walkthroughs pass at desktop and phone widths. Receipt fault scenarios pass in CI. Owner acceptance remains open.
 
-The bundled computer is being integrated onto main. The published macOS ARM64 candidate has packaged desktop/phone-width
-walkthrough evidence, including lazy browser preparation, guarded sends and restart persistence. General shows
-browser preparation and retry, and the packaged app preserves that status through proxy recovery. Linux x64 and
-ARM64 source builds, ABI and smoke checks pass, but neither has native acceptance. The ARM64 runner has no KVM device.
-The x64 command VM aborts before its agent relay starts; its proxy boots. The abort's cause and native qualification
-remain open.
-The current recovery fix makes guest command sessions connect only to running VMs and orders proxy startup with
-policy updates. Native packaging builds that CLI capability from pinned source. Ordinary suites and real native
-execution-boundary checks, packaged recovery walkthroughs and all six fault shards and Docker in CI pass. Mac,
-Windows and Android artifact builds pass. The owner accepted the source and notice packet for the unsigned Mac
-pre-release; its public-download and source reconstruction checks pass.
-Windows retains the existing backend while its native runtime boundaries are unresolved ([Operations](operations.md)).
-macOS support requires Apple silicon; Intel Macs are no longer a release target. Public browser download delivery
-passes for alpha.12. Clean-machine distribution remains open.
-Workspace refreshes come from tool completion and owner actions; startup and explicit reads reconcile missed
-changes. Native Mac proxy and command-VM recovery have throwaway-home evidence, including concurrent homes;
-CI fault and Docker qualification pass for the published authority and publication changes. The owner verified
-Mac sleep/wake. Prolonged outages, broader recovery qualification and preflight latency remain open.
+The bundled computer candidate targets Apple silicon Mac and Linux x64 desktops. The landing page advertises
+those desktops and command-line archives, with Android in its separate phone section. Windows, Intel Mac and Linux
+ARM downloads are no longer advertised. Local ordinary checks and independent desktop/phone-width landing review pass.
+The next release version is 0.1.0-alpha.13. Main landing and the tag wait for the remaining release gates.
+
+The published macOS ARM64 alpha.12 has packaged desktop/phone-width walkthrough evidence, including lazy browser
+preparation, guarded sends and restart persistence. Its public-download and source reconstruction checks pass.
+The owner accepted its source and notice packet and verified Mac sleep/wake. The rebased candidate's exact packaged
+Mac qualification and alpha.13 source and notice review remain open. Mac support requires Apple silicon and macOS 14.
+
+Linux x64 staged native app use passes at desktop and phone widths, including command and browser use, proxy repair,
+guarded sends, persistent folders and complete cleanup. Only the KVM supplementary group is added to the ordinary
+runner identity. Distinct VM generations retain files and every recorded history entry. This restart occurs within
+one verifier process. Browser delivery uses a local pinned archive, so Linux public download delivery remains open.
+Actual Debian inspection binds its embedded runtime and shell to the staged proof. Explicit runtime library and
+glibc requirements are declared; clean Debian APT installation and binary loading still need CI evidence.
+The inert Linux service experiment preserves original main exits 0 and 23 with live detached descendants, then
+cleans each owned cgroup, including after an injected observer failure. Installed Electron startup, effective renderer
+confinement, natural Quit and persistence across a new daemon process remain open. Linux ARM64 has source-build and
+smoke evidence but no KVM runner. It is not a desktop release target. Windows retains its existing backend for development.
+
+Guest command sessions connect only to running VMs and proxy startup follows policy updates. Native packaging builds
+that capability from pinned source. Ordinary suites, native execution-boundary checks, packaged Mac recovery
+walkthroughs and fresh six-shard fault and Docker CI pass. Workspace refreshes come from tool completion and owner
+actions; startup and explicit reads reconcile missed changes. Concurrent native Mac homes have recovery evidence.
+Prolonged outages, broader recovery qualification, preflight latency and clean-machine distribution remain open.
 
 Agent search is in review on `feat/agent-search`: messages, shared group histories and artifacts use the same
 retrieval as Cmd+K, with bounded results and source reads. Recall now searches saved facts only. Validation and
