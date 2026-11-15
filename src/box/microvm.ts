@@ -624,6 +624,9 @@ export function microvmBox(input: string): BoxSetup {
 				if (!found || !answering) untie();
 			}
 			if (!answering) {
+				// A VM keeps its files through a stop, the config it was last told among them: it is told what the store
+				// says now before its guard listens, so the guard never serves what it was told before it went.
+				if ((await push()) !== "told") throw new Error("The computer's network guard could not be configured.");
 				await current.detach(
 					{ name: names.proxy, user: "1000:1000", argv: ["/usr/local/bin/python3", "/banda/start.py"] },
 					startup.signal,

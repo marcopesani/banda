@@ -46,7 +46,9 @@ const realExecFile = childProcess.execFile;
 // biome-ignore lint/suspicious/noExplicitAny: a pass-through wrapper
 (childProcess as any).execFile = (file: string, args: readonly string[], ...rest: any[]) => {
 	const started = now();
-	const what = `msb ${args.slice(0, 2).join(" ")}`;
+	// a command run in a VM is named by what it runs there
+	const guest = args[0] === "exec" ? args.slice(args.indexOf("--") + 1).map((arg) => arg.split("/").at(-1)) : [];
+	const what = `msb ${(guest.length > 0 ? ["exec", ...guest.slice(0, 3)] : args.slice(0, 2)).join(" ")}`;
 	const callback = rest.at(-1);
 	if (typeof callback === "function")
 		// biome-ignore lint/suspicious/noExplicitAny: a pass-through wrapper

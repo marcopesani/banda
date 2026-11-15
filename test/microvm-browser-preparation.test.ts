@@ -470,6 +470,47 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 				await close();
 			}
 		});
+		it("tells the proxy the store's config before its guard starts, each time it starts", async () => {
+			const { ensure, egress, stopProxy, killGuard, guardLog, close } = await fixture(true);
+			try {
+				let reads = 0;
+				egress.source(async () => {
+					reads++;
+					return { credentials: [] };
+				});
+				await ensure();
+				expect(await guardLog()).toEqual(["config", "start", "config"]);
+				expect(reads).toBe(2);
+				// a guard that answers is told once, as before
+				await ensure();
+				expect(await guardLog()).toEqual(["config", "start", "config", "config"]);
+				// its VM stopped keeps the config file it had: the store is read again and told before the guard listens
+				await stopProxy();
+				await ensure();
+				expect((await guardLog()).slice(4)).toEqual(["config", "start", "config"]);
+				await killGuard();
+				await ensure();
+				expect((await guardLog()).slice(7)).toEqual(["config", "start", "config"]);
+				expect(reads).toBe(7);
+			} finally {
+				await close();
+			}
+		});
+		it("a proxy that cannot be told before its guard starts is stopped, and its guard is not started", async () => {
+			const { ensure, egress, stopProxy, proxyState, guardLog, close } = await fixture(true);
+			try {
+				await ensure();
+				await stopProxy();
+				egress.source(async () => {
+					throw new Error("the store is closed");
+				});
+				await expect(ensure()).rejects.toThrow("could not be configured");
+				expect(await proxyState()).toContain('"status":"Stopped"');
+				expect((await guardLog()).filter((line) => line === "start")).toHaveLength(1);
+			} finally {
+				await close();
+			}
+		});
 		it("the guard's process lost alone fells the tether, and the next preparation starts and ties another", async () => {
 			const { setup, ensure, killGuard, proxyState, knocks, guardLog, close } = await fixture(true);
 			const intact = () => setup.intact?.() === true;
