@@ -1,9 +1,18 @@
 import type { JsonObject, Tx } from "@earendil-works/pi-durable";
 import { acceptedAgent } from "./agents.ts";
 import { toolWords } from "./ask.ts";
-import { acceptedConnection, accountsOn, Connected, mayUse, readsFor, signsIn, toolName } from "./connections.ts";
+import {
+	acceptedConnection,
+	accountsOn,
+	Connected,
+	type Connection,
+	mayUse,
+	readsFor,
+	signsIn,
+	toolName,
+} from "./connections.ts";
 import { Groups } from "./groups.ts";
-import { type ObjectRead, type ObjectRef, readArgs } from "./objects.ts";
+import { type ObjectKind, type ObjectRead, type ObjectRef, readArgs } from "./objects.ts";
 import { agentOfChat } from "./permissions.ts";
 
 /** A read a kind needs that the owner's switch holds off (`Connected.off`), for either reason it can be off. */
@@ -20,6 +29,23 @@ export const offWords = ({ tool, words, why, service }: OffRead): string =>
 	why === "owner"
 		? `You turned off "${words ?? toolWords(tool)}" for ${service}. Turn it back on in ${service}'s details, under Connections.`
 		: `"${words ?? toolWords(tool)}" is off until you turn it on in ${service}'s details, under Connections.`;
+
+/**
+ * The tools of `kind`'s required reads that `connection`, as listed, does not list: why `objectStanding` finds nothing
+ * for an object of that kind though the connection is there (GitHub's hosted server at its default URL lists no
+ * discussion tools). Empty when the connection is not listed at its version: then it is not connected, not short.
+ */
+export async function unlistedReads(
+	tx: Tx,
+	connection: Connection & { readonly version: string },
+	kind: ObjectKind,
+): Promise<string[]> {
+	const listed = (await tx.doc(Connected)).connections[connection.name];
+	if (listed?.version !== connection.version) return [];
+	return Object.values(kind.reads)
+		.filter((read) => !read.optional && listed.tools[read.tool] === undefined)
+		.map((read) => read.tool);
+}
 
 /** One member's authority, never the union of a room's members. Also used at each remote call and publication. */
 export async function objectAccess(tx: Tx, chat: number, ref: ObjectRef, account: string) {
