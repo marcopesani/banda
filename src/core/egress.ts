@@ -526,9 +526,10 @@ export async function intake(
 								? "It is the same request as one of yours already waiting on the owner, so they were not asked again " +
 									"and this one will not be sent. The one waiting is sent once if they approve, and you will be told " +
 									"how it ended: do not send it again before that."
-								: "It writes, so the owner decides: they have been asked, or allowed it already. You will be told how " +
-									"it ended, with the response if it was sent. There is nothing to call: go on or end your turn, and " +
-									"do not send it again yourself." +
+								: "It writes, so the owner decides: they have been asked, or allowed it already. Your command was " +
+									"answered 403 in its place, so it may say it failed (a git push does): that is this hold, not its " +
+									"server refusing it. You will be told how it ended, with the response if it was sent. There is " +
+									"nothing to call: go on or end your turn, and do not send it again yourself." +
 									(ownCredential(held.headers, held.path)
 										? ""
 										: ` Before your next writes there, you can ask the owner to allow ${permittedHost(held)} with ask_hosts.`)),

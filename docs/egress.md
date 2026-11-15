@@ -37,8 +37,6 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] Credential swap for signing schemes (SigV4, HMAC bodies, OAuth refresh)
 - [ ] Credentials for the proxy's hosts are written by hand into `auth/egress.json`: the app adds connections' credentials, not these
 - [ ] A replayed response is cut at 1 MB; a held WebSocket is never sent from its ticket: only an allowed host opens one
-- [ ] An approved `git push` lands once, but git itself was answered 403 and reported failure: the agent hears the send
-  only when woken with how it ended
 - [ ] Rethink how a held request is shown to the owner (issue #49): the card is still its method, address, headers and
   body; one command can hold several requests, one card each; the `ask_hosts` card does not say that approving it also
   sends the held requests waiting for those hosts

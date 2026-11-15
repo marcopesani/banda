@@ -906,7 +906,9 @@ long as it runs.
   sent the same (method, address, headers, body), so one request has one card and one approval sends it once; once the
   owner answered, the same request is a new one. Approved, the proxy sends exactly the stored request,
   once, and the agent is woken with how it ended, the response fenced as foreign data; how a send ended is stored in
-  the commit that logs it, so a restart after it asks nothing again. The task doing this belongs to the chat, as the
+  the commit that logs it, so a restart after it asks nothing again. The command that made a held request was answered
+  403 and may have reported a failure (a `git push` does): what it reported says nothing of how the request ended,
+  and the agent is told so when it is held and when it ended. The task doing this belongs to the chat, as the
   command that held the request has already ended. A chat's held requests that can go leave in the order they were
   held, one at a time, and wake the agent once; one waiting on the owner holds none up, from whenever it starts to wait.
   Stop ends those about to go unasked, keeps the owner's cards, and still tells the agent what left in its name.

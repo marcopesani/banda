@@ -1955,6 +1955,38 @@ describe("a held write's release", () => {
 		);
 	}, 180_000);
 
+	it("a command answered 403 for the hold is no evidence of how its request ended: the agent is told so, held and sent", async () => {
+		const s = setup();
+		const { harness, close } = await s.open(await tempHome());
+		try {
+			const first = await s.say(harness);
+			const push = held(first.chat, {
+				host: "github.com",
+				path: "/me/repo.git/git-receive-pack",
+				headers: [["Content-Type", "application/x-git-receive-pack-request"]],
+			});
+			s.proxy.pending.set(first.chat, [push]);
+			const { wait } = await nextAsk(harness, first.turn);
+			await until(turnOver(harness, first.turn));
+			// the command's result: git was answered 403 and said it failed, which is the hold and not its server
+			const [said] = await results(harness, first.chat);
+			expect(said).toContain("Your command was answered 403 in its place, so it may say it failed (a git push does)");
+			expect(said).toContain("that is this hold, not its server refusing it");
+			await approve(harness, wait!.key);
+			await until(() => done(harness, first.turn));
+			expect(s.proxy.sent).toEqual([push]);
+			const [told] = await released(harness, first.chat);
+			// in the daemon's own words, before the fence: it left once whatever git reported, and how to see what landed
+			const [words] = told?.split("<held-request-result>") ?? [];
+			expect(words).toContain("One that was sent left once, exactly as its command made it");
+			expect(words).toContain("whatever the command reported then (a git push says it failed)");
+			expect(words).toContain("`git fetch` shows what the remote has now");
+			expect(told).toContain("Sent. The server answered 201 Created");
+		} finally {
+			await close();
+		}
+	});
+
 	it("what the server answered cannot close the fence it is told in", async () => {
 		const s = setup();
 		const { harness, close } = await s.open(await tempHome());
