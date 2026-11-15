@@ -1,6 +1,7 @@
 /**
- * First run: the first agent, and the model providers to pick from. The one picked signs the owner in, or takes a key
- * where it has no sign-in; one screen, no other step. Then the chat opens with the agent's first words.
+ * First run: the first agent, one line on what agents do, and the model providers to pick from. The one picked signs
+ * the owner in, or takes a key where it has no sign-in; one screen, no other step. Then the chat opens with the
+ * agent's first words.
  */
 import { ChevronRightIcon, SearchIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -87,6 +88,10 @@ export function FirstRun({
 				<h1 className="mt-2 text-display font-semibold text-ink">Sancho</h1>
 				<p className="text-body text-ink-2">
 					I'm the first of your band. Pick the model I think with, and we can start.
+				</p>
+				<p className="text-ui text-ink-3">
+					Agents browse, write and run routines on a computer of their own. What they send through your accounts waits
+					for your OK, unless you allowed it.
 				</p>
 			</div>
 			{searchable ? (
