@@ -31,6 +31,7 @@ import {
 } from "../lib/api.ts";
 import type { SegmentFile } from "../lib/chat.ts";
 import { useReturnFocus } from "../lib/return-focus.ts";
+import { saveAndSay } from "../lib/save-file.ts";
 import { sizeOf } from "../lib/size.ts";
 
 /** A language as people name it, by the highlighter's id. */
@@ -130,14 +131,8 @@ function useBytes(chat: number, file: SegmentFile, mimeType: string | undefined,
 	);
 }
 
-/** Save a file as the device saves a download. */
-async function download(chat: number, file: SegmentFile) {
-	const url = await bytesOf(chat, file);
-	const link = document.createElement("a");
-	link.href = url;
-	link.download = file.name;
-	link.click();
-}
+/** Save a file as the device saves a download, and say how it went (save-file.ts). */
+const download = (chat: number, file: SegmentFile) => saveAndSay({ name: file.name, url: () => bytesOf(chat, file) });
 
 export function FilePart({ chat, file }: { chat: number; file: SegmentFile }) {
 	const [open, setOpen] = useState(false);

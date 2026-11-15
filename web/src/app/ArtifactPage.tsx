@@ -24,6 +24,7 @@ import { type ArtifactView, api, blobFile, blobPreview, type Preview } from "../
 import { boxNote, byWords, pageDocument, parseCsv, versionNote } from "../lib/artifacts.ts";
 import { fileName } from "../lib/chat.ts";
 import { languageOf } from "../lib/highlight.ts";
+import { saveAndSay } from "../lib/save-file.ts";
 import { openFileOf } from "./FilePart.tsx";
 
 const TEXT = new Set(["markdown", "text", "table", "page"]);
@@ -212,11 +213,9 @@ export function ArtifactPage({
 						className="text-ink-2"
 						aria-label="Download"
 						onClick={() =>
-							void blobFile(version.sha).then((made) => {
-								const link = document.createElement("a");
-								link.href = made;
-								link.download = artifact.path.split("/").at(-1) ?? "artifact";
-								link.click();
+							void saveAndSay({
+								name: artifact.path.split("/").at(-1) ?? "artifact",
+								url: () => blobFile(version.sha),
 							})
 						}
 					>
