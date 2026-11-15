@@ -122,6 +122,22 @@ describe("staging a release", () => {
 		}
 	});
 
+	it("gives a release no package the daemon never imports", async () => {
+		const { dependencies } = (await import("../package.json", { with: { type: "json" } })).default as {
+			dependencies: Record<string, string>;
+		};
+		const files = (await readdir("src", { recursive: true })).filter((file) => file.endsWith(".ts"));
+		const imported = new Set<string>();
+		for (const file of files) {
+			const text = await readFile(join("src", file), "utf8");
+			for (const [, name] of text.matchAll(
+				/(?:from|import\(|resolve\()\s*"(@[\w.-]+\/[\w.-]+|[a-z][\w.-]*)(?:\/[^"]*)?"/g,
+			))
+				imported.add(name ?? "");
+		}
+		expect(Object.keys(dependencies).filter((name) => !imported.has(name))).toEqual([]);
+	});
+
 	it("launches the bundled CLI with the bundled Node, passing every argument", () => {
 		expect(POSIX_LAUNCHER.startsWith("#!/bin/sh\n")).toBe(true);
 		expect(POSIX_LAUNCHER).toContain('exec "$root/node/node" "$root/app/dist/cli/index.js" "$@"');
