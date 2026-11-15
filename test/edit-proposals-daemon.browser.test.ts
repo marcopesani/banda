@@ -7,9 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
 	createModels,
 	fauxAssistantMessage,
@@ -17,15 +15,14 @@ import {
 	fauxToolCall,
 	type Context as ModelContext,
 } from "@earendil-works/pi-ai";
-import { createServer as createViteServer } from "vite";
 import { expect, it } from "vitest";
 import { defaultAvatarFace } from "../src/core/avatar-face.ts";
 import { startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
-import type { ControlView, Item } from "../src/server/api.ts";
+import type { ControlView, Item, ShownWait } from "../src/server/api.ts";
 import { githubObjectDefinition, startGithubObjects } from "./fixtures/github-objects.ts";
 import { hostBox } from "./fixtures/host-box.ts";
-import { skipShippedSkills, tempHome, until as untilEver, viteCacheDir } from "./helpers.ts";
+import { skipShippedSkills, tempHome, until as untilEver, webServer } from "./helpers.ts";
 import { hasChrome, type Page, withPage } from "./smoke/chrome.ts";
 
 /** `untilEver`, bounded: a state that never comes fails naming what it waited on, well before the test's own timeout. */
@@ -116,12 +113,14 @@ async function typeOver(page: Page, field: string, text: string): Promise<void> 
 	else await page.input("Input.insertText", { text });
 }
 
-for (const [width, height] of [
-	[1440, 1000],
-	[390, 844],
+for (const [width, height, delivery] of [
+	[1440, 1000, "before approval"],
+	[390, 844, "before approval"],
+	[1440, 1000, "after approval"],
+	[390, 844, "after approval"],
 ] as const)
 	it.skipIf(!hasChrome())(
-		`the owner edits a pull request, an agent, a change to the lead and a routine before accepting them, at ${width}px`,
+		`the owner edits ${delivery === "before approval" ? "a pull request, agents and a routine" : "a pull request"}, with history arriving ${delivery}, at ${width}px`,
 		async () => {
 			const shots = process.env.BANDA_EDIT_SHOTS;
 			const fake = await startGithubObjects();
@@ -174,7 +173,15 @@ for (const [width, height] of [
 						stopReason: "toolUse",
 					});
 				}
-				return fauxAssistantMessage([fauxToolCall(plan[0], plan[1] as never)], { stopReason: "toolUse" });
+				return fauxAssistantMessage(
+					[
+						...(plan[0] === "github__create_pull_request"
+							? [fauxToolCall("message_user", { text: "I prepared the pull request for review." })]
+							: []),
+						fauxToolCall(plan[0], plan[1] as never),
+					],
+					{ stopReason: "toolUse" },
+				);
 			};
 			faux.setResponses(Array.from({ length: 400 }, () => respond as never));
 			const daemon = await startDaemon({ home, port: 0, models, box: hostBox(home), shipped, log: () => {} });
@@ -213,22 +220,32 @@ for (const [width, height] of [
 				});
 			const items = async (chat: number) => (await api<{ items: Item[] }>(`/chats/${chat}/items?after=0`)).items;
 
-			let vite: Awaited<ReturnType<typeof createViteServer>>;
-			const listener = createServer((req, res) => vite.middlewares(req, res));
-			vite = await createViteServer({
-				configFile: fileURLToPath(new URL("../web/vite.config.ts", import.meta.url)),
-				cacheDir: await viteCacheDir(),
-				server: {
-					middlewareMode: true,
-					hmr: { server: listener },
-					proxy: { "/api": { target: base, changeOrigin: true, headers: { origin: base } } },
-				},
+			let releaseHistory = () => {};
+			const history = new Promise<void>((resolve) => {
+				releaseHistory = resolve;
+			});
+			let receivedHistory = () => {};
+			const historyHeld = new Promise<void>((resolve) => {
+				receivedHistory = resolve;
+			});
+			let holdHistory = true;
+			const server = await webServer({
+				server: { proxy: { "/api": { target: base, changeOrigin: true, headers: { origin: base } } } },
+				plugins: [
+					{
+						name: "delayed-history",
+						configureServer(vite) {
+							vite.middlewares.use((req, _res, next) => {
+								if (!holdHistory || !/^\/api\/chats\/\d+\/items\?/.test(req.url ?? "")) return next();
+								receivedHistory();
+								void history.then(next);
+							});
+						},
+					},
+				],
 			});
 			try {
-				await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
-				const address = listener.address();
-				if (!address || typeof address === "string") throw new Error("No app port");
-				const app = `http://127.0.0.1:${address.port}`;
+				const app = server.origin;
 				await withPage(`${app}/#token=${token}`, { width, height }, async (page) => {
 					/** Light and dark, of what is on screen now, with `card` in view. */
 					const snap = async (name: string, card?: string) => {
@@ -240,7 +257,7 @@ for (const [width, height] of [
 								`document.documentElement.classList.remove('light', 'dark'); document.documentElement.classList.add('${theme}')`,
 							);
 							await page.run("new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
-							await page.shoot(`${shots}/${width}-${theme}-${name}.png`);
+							await page.shoot(`${shots}/${width}-${delivery.replaceAll(" ", "-")}-${theme}-${name}.png`);
 						}
 						await page.run(`document.documentElement.classList.remove('light', 'dark')`);
 					};
@@ -255,7 +272,7 @@ for (const [width, height] of [
 					await snap("pr-drafted", pr);
 					// the daemon refuses what is not text, or not offered as text, whatever the page sends
 					const wait = await until(async () =>
-						(await api<{ waits: { key: string; chat: number }[] }>("/status")).waits.find((w) => w.chat === chat),
+						(await api<{ waits: ShownWait[] }>("/status")).waits.find((w) => w.chat === chat),
 					);
 					for (const edits of [{ owner: "evil" }, { repo: "other" }, { head: "evil" }, { base: "release" }])
 						expect(
@@ -279,9 +296,49 @@ for (const [width, height] of [
 					).toMatch(/only an approval, approved, carries edits/);
 					expect(fake.calls.filter((c) => c.tool === "create_pull_request")).toEqual([]);
 
-					await page.run(`${pr}.querySelector('[aria-label="Edit title"]').click()`);
+					await historyHeld;
+					expect(wait.ask.type).toBe("approval");
+					if (wait.ask.type !== "approval") throw new Error("Expected a pull request approval");
+					expect(wait.ask.scopes?.[0]?.scope).toBe("task");
+					expect(
+						await page.run(`${pr}.querySelector('[role="checkbox"]').parentElement.querySelector('label').textContent`),
+					).toBe(wait.ask.scopes?.[0]?.words);
+					await page.click(`${pr}.querySelector('[role="checkbox"]')`);
+					expect(await page.run(`${pr}.querySelector('[role="checkbox"]').getAttribute('aria-checked')`)).toBe("true");
+					await page.click(`${pr}.querySelector('[aria-label="Edit title"]')`);
 					await page.until(`${pr}.querySelector('input')`);
 					await typeOver(page, `${pr}.querySelector('input')`, "Owner's title");
+					expect(await page.run(`${pr}.querySelector('input')?.value`)).toBe("Owner's title");
+					expect(await page.run(`!!document.querySelector('[aria-label="Loading the chat"]')`)).toBe(true);
+					await page.run(
+						`window.approvalInput = ${pr}.querySelector('input'); window.approvalInput.setSelectionRange(2, 9, 'backward')`,
+					);
+					expect(await page.run(`document.activeElement === window.approvalInput`)).toBe(true);
+					await snap("history-held", pr);
+					if (delivery === "before approval") {
+						holdHistory = false;
+						releaseHistory();
+						await page.until(`!document.querySelector('[aria-label="Loading the chat"]')`);
+						await page.until(`document.body.innerText.includes('I prepared the pull request for review.')`);
+						await snap("history-loaded", pr);
+						expect(await page.run(`${pr}.querySelector('input')?.value`)).toBe("Owner's title");
+						expect(await page.run(`${pr}.querySelector('input') === window.approvalInput`)).toBe(true);
+						expect(await page.run(`document.activeElement === window.approvalInput`)).toBe(true);
+						expect(
+							await page.run(
+								`[window.approvalInput.selectionStart, window.approvalInput.selectionEnd, window.approvalInput.selectionDirection]`,
+							),
+						).toEqual([2, 9, "backward"]);
+						expect(await page.run(`${pr}.querySelector('[role="checkbox"]').getAttribute('aria-checked')`)).toBe(
+							"true",
+						);
+						const source = (await items(chat)).find(
+							(item) =>
+								item.role === "assistant" && item.calls?.some((call) => call.name === "github__create_pull_request"),
+						);
+						expect(source).toBeDefined();
+						expect(await page.run(`${pr}.closest('[data-entry]').getAttribute('data-entry')`)).toBe(String(source?.id));
+					}
 					await page.run(`${pr}.querySelector('[aria-label="Done editing title"]').click()`);
 					await page.run(`${pr}.querySelector('[aria-label="Edit description"]').click()`);
 					await page.until(`${pr}.querySelector('textarea')`);
@@ -296,7 +353,26 @@ for (const [width, height] of [
 					);
 					await page.until(`!${pr}.innerText.includes('undid') && ${pr}.innerText.includes('Drafted description.')`);
 					expect(await page.run(`[...${pr}.querySelectorAll('[data-edited]')].length`)).toBe(1);
-					await page.run(`${button(pr, "Open")}.click()`);
+					await page.click(button(pr, "Open"));
+					const receipt = await until(async () =>
+						(await items(chat)).find(
+							(item) =>
+								item.role === "wait" && item.ask.type === "approval" && item.ask.tool === "github__create_pull_request",
+						),
+					);
+					expect(receipt).toMatchObject({
+						outcome: "answered",
+						answer: "approve",
+						edited: { title: "Owner's title" },
+						permitted: { scope: "task" },
+					});
+					if (delivery === "after approval") {
+						holdHistory = false;
+						releaseHistory();
+						await page.until(`!document.querySelector('[aria-label="Loading the chat"]')`);
+						await page.until(`document.querySelector('[data-done="pull-request"]')`);
+						await page.click(`document.querySelector('[data-done="pull-request"] [aria-label="Show details"]')`);
+					}
 					await page.until(
 						`[...document.querySelectorAll('.rounded-tile')].some(t => t.innerText.includes('Approved as you edited it'))`,
 					);
@@ -327,6 +403,11 @@ for (const [width, height] of [
 					expect(await page.run(`${answered}.innerText`)).toContain("Edited by you");
 					expect(await page.run(`${answered}.querySelector('input, textarea, [aria-label^="Edit "]')`)).toBe(null);
 					await snap("pr-answered", answered);
+					expect(await page.run(`${answered}.innerText`)).toContain("allowed for this task");
+					if (delivery === "after approval") {
+						expect(page.errors()).toEqual([]);
+						return;
+					}
 
 					// ---- a new agent: its description and instructions are the owner's to edit; a blank holds the button back
 					await say("hire a writer");
@@ -501,8 +582,8 @@ for (const [width, height] of [
 					expect(page.errors().filter((e) => !/Failed to load resource/.test(e))).toEqual([]);
 				});
 			} finally {
-				await vite.close();
-				await new Promise<void>((resolve) => listener.close(() => resolve()));
+				releaseHistory();
+				await server.close();
 				await daemon.close();
 				await fake.close();
 			}

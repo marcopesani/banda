@@ -562,13 +562,16 @@ export function FeedView({
 			);
 			return;
 		}
+		const wait = segment.kind === "approval" || segment.kind === "question" ? segment.open?.wait : undefined;
+		const key = wait === undefined ? segment.key : `wait:${wait}`;
+		if (wait !== undefined) flush();
 		if (run === undefined || run.side !== side) {
 			flush();
-			run = { side, items: [], key: segment.key };
+			run = { side, items: [], key };
 		}
 		run.items.push(
 			<div
-				key={segment.key}
+				key={key}
 				data-entry={entryOf(segment.key)}
 				data-open-ask={
 					(segment.kind === "question" || segment.kind === "approval") && segment.open !== undefined ? "" : undefined
@@ -582,6 +585,7 @@ export function FeedView({
 			</div>,
 		);
 		run.at = at ?? run.at;
+		if (wait !== undefined) flush();
 	});
 	flush();
 	// a change to its own file waits for the owner however the box came to hold it (another chat, a group, a stale
