@@ -95,8 +95,8 @@ function bodyText(body: string): string | { readonly what: string } {
 	return text;
 }
 
-/** A type whose body is text whatever bytes it holds. */
-const TEXT_TYPE = /^text\/|json|xml|javascript|ecmascript|x-www-form-urlencoded|yaml|csv/i;
+/** A type whose body is text whatever bytes it holds: text/*, and a subtype or suffix that names a text format. */
+const TEXT_TYPE = /^text\/|[/+](json|xml|javascript|ecmascript|x-www-form-urlencoded|yaml|x-yaml)$/i;
 
 /**
  * A response's body (base64, as the proxy gave it back: undone from its encoding, scrubbed, cut) as its reader gets
@@ -126,7 +126,7 @@ export function responseWords(body: string, headers: readonly (readonly [string,
 		}
 	};
 	const text = decoder().decode(bytes, { stream: cut });
-	if (TEXT_TYPE.test(type.split(";")[0] ?? "")) return text;
+	if (TEXT_TYPE.test((type.split(";")[0] ?? "").trim())) return text;
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what marks a body as binary
 	if (text.includes("�") || /[\x00-\x08\x0e-\x1f]/.test(text)) return `(${bytes.length} bytes of binary data)`;
 	return text;

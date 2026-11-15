@@ -170,6 +170,15 @@ describe("a response's body", () => {
 			"(4 bytes of binary data)",
 		);
 		expect(responseWords("", json)).toBe("(empty)");
+		// a type that only has a text format's name inside it is judged by its bytes
+		const docx: [string, string][] = [
+			["Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+		];
+		expect(responseWords(Buffer.from([0x50, 0x4b, 3, 4]).toString("base64"), docx)).toBe("(4 bytes of binary data)");
+		for (const type of ["application/problem+json; charset=utf-8", "image/svg+xml", "Application/JSON"])
+			expect(responseWords(Buffer.from('{"a":"\u0001"}').toString("base64"), [["content-type", type]])).toBe(
+				'{"a":"\u0001"}',
+			);
 	});
 
 	it("cut inside a character is still text: the broken character is dropped", () => {
