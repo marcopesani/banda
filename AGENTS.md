@@ -115,6 +115,10 @@ A banda daemon may be running from another checkout, possibly the one you are ru
 - `npm run cache:audit -- --home <fork>` reports how a fork's real history used the prompt cache; `npm run cache:probe`
   sends invented text through a fork's sign-ins and spends real tokens, so it runs only when needed. Both refuse the live
   home. `test/cache-prefix.test.ts` guards the request's cached prefix offline.
+- `npm run turn:audit -- --home <fork>` reports what a fork's runs took, per launch workflow and for banda's own time
+  around the model, against the launch budgets in docs/verification.md; it refuses the live home too.
+  `test/turn-budget.test.ts` caps the median of banda's own time on the faux provider. A change that moves a cap says
+  the measured medians (`BANDA_TURN_BUDGET=print` with `--disable-console-intercept`) and why in the commit message.
 - `test/prompt-budget.test.ts` holds a fresh chat's system prompt and first-step tools to the UTF-8 byte counts in
   `test/prompt-budget.json`, by equality. A change that moves them reruns `npm run prompt:budget` (it rewrites the file
   and fails; never under CI) and commits the new file with the change, saying why in the commit message.
