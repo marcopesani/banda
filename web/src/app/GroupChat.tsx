@@ -62,6 +62,7 @@ export function GroupChat({
 	agents,
 	archived = [],
 	phone,
+	panelBeside = !phone,
 	at,
 	onBack,
 	onArchived = onBack,
@@ -73,6 +74,8 @@ export function GroupChat({
 	/** Archived agents: still named in the group's history, never asked. */
 	archived?: readonly ChatAgent[];
 	phone: boolean;
+	/** Its panel opens beside the chat; else it takes the chat's place, as on the phone. */
+	panelBeside?: boolean;
 	onBack: () => void;
 	/** After the owner archived it: it left the band. */
 	onArchived?: () => void;
@@ -169,7 +172,7 @@ export function GroupChat({
 	const change = (body: { name?: string; add?: string[]; remove?: string[] }) =>
 		void api<GroupView>(`/groups/${room}`, { method: "PUT", body: JSON.stringify(body) }).then(setGroup, () => {});
 	const panelView = (
-		<Panel name={name} phone={phone} onClose={() => setPanel(false)}>
+		<Panel name={name} phone={!panelBeside} onClose={() => setPanel(false)}>
 			<GroupPanel
 				name={name}
 				members={all}
@@ -182,7 +185,7 @@ export function GroupChat({
 			/>
 		</Panel>
 	);
-	if (phone && panel) return panelView;
+	if (!panelBeside && panel) return panelView;
 	return (
 		<>
 			<div className="flex min-w-0 flex-1 flex-col bg-paper">
@@ -395,7 +398,7 @@ export function GroupChat({
 					}}
 				/>
 			)}
-			{!phone && panel ? panelView : null}
+			{panelBeside && panel ? panelView : null}
 		</>
 	);
 }

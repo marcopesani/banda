@@ -204,7 +204,8 @@ one that gives them one more thing to manage stays out.
   that request was sent, never today's agent definition. These are views of the same stored facts, not a second log,
   and inspecting them never submits work.
 - **The panel** is a 20rem column at the right on the desktop, open by default on wide screens, and a sheet from the
-  header on the phone. An agent's panel is the agent's whole home; it has no settings page of its own. At the top, the
+  header on the phone. The chat beside it never narrows past the phone's width (24rem): a window without room for
+  the band, the chat at that width and the panel opens the panel in the chat's place, as the phone does. An agent's panel is the agent's whole home; it has no settings page of its own. At the top, the
   face large and the name; below, four tabs. It opens on Routines when the agent has routines or watches; else on Access
   while it can reach nothing; else on About. **Routines**: Routines on (a switch) and Add, then rows (name, when in
   words, next run, last run and what it said, paused; run now and pause in now on the row; tapping opens its editor) or,

@@ -46,7 +46,27 @@ async function click(page: Page, expression: string) {
 	await page.input("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
 }
 
-for (const width of [390, 1440])
+/** The chat at its narrowest beside the panel: the phone's width (Shell.tsx `usePanelBeside`). */
+const CHAT_MIN = 384;
+// how wide main, the panel in it and the chat beside it are, and whether the page scrolls sideways
+const layout = `(() => {
+	const main = document.querySelector('main');
+	const width = (el) => el ? el.getBoundingClientRect().width : 0;
+	return {
+		main: width(main),
+		panel: width(main?.querySelector('aside')),
+		chat: width([...(main?.children ?? [])].find((el) => el.tagName !== 'ASIDE')),
+		scrolls: document.documentElement.scrollWidth > innerWidth,
+	};
+})()`;
+type Layout = { main: number; panel: number; chat: number; scrolls: boolean };
+
+// a phone, a laptop's window too narrow for the band, the chat and the panel side by side, and a wide one
+for (const [width, height] of [
+	[390, 900],
+	[852, 924],
+	[1440, 900],
+] as const)
 	it.skipIf(!hasChrome())(
 		`keeps a stale personality draft and both saved versions through the app at ${width}px`,
 		async () => {
@@ -86,10 +106,36 @@ for (const width of [390, 1440])
 				const created = await api(Agents, "/agents/mira", "PUT", { text: ORIGINAL, base: null });
 				const original = created.find((agent) => agent.name === "mira")?.accepted;
 				if (original === undefined) throw new Error("Mira was not accepted.");
-				await withPage(`${server.origin}/#token=${token}`, { width, height: 900 }, async (page) => {
+				await withPage(`${server.origin}/#token=${token}`, { width, height }, async (page) => {
 					await page.until("!location.hash.includes('token=')");
 					await page.run("location.hash='#/a/mira'");
 					await click(page, "document.querySelector('button[aria-label=\"Mira: open its panel\"]')");
+					await page.until(`document.querySelector('aside')?.getAttribute('aria-label') === "Mira's panel"`);
+					// the chat is never squeezed: beside the panel it keeps the phone's width, else the panel takes its place
+					const open = await page.run<Layout>(layout);
+					expect(open.scrolls).toBe(false);
+					if (width === 1440) {
+						expect(open.chat).toBeGreaterThanOrEqual(CHAT_MIN);
+					} else {
+						expect(open.chat).toBe(0);
+						expect(open.panel).toBe(open.main);
+					}
+					if (width === 852) {
+						await click(page, "document.querySelector('button[aria-label=\"Close the panel\"]')");
+						await page.until(
+							`![...document.querySelectorAll('aside')].some((el) => el.getAttribute('aria-label') === "Mira's panel")`,
+						);
+						const closed = await page.run<Layout>(layout);
+						expect(closed.chat).toBe(closed.main);
+						expect(closed.chat).toBeGreaterThanOrEqual(CHAT_MIN);
+						expect(closed.scrolls).toBe(false);
+						const shots = process.env.BANDA_PUBLICATION_SHOTS;
+						if (shots !== undefined) {
+							await mkdir(shots, { recursive: true });
+							await page.shoot(join(shots, `${width}-chat.png`));
+						}
+						await click(page, "document.querySelector('button[aria-label=\"Mira: open its panel\"]')");
+					}
 					await click(
 						page,
 						"document.querySelector('[role=tab][data-state=inactive][value=about]') || [...document.querySelectorAll('[role=tab]')].find(el=>el.textContent==='About')",

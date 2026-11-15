@@ -1,6 +1,7 @@
 /**
  * The app (DESIGN.md "The app"): the band at the left, a chat in the middle, its panel at the right (a sheet on the
- * phone, where the band is the first screen and a chat opens over it). Settings and Connections are plain pages.
+ * phone, where the band is the first screen and a chat opens over it, and in the chat's place in a window too narrow
+ * for all three). Settings and Connections are plain pages.
  * `#/` opens the chat last shown on this device, else the first agent's. The tab's title counts asks, then unread.
  */
 
@@ -97,17 +98,25 @@ const go = (where: Where) => {
 
 const openRow = (row: { to: Where }) => go(row.to);
 
-function usePhone(): boolean {
-	const query = "(max-width: 767px)";
-	const [phone, setPhone] = useState(() => matchMedia(query).matches);
+function useMedia(query: string): boolean {
+	const [matches, setMatches] = useState(() => matchMedia(query).matches);
 	useEffect(() => {
 		const list = matchMedia(query);
-		const changed = () => setPhone(list.matches);
+		const changed = () => setMatches(list.matches);
 		list.addEventListener("change", changed);
 		return () => list.removeEventListener("change", changed);
-	}, []);
-	return phone;
+	}, [query]);
+	return matches;
 }
+
+const usePhone = () => useMedia("(max-width: 767px)");
+
+/**
+ * Whether a chat's panel opens beside it: only while the window holds the band (--sidebar-width, 18rem), the panel
+ * (--panel-width, 20rem) and the chat at its narrowest, 24rem: the phone's width, the narrowest the composer and a
+ * bubble are made for. Narrower, the panel takes the chat's place, as on the phone.
+ */
+const usePanelBeside = () => useMedia("(min-width: 62rem)");
 
 export function Shell() {
 	const tiers = useTiers();
@@ -183,6 +192,7 @@ function Main() {
 	};
 	const { where, removedConnection } = useWhere();
 	const phone = usePhone();
+	const beside = usePanelBeside();
 	const { pinned, centred } = useBand();
 	// closed by default, so the screen is the conversation; it opens for what needs room (a routine, the face tapped)
 	const [panel, setPanel] = useState(false);
@@ -493,6 +503,7 @@ function Main() {
 							runLine.current = entry;
 							// on the phone the sheet closes so the chat shows; the detail waits beneath for it to open again
 							if (phone) setSheet(false);
+							else if (!beside) setPanel(false);
 							if (where.at !== entry) {
 								go({ name: "agent", id: where.id, at: entry });
 								return;
@@ -512,7 +523,7 @@ function Main() {
 			const agentFile = agentView?.accepted;
 			const personality = where.id === "sancho" ? personalityOf(agentFile?.text ?? "") : agentFile?.agent?.instructions;
 			const agentPanel = (
-				<Panel name={who.name} phone={phone} onClose={() => setSheet(false)}>
+				<Panel name={who.name} phone={phone || !beside} onClose={() => (phone ? setSheet(false) : setPanel(false))}>
 					{editor ?? (
 						<AgentPanel
 							// a routine's line asks for its routines: the panel opens again on them
@@ -636,6 +647,7 @@ function Main() {
 				</Panel>
 			);
 			if (phone) return sheet ? agentPanel : chat;
+			if (!beside) return panel ? agentPanel : chat;
 			return (
 				<>
 					{chat}
@@ -652,6 +664,7 @@ function Main() {
 					agents={agents}
 					archived={archived}
 					phone={phone}
+					panelBeside={!phone && beside}
 					onBack={() => go({ name: "home" })}
 					onArchived={() => {
 						// it left the band: to a chat that is in it (the band itself on the phone), never through the
