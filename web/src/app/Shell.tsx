@@ -21,7 +21,7 @@ import { MemorySettings, type NewFactSpec } from "../chat/MemorySettings.tsx";
 import { AgentPanel, firstTab, Panel, Routines, Watching } from "../chat/Panel.tsx";
 import { AppSettings, Archive, Personality, SettingsPage } from "../chat/Settings.tsx";
 import { SkillCatalogue } from "../chat/Skill.tsx";
-import { actOnFact, prepareBrowser, readMemory, setPaused, signOutSite } from "../lib/api.ts";
+import { actOnFact, prepareBrowser, readMemory, runsOnDevice, setPaused, signOutSite } from "../lib/api.ts";
 import { attempt } from "../lib/attempt.ts";
 import { agentMainOf } from "../lib/chats.ts";
 import { desktop } from "../lib/desktop.ts";
@@ -51,6 +51,7 @@ import { Onboarding, SkillsOnboarding, useShippedSkills } from "./Onboarding.tsx
 import { ownerEdits } from "./owner-edits.ts";
 import { EditRoutine, RoutineHistory, routineRows } from "./routines.tsx";
 import { SearchDialog } from "./SearchDialog.tsx";
+import { SettingsBackups } from "./SettingsBackups.tsx";
 import { SettingsCustomProviders } from "./SettingsCustomProviders.tsx";
 import { SettingsDevices } from "./SettingsDevices.tsx";
 import { SettingsProviders } from "./SettingsProviders.tsx";
@@ -794,6 +795,8 @@ function Main() {
 							/>
 						}
 						devices={<SettingsDevices />}
+						// a paired device is refused them: a backup is taken and restored on the computer banda runs on
+						backups={runsOnDevice ? undefined : <SettingsBackups />}
 						onTheme={setTheme}
 						onCentred={centreBand}
 						onPause={(paused) => void setPaused(paused)}

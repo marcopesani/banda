@@ -7,6 +7,10 @@ type Desktop = {
 	readonly chooseFolder: (at?: string) => Promise<string | undefined>;
 	/** What waits on the owner now, which the tray shows as a dot: chats with an open ask, and unread messages. */
 	readonly attention: (attention: { asks: number; unread: number }) => void;
+	/** Show the backup `name` in the system's file manager; false when there is none by that name. */
+	readonly revealBackup?: (name: string) => Promise<boolean>;
+	/** Quit banda, its daemon too, and start it again: how a restore made ready takes the home's place. */
+	readonly restart?: () => Promise<void>;
 };
 
 export const desktop = (globalThis as { bandaDesktop?: Desktop }).bandaDesktop;
