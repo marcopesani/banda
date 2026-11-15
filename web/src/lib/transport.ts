@@ -51,6 +51,16 @@ export interface BandaPlugin {
 	revertDaemon(): Promise<void>;
 	/** Forget the daemon and this device's key: the next pairing is a new device (a revoked one cannot pair again). */
 	forget(): Promise<void>;
+	/**
+	 * Save a file where the owner chooses, in the device's own save sheet: the shell's web view downloads nothing by
+	 * itself. `body` is base64 of the bytes. Resolves `saved: false` when the owner closed the sheet; rejects (`SAVE`)
+	 * when the place chosen refused the bytes.
+	 */
+	saveFile(options: {
+		readonly name: string;
+		readonly mimeType: string;
+		readonly body: string;
+	}): Promise<{ readonly saved: boolean }>;
 }
 
 /**
@@ -104,7 +114,8 @@ export const sameOrigin: Transport = {
 	stream: (path, init) => fetch(path, init),
 };
 
-const toBase64 = (bytes: Uint8Array) => {
+/** Bytes as base64, the way they cross the shell's bridge. */
+export const toBase64 = (bytes: Uint8Array) => {
 	let text = "";
 	for (let at = 0; at < bytes.length; at += 0x8000) text += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
 	return btoa(text);

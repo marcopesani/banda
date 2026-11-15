@@ -3,12 +3,20 @@
  * these: a message's files, the owner's, and a `[name](sha256:<hex>)` link in markdown.
  */
 import { DownloadIcon, FileIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import Zoom from "react-medium-image-zoom";
 import "react-medium-image-zoom/dist/styles.css";
 import { blobFile } from "../lib/api.ts";
+import { inNativeShell, saveAndSay } from "../lib/save-file.ts";
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i;
+
+/** An anchor's download, in the native shell: the shell's save sheet, since the web view downloads nothing. */
+const saveInShell = (name: string, url: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+	if (!inNativeShell()) return;
+	event.preventDefault();
+	void saveAndSay({ name, url: () => Promise.resolve(url) });
+};
 
 /** Whether a file shows inline, by its name. */
 export const isImage = (name: string) => IMAGE.test(name);
@@ -51,6 +59,7 @@ export function FileChip({ name, url }: { name: string; url?: string }) {
 			href={url}
 			download={name}
 			title={`Download ${name}`}
+			onClick={saveInShell(name, url)}
 			className={`${chip} no-underline transition-colors duration-hover hover:text-sa-accent`}
 		>
 			<DownloadIcon aria-hidden="true" className="size-4 shrink-0 text-sa-muted" />
@@ -80,6 +89,7 @@ export function ImageAttachment({
 			download={name}
 			aria-label={`Download ${name}`}
 			title="Download"
+			onClick={saveInShell(name, url)}
 			className="flex size-8 shrink-0 items-center justify-center rounded-full text-sa-muted transition-colors duration-hover hover:bg-sa-surface hover:text-sa-text"
 		>
 			<DownloadIcon aria-hidden="true" className="size-4" />

@@ -1,15 +1,18 @@
 package app.banda
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import android.util.Base64
 import android.util.Log
+import androidx.activity.result.ActivityResult
 import androidx.webkit.WebViewFeature
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import computer.iroh.BiStream
 import computer.iroh.IrohAndroid
@@ -242,6 +245,54 @@ class BandaPlugin : Plugin() {
         val id = call.getString("id") ?: return call.reject("an id is needed")
         streams.remove(id)?.job?.cancel()
         call.resolve()
+    }
+
+    /**
+     * Save a file where the owner chooses: the system's save sheet (a document to create), which every Android with a
+     * documents provider has and which needs no storage permission. The web view downloads nothing by itself, so an
+     * anchor with `download` does nothing here; the app brings the bytes instead. The sheet closed resolves
+     * `saved: false`; a place the bytes could not be written to rejects (`SAVE`).
+     */
+    @PluginMethod
+    fun saveFile(call: PluginCall) {
+        if (refused(call)) return
+        if (call.getString("body") == null) return call.reject("the file's bytes are needed")
+        val type = call.getString("mimeType")?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(type)
+            .putExtra(Intent.EXTRA_TITLE, SaveName.of(call.getString("name")))
+        try {
+            startActivityForResult(call, intent, "saved")
+        } catch (error: Exception) {
+            call.reject("This phone has no app that saves files.", "SAVE", error)
+        }
+    }
+
+    /** The save sheet's answer: where to write the bytes `saveFile` was called with, or nowhere. */
+    @ActivityCallback
+    private fun saved(call: PluginCall?, result: ActivityResult) {
+        if (call == null) return
+        if (result.resultCode != Activity.RESULT_OK) return call.resolve(JSObject().put("saved", false))
+        val uri = result.data?.data ?: return call.reject("The save sheet chose no place for the file.", "SAVE")
+        val body = call.getString("body") ?: return call.reject("the file's bytes are needed", "SAVE")
+        scope.launch {
+            try {
+                val bytes = Base64.decode(body, Base64.NO_WRAP)
+                val resolver = context.contentResolver
+                // "wt" truncates a file the sheet let the owner replace; a provider without it takes "w"
+                val out = runCatching { resolver.openOutputStream(uri, "wt") }.getOrNull()
+                    ?: resolver.openOutputStream(uri, "w")
+                    ?: throw IllegalStateException("the chosen place could not be opened")
+                out.use {
+                    it.write(bytes)
+                    it.flush()
+                }
+                call.resolve(JSObject().put("saved", true))
+            } catch (error: Exception) {
+                call.reject("Couldn't write the file there: ${error.message ?: "the chosen place refused it"}.", "SAVE", error)
+            }
+        }
     }
 
     private fun refused(call: PluginCall): Boolean {
