@@ -21,7 +21,7 @@ export const artifact: MessagePart = {
 	said: (args) => {
 		const file = given(args);
 		if (file === undefined) return undefined;
-		return `I put “${file.title ?? titleOf(file.path)}” in your Library${file.change === undefined ? "" : `: ${file.change}`}.`;
+		return `I published “${file.title ?? titleOf(file.path)}”${file.change === undefined ? "" : `: ${file.change}`}.`;
 	},
 	prepare: async (args, api, ctx, { blobs, limit }) => {
 		const file = given(args);

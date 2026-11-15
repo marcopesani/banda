@@ -14,12 +14,12 @@
 			}
 		},
 		"tools": {
-			"total": 22675,
+			"total": 22658,
 			"tools": {
 				"message_user": 1947,
 				"ask_user": 1550,
 				"react": 424,
-				"publish": 920,
+				"publish": 903,
 				"tool_search": 615,
 				"search": 1034,
 				"read_search_result": 979,
@@ -57,12 +57,12 @@
 			}
 		},
 		"tools": {
-			"total": 22675,
+			"total": 22658,
 			"tools": {
 				"message_user": 1947,
 				"ask_user": 1550,
 				"react": 424,
-				"publish": 920,
+				"publish": 903,
 				"tool_search": 615,
 				"search": 1034,
 				"read_search_result": 979,
@@ -98,12 +98,12 @@
 			}
 		},
 		"tools": {
-			"total": 17699,
+			"total": 17682,
 			"tools": {
 				"message_group": 1928,
 				"ask_user": 1550,
 				"react": 424,
-				"publish": 920,
+				"publish": 903,
 				"tool_search": 615,
 				"search": 1034,
 				"read_search_result": 979,

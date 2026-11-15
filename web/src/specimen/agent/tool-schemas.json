@@ -145,7 +145,7 @@
 		}
 	},
 	"publish": {
-		"description": "Publish a file you made for the owner (a document in markdown, a table as CSV, a plan, a page as HTML, an image, a PDF) to their Library, beside the chat, as its next version; the chat shows it as a card. `path` is the file in your box, `title` its name in their words, `change` what changed since its last version, in one line. Publish the same path again when you change it; every version is kept. It returns the artifact's id, which a message's `artifacts` shows again. They may edit it: what they change reaches you as their words.",
+		"description": "Publish a file you made for the owner (a document in markdown, a table as CSV, a plan, a page as HTML, an image, a PDF) to them as its next version; the chat shows it as a card they open. `path` is the file in your box, `title` its name in their words, `change` what changed since its last version, in one line. Publish the same path again when you change it; every version is kept. It returns the artifact's id, which a message's `artifacts` shows again. They may edit it: what they change reaches you as their words.",
 		"parameters": {
 			"type": "object",
 			"required": ["path"],

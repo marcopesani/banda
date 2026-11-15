@@ -491,14 +491,14 @@ export function reactTool({ asking, sending, blobs, limit, venue }: Speaking): T
 	});
 }
 
-/** `publish`: a file of the box into the owner's Library as its next version, shown as a card (DESIGN.md "The app"). */
+/** `publish`: a file of the box to the owner as its next version, shown as a card in the chat (DESIGN.md "The app"). */
 export function publishTool({ asking, sending, blobs, limit, venue }: Speaking): ToolRegistration {
 	const send = speak(asking, sending, blobs, limit, venue, [artifact]);
 	return defineTool({
 		name: PUBLISH,
 		description:
 			"Publish a file you made for the owner (a document in markdown, a table as CSV, a plan, a page as HTML, an " +
-			"image, a PDF) to their Library, beside the chat, as its next version; the chat shows it as a card. `path` is " +
+			"image, a PDF) to them as its next version; the chat shows it as a card they open. `path` is " +
 			"the file in your box, `title` its name in their words, `change` what changed since its last version, in " +
 			"one line. Publish the same path again when you change it; every version is kept. It returns the artifact's " +
 			"id, which a message's `artifacts` shows again. They may edit it: what they change reaches you as their words.",
