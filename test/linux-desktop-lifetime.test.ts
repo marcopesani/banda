@@ -14,6 +14,9 @@ CapAmb:\t0000000000000000
 NoNewPrivs:\t0
 `;
 const completion = { status: 0, signal: null, error: null, stdout: "", stderr: "" };
+const commandFields = ["ExecStartPre", "ExecStartPost", "ExecStop", "ExecStopPost"] as const;
+const commandArrays = () =>
+	Object.fromEntries(commandFields.map((field) => [field, { ...completion, stdout: "a(sasbttttuii) 0\n" }]));
 function fixture(): Result {
 	const cases = (["exit-0", "exit-23", "observation-failure"] as const).map((name, index): Case => {
 		const unit = `banda-lifetime-${"a".repeat(24)}-${name}.service`;
@@ -81,11 +84,12 @@ function fixture(): Result {
 				desktopSessionAbsent: true,
 				pythonPathAbsent: true,
 			} as const,
-			unit: { atNs: "100", properties },
+			unit: { atNs: "100", properties, commandArrays: commandArrays() },
 			observedAtNs: "200",
 		};
 		const originalExit = {
 			atNs: "300",
+			commandArrays: commandArrays(),
 			properties: {
 				...properties,
 				ExecMainCode: "1",
@@ -95,6 +99,7 @@ function fixture(): Result {
 		};
 		const stopped = {
 			atNs: "600",
+			commandArrays: commandArrays(),
 			properties: {
 				...originalExit.properties,
 				ActiveState: "inactive",
@@ -284,7 +289,7 @@ it("rejects a missing unit when no exact owned cgroup was captured", () => {
 		kind: "failed",
 		error: "Capture failed",
 		injected: false,
-		lastUnit: { atNs: "100", properties: { Id: item.unit } },
+		lastUnit: { atNs: "100", properties: { Id: item.unit }, commandArrays: {} },
 	};
 	item.cleanup.empty!.unit.properties.LoadState = "not-found";
 	expect(() => parseLinuxLifetimeResult(value)).toThrow();
@@ -298,3 +303,55 @@ it.each(["Type", "ExitType", "KillMode", "Delegate", "RuntimeMaxUSec", "SuccessE
 		expect(() => parseLinuxLifetimeResult(value)).toThrow();
 	},
 );
+
+it.each(commandFields)("requires successful typed empty-array evidence for %s", (field) => {
+	for (const receipt of [
+		undefined,
+		{ ...completion, stdout: "" },
+		{ ...completion, stdout: "as 0\n" },
+		{ ...completion, stdout: "a(sasbttttuii)" },
+		{ ...completion, stdout: "a(sasbttttuii) 00\n" },
+		{ ...completion, stdout: "a(sasbttttuii) 0 unexpected\n" },
+		{ ...completion, stdout: 'a(sasbttttuii) 1 "/usr/bin/true" 1 "/usr/bin/true" false 0 0 0 0 0 0 0\n' },
+		{ ...completion, status: 1, stdout: "a(sasbttttuii) 0\n" },
+		{ ...completion, signal: "SIGKILL", stdout: "a(sasbttttuii) 0\n" },
+		{ ...completion, error: "Query failed", stdout: "a(sasbttttuii) 0\n" },
+	]) {
+		const value = fixture();
+		const unit = normal(value).unit;
+		if (receipt) unit.commandArrays[field] = receipt;
+		else delete unit.commandArrays[field];
+		expect(unit.properties[field]).toBe("");
+		expect(() => parseLinuxLifetimeResult(value)).toThrow();
+	}
+});
+
+it("rejects omitted command properties captured by systemctl show without typed readback", () => {
+	const value = fixture();
+	const unit = normal(value).unit;
+	for (const field of commandFields) delete unit.properties[field];
+	unit.commandArrays = {};
+	expect(() => parseLinuxLifetimeResult(value)).toThrow();
+});
+
+it.each(["readiness", "cleanup", "failed observation"])("requires typed command evidence in %s", (snapshot) => {
+	const value = fixture();
+	const item = value.cases[0]!;
+	const unit = snapshot === "cleanup" ? item.cleanup.empty!.unit : item.ready!.unit;
+	unit.commandArrays = {};
+	if (snapshot === "failed observation") {
+		value.state = "failed";
+		item.ready = null;
+		item.beforeRescue = { kind: "failed", error: "Query failed", injected: false, lastUnit: unit };
+	}
+	expect(() => parseLinuxLifetimeResult(value)).toThrow();
+});
+
+it("does not require command readback for a removed unit after cleanup", () => {
+	const value = fixture();
+	const unit = value.cases[0]!.cleanup.empty!.unit;
+	unit.properties.LoadState = "not-found";
+	unit.commandArrays = {};
+	for (const field of commandFields) delete unit.properties[field];
+	expect(parseLinuxLifetimeResult(value)).toBe(value);
+});

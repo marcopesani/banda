@@ -39,8 +39,6 @@ const Environment = Type.Object({
 	pythonPathAbsent: Type.Literal(true),
 });
 const Receipt = Type.Object({ main: Process, descendant: Process, environment: Environment });
-const Unit = Type.Object({ atNs: Ticks, properties: Type.Record(Type.String(), Text) });
-const Ready = Type.Object({ ...Receipt.properties, unit: Unit, observedAtNs: Ticks });
 const Completion = Type.Object({
 	status: Type.Union([Type.Integer(), Type.Null()]),
 	signal: Type.Union([Text, Type.Null()]),
@@ -48,6 +46,12 @@ const Completion = Type.Object({
 	stdout: Text,
 	stderr: Text,
 });
+const Unit = Type.Object({
+	atNs: Ticks,
+	properties: Type.Record(Type.String(), Text),
+	commandArrays: Type.Record(Type.String(), Completion),
+});
+const Ready = Type.Object({ ...Receipt.properties, unit: Unit, observedAtNs: Ticks });
 const BeforeRescue = Type.Union([
 	Type.Object({
 		kind: Type.Literal("observed"),
@@ -117,6 +121,7 @@ type Process = Static<typeof Process>;
 type Unit = Static<typeof Unit>;
 type Case = Static<typeof Case>;
 type Baseline = NonNullable<Result["initial"]>;
+const commandFields = ["ExecStartPre", "ExecStartPost", "ExecStop", "ExecStopPost"] as const;
 const effective = {
 	Type: "exec",
 	ExitType: "cgroup",
@@ -136,10 +141,7 @@ const effective = {
 	PAMName: "",
 	SupplementaryGroups: "",
 	AmbientCapabilities: "",
-	ExecStartPre: "",
-	ExecStartPost: "",
-	ExecStop: "",
-	ExecStopPost: "",
+	...Object.fromEntries(commandFields.map((field) => [field, ""])),
 	OnFailure: "",
 	OnSuccess: "",
 	FailureAction: "none",
@@ -174,6 +176,7 @@ function assertProcess(value: Process, baseline: Baseline, unit: string) {
 	assert.ok(!["Z", "X", "x"].includes(value.state), "Expected a live process.");
 }
 function assertUnit(unit: Unit, name: string, baseline: Baseline, invocation?: string) {
+	assertCommandArrays(unit);
 	const properties = unit.properties;
 	for (const [key, value] of Object.entries(effective)) assert.equal(properties[key], value, `Unexpected ${key}.`);
 	const identity = parseDiagnosticIdentity(baseline.observer.status);
@@ -213,6 +216,14 @@ export function parseLinuxLifetimeResult(value: unknown) {
 		const selected = cases[index];
 		assert.equal(item.name, selected?.name, "Lifetime cases are out of order.");
 		assert.ok(item.unit.endsWith(`-${item.name}.service`));
+		for (const unit of [
+			item.ready?.unit,
+			item.beforeRescue.kind === "observed" ? item.beforeRescue.unit : item.beforeRescue.lastUnit,
+			item.cleanup.empty?.unit,
+			item.cleanup.afterRescueMain,
+		]) {
+			if (unit?.properties.LoadState === "loaded") assertCommandArrays(unit);
+		}
 		if (item.ready) {
 			assert.ok(value.initial, "Missing original identity.");
 			assertReady(item.ready, value.initial, item.unit);
@@ -351,6 +362,13 @@ function command(binary: string, args: string[]): Promise<Static<typeof Completi
 function succeeded(result: Static<typeof Completion>) {
 	return result.status === 0 && result.signal === null && result.error === null;
 }
+function emptyCommandArray(result: Static<typeof Completion> | undefined) {
+	return result !== undefined && succeeded(result) && result.stdout.trim() === "a(sasbttttuii) 0";
+}
+function assertCommandArrays(unit: Unit) {
+	for (const field of commandFields)
+		assert.ok(emptyCommandArray(unit.commandArrays[field]), `Missing successful empty ${field} array readback.`);
+}
 async function show(unit: string): Promise<Unit> {
 	const result = await command("/usr/bin/systemctl", [
 		"--system",
@@ -373,7 +391,26 @@ async function show(unit: string): Promise<Unit> {
 		result.error ?? "Manager unavailable.",
 	);
 	for (const key of ["Id", "LoadState", "ActiveState", "Job"]) assert.ok(key in properties, `Missing ${key}.`);
-	return { atNs: now(), properties };
+	const commandArrays: Unit["commandArrays"] = {};
+	if (properties.LoadState === "loaded") {
+		assert.ok(Value.Check(Case.properties.unit, unit), "Unexpected unit name.");
+		const path = `/org/freedesktop/systemd1/unit/${unit.replace(/[^A-Za-z0-9]/g, (char) => `_${char.charCodeAt(0).toString(16)}`)}`;
+		for (const field of commandFields) {
+			const readback = await command("/usr/bin/busctl", [
+				"--system",
+				"--no-pager",
+				"--timeout=5s",
+				"get-property",
+				"org.freedesktop.systemd1",
+				path,
+				"org.freedesktop.systemd1.Service",
+				field,
+			]);
+			commandArrays[field] = readback;
+			if (!(field in properties) && emptyCommandArray(readback)) properties[field] = "";
+		}
+	}
+	return { atNs: now(), properties, commandArrays };
 }
 async function readText(path: string) {
 	const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -734,6 +771,7 @@ async function main() {
 			"/usr/bin/sudo",
 			"/usr/bin/systemd-run",
 			"/usr/bin/systemctl",
+			"/usr/bin/busctl",
 			"/usr/bin/env",
 			"/usr/bin/python3",
 			"/usr/bin/getent",
