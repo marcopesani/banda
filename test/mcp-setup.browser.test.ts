@@ -165,15 +165,51 @@ for (const width of [390, 1440])
 						["account-1", "Work"],
 						["account-2", "Home"],
 					]);
-					await fetch(`${base}/api/capabilities/connections/${connection.name}/accounts/account-1/signout`, {
-						method: "POST",
-						headers: { authorization: `Bearer ${token}` },
-					});
-					await click(page, button("Sign out"));
-					await click(
-						page,
-						`[...document.querySelectorAll('[role="alertdialog"] button')].find(el => el.textContent.trim() === 'Sign out')`,
+					// each account is a row; what acts on it is in the row's menu, and what adds one is under the list
+					const more = (account: string) =>
+						`document.querySelector('[data-account="${account}"] button[aria-haspopup="menu"]')`;
+					const signOutItem = `[...document.querySelectorAll('[role="menuitem"]')].find(el => el.textContent.trim() === 'Sign out')`;
+					const asked = `document.querySelector('[role="alertdialog"]')`;
+					const confirm = `[...document.querySelectorAll('[role="alertdialog"] button')].find(el => el.textContent.trim() === 'Sign out')`;
+					expect(await page.run(`Boolean(${button("Sign out")})`)).toBe(false);
+					expect(
+						await page.run(
+							`Boolean(document.querySelector('[data-account="account-2"]').closest('ul').compareDocumentPosition(${button("Add account")}) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+						),
+					).toBe(true);
+					// Home is the account at hand: Sancho is switched on for it, so its sign-out names him
+					await click(page, labelled("Sancho"));
+					await page.until(`${labelled("Sancho")}?.getAttribute('aria-checked') === 'true'`);
+					await click(page, more("account-2"));
+					await click(page, signOutItem);
+					await page.until(asked);
+					expect(await page.run(`${asked}.textContent`)).toContain("Sign out of Ernesto test as Home?");
+					expect(await page.run(`${asked}.textContent`)).toContain(
+						"Sancho loses access to Home. You can sign in again.",
 					);
+					// the way out keeps the account, and the menu's button has the focus again
+					await click(page, button("Stay connected"));
+					await page.until(`!${asked}`);
+					await page.until(`document.activeElement === ${more("account-2")}`);
+					expect((await view()).connections.find((each) => each.name === connection.name)?.accounts?.length).toBe(2);
+					// signing out of one of two stays on the accounts left
+					await click(page, more("account-1"));
+					await click(page, signOutItem);
+					await page.until(asked);
+					expect(await page.run(`${asked}.textContent`)).toContain("No agent uses Work. You can sign in again.");
+					await click(page, confirm);
+					await page.until(`!document.querySelector('[data-account="account-1"]')`);
+					await phase(page, "done");
+					// its row took the focus's place with it: the focus is on the list of those left
+					await page.until(`document.activeElement?.getAttribute('aria-label') === 'Accounts'`);
+					expect(
+						(await view()).connections
+							.find((each) => each.name === connection.name)
+							?.accounts?.map((each) => each.label),
+					).toEqual(["Home"]);
+					await click(page, more("account-2"));
+					await click(page, signOutItem);
+					await click(page, confirm);
 					try {
 						await phase(page, "auth");
 					} catch (error) {

@@ -117,13 +117,18 @@ const ACCESS = {
 function Live({ view, mode }: { view: ConnectionView; mode: "details" | "review" }) {
 	const [tools, setTools] = useState(view.tools);
 	const [chosen, setChosen] = useState<{ readonly [tool: string]: Setting }>({});
-	const [selected, setSelected] = useState<readonly string[]>(["sancho"]);
+	const [selected, setSelected] = useState<readonly string[]>(["sancho", "mara"]);
+	const [gone, setGone] = useState<readonly string[]>([]);
 	const onSwitch = (agent: string, on: boolean) =>
 		setSelected((old) => (on ? [...old, agent] : old.filter((each) => each !== agent)));
 	const agentsFor: AgentsFor[] = [{ key: "bandarra", selected, onSwitch }];
+	// the first account is used by the agents switched on below, so its sign-out names them
+	const accounts = (view.accounts ?? [])
+		.filter((each) => !gone.includes(each.account))
+		.map((each) => (each.account === ACCOUNT.account ? { ...each, agents: selected } : each));
 	return (
 		<ConnectionDetailsView
-			view={{ ...view, tools }}
+			view={{ ...view, tools, accounts }}
 			service="GitHub"
 			about="Read and change code, issues and pull requests"
 			mode={mode}
@@ -140,7 +145,8 @@ function Live({ view, mode }: { view: ConnectionView; mode: "details" | "review"
 			agentsFor={agentsFor}
 			access={ACCESS}
 			onChangeAccess={() => {}}
-			onSignOut={() => {}}
+			onSignOut={(account) => setGone((old) => [...old, account.account])}
+			onAddAccount={() => setGone([])}
 			onRemove={() => {}}
 		/>
 	);

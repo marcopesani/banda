@@ -72,6 +72,18 @@ async function scenario(page: Page, text: string) {
 		`(() => {const el=${option}; el.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,pointerType:'mouse'})); el.click();})()`,
 	);
 }
+/** Sign out from the account's menu, which opens on the pointer going down, as a tap or a click does. */
+async function signOutFromMenu(page: Page) {
+	const more = `document.querySelector('button[aria-label="More for ernesto.example"]')`;
+	await page.until(more);
+	await page.run(
+		`${more}.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, button: 0, pointerType: 'mouse'}))`,
+	);
+	await click(
+		page,
+		`[...document.querySelectorAll('[role="menuitem"]')].find(el => el.textContent.trim() === 'Sign out')`,
+	);
+}
 async function shot(page: Page, name: string) {
 	const directory = process.env.BANDA_MCP_SPECIMEN_SHOTS;
 	if (!directory) return;
@@ -125,15 +137,26 @@ for (const width of [390, 1440])
 					expect(await page.run(`${labelled("Sancho")}.getAttribute('aria-checked')`)).toBe("true");
 					expect(await page.run(`${labelled("Mara")}.getAttribute('aria-checked')`)).toBe("false");
 					await shot(page, `${width}-${theme}-done`);
-					await click(page, button("Sign out"));
+					// signing out is in the account's row menu, never a button beside the one that adds; adding is under the list
+					expect(await page.run(`Boolean(${button("Sign out")})`)).toBe(false);
+					expect(
+						await page.run(
+							`Boolean(document.querySelector('[data-account="account-1"]').closest('ul').compareDocumentPosition(${button("Add account")}) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+						),
+					).toBe(true);
+					await signOutFromMenu(page);
 					await page.until(`document.querySelector('[role="alertdialog"]')`);
 					expect(await page.run(`getComputedStyle(document.querySelector('[role="alertdialog"]')).colorScheme`)).toBe(
 						theme.toLowerCase(),
 					);
-					await click(page, button("Stay signed in"));
+					// it says who loses the account, and only the verb is red
+					expect(await page.run(`document.querySelector('[role="alertdialog"]').textContent`)).toContain(
+						"Sancho loses access to ernesto.example. You can sign in again.",
+					);
+					await click(page, button("Stay connected"));
 					await page.until(`!document.querySelector('[role="alertdialog"]')`);
 					await phase(page, "done");
-					await click(page, button("Sign out"));
+					await signOutFromMenu(page);
 					await click(
 						page,
 						`[...document.querySelectorAll('[role="alertdialog"] button')].find(el => el.textContent === 'Sign out')`,
@@ -186,6 +209,16 @@ it.skipIf(!hasChrome())(
 			await phase(page, "auth");
 			expect(await page.run(`Boolean(${button("Use a connected account")})`)).toBe(false);
 			await click(page, button("Back to review"));
+			await phase(page, "review");
+			// the review lists no accounts: the one under review carries its menu, and signing out asks there too
+			expect(await page.run(`Boolean(${button("Sign out")})`)).toBe(false);
+			await signOutFromMenu(page);
+			await page.until(`document.querySelector('[role="alertdialog"]')`);
+			expect(await page.run(`document.querySelector('[role="alertdialog"]').textContent`)).toContain(
+				"No agent uses ernesto.example. You can sign in again.",
+			);
+			await click(page, button("Stay connected"));
+			await page.until(`!document.querySelector('[role="alertdialog"]')`);
 			await phase(page, "review");
 			await scenario(page, "Expired sign-in");
 			await phase(page, "auth");
