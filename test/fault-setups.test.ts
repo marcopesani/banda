@@ -5,8 +5,9 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { Faults } from "./fault/faults.ts";
-import { runWorker } from "./fault/kill.ts";
+import { runWorker, unlanded } from "./fault/kill.ts";
 import { objectProblems, objectScenario } from "./fault/object-scenario.ts";
+import { SCENARIOS as WATCH_SCENARIOS, type WatchSummary } from "./fault/watch-scenario.ts";
 import { type FakeMcp, startFakeMcp } from "./fixtures/mcp-server.ts";
 import { tempHome } from "./helpers.ts";
 
@@ -66,4 +67,25 @@ describe("a fault worker's setup, run with no fault", () => {
 				expect(points["connection:stays-write"]).toBeGreaterThan(0);
 			}
 		});
+
+	// a hit's number is not the same commit in every run (`PAST` in fault/kill.ts): a sweep schedules kills by the
+	// counts of one run, and the run it kills may end a commit sooner
+	it("a kill scheduled past where a watch's run ends does not land, and its sweep tells that from a kill that misfired", async () => {
+		const fault = { point: "commit:before", hit: 1000, kind: "kill" } as const;
+		const { last, kills } = await runWorker("test/fault/watch-worker.ts", [await tempHome(), "life"], [[fault]]);
+		const summary = last as WatchSummary;
+		expect(kills).toBe(0);
+		expect(WATCH_SCENARIOS.life?.problems(summary)).toEqual([]);
+		// its own count of the point, and what each commit it counted wrote
+		expect(summary.reached["commit:before"]).toBe(summary.commits);
+		expect(summary.trace).toHaveLength(summary.commits);
+		expect(summary.trace.some((wrote) => wrote.includes("entry banda.watch-wake"))).toBe(true);
+		const run = { kills, reached: summary.reached };
+		expect(unlanded(fault, run)).toBeUndefined();
+		// the same run under a kill it passed: the injection did not fire, which no sweep lets by
+		expect(unlanded({ ...fault, hit: summary.commits }, run)).toMatch(/was not killed at #/);
+		expect(unlanded({ ...fault, hit: 1 }, run)).toMatch(/was not killed at #1/);
+		expect(unlanded(fault, { kills: 1, reached: {} })).toBeUndefined();
+		expect(unlanded(fault, { kills: 2, reached: {} })).toMatch(/2 processes were killed/);
+	});
 });

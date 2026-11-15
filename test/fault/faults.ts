@@ -6,7 +6,7 @@
  * what happens: `kill` ends the process with SIGKILL, as a power cut or the OOM killer would; `error` throws there,
  * as a failing disk, network or provider does. A storage error fails the Harness, which closes itself.
  */
-import type { Storage } from "@earendil-works/pi-durable";
+import type { Storage, StorageWrite } from "@earendil-works/pi-durable";
 
 export type FaultPoint =
 	| import("../../src/server/remote.ts").KeyPoint
@@ -170,9 +170,31 @@ export class InjectedFault extends Error {
 	override name = "InjectedFault";
 }
 
+/**
+ * One write of a commit in a few words: a task by its kind, id, status and phase, an entry by its kind, a document by
+ * its kind (or its id, for a change, which names no kind).
+ */
+function writeWords(write: StorageWrite): string {
+	if (write.type === "task") {
+		const { id, kind, state } = write.value as unknown as {
+			id: unknown;
+			kind?: string;
+			state: { status: string; checkpoint?: unknown };
+		};
+		const phase = (state.checkpoint as { phase?: unknown } | undefined)?.phase;
+		return `task ${kind ?? "?"}#${String(id)} ${state.status}${typeof phase === "string" ? `/${phase}` : ""}`;
+	}
+	if (write.type === "entry") return `entry ${write.value.kind}`;
+	if (write.type === "conversation") return `conversation #${String(write.value.id)}`;
+	if (write.type === "submission") return "submission";
+	if (write.type === "document.change" || write.type === "document.retire") return `${write.type} #${String(write.id)}`;
+	return `${write.type} ${write.record.kind}#${String(write.record.id)}`;
+}
+
 export class Faults {
 	readonly #schedule: readonly Fault[];
 	readonly #hits = new Map<FaultPoint, number>();
+	readonly #commits: string[] = [];
 
 	constructor(schedule: readonly Fault[] = []) {
 		this.#schedule = schedule;
@@ -191,9 +213,24 @@ export class Faults {
 		return this.#hits.get(point) ?? 0;
 	}
 
+	/** How many times this process passed each point it passed at all. */
+	counts(): { [point: string]: number } {
+		return Object.fromEntries(this.#hits);
+	}
+
+	/**
+	 * What each commit this process reached wrote, in order (`commits()[n - 1]` is hit `n` of `commit:before`): what a
+	 * sweep prints beside a kill that failed, to say which commit it was. A hit's number is no name for a commit: the
+	 * store reserves every task that can run in one commit, so two tasks ready a moment apart are one commit or two.
+	 */
+	commits(): readonly string[] {
+		return this.#commits;
+	}
+
 	/** Storage whose commits pass `commit:before` and, once stored, `commit:after`. */
 	storage(inner: Storage): Storage {
 		const commit: Storage["commit"] = async (writes, context) => {
+			this.#commits.push(writes.map(writeWords).sort().join("; "));
 			this.hit("commit:before");
 			const seq = await inner.commit(writes, context);
 			this.hit("commit:after");

@@ -62,6 +62,32 @@ function worker(
 	});
 }
 
+/**
+ * How many hits past a run without faults' count a sweep schedules kills at. A hit's number is not the same boundary
+ * in every run: tasks that run side by side commit in the order the machine gives them, and the store reserves every
+ * task that can run in one commit, so the same scenario is a commit more in one run than in the next. Sweeping to the
+ * count of one run alone leaves the last commits of a longer run with no kill.
+ */
+export const PAST = 2;
+
+/**
+ * Why a run under one scheduled kill is not what the schedule asked for, or nothing. The kill lands in a run that
+ * reaches its hit, and only there: a run that ended before the hit (`reached`, the finished process's own count of
+ * each point) had no such boundary to die at and is a run without faults, held to the same invariants by its caller.
+ * A run that passed the hit and was not killed is the fault injection failing.
+ */
+export function unlanded(
+	fault: Fault,
+	run: { readonly kills: number; readonly reached: { readonly [point: string]: number } },
+): string | undefined {
+	if (run.kills === 1) return undefined;
+	if (run.kills > 1) return `one kill was scheduled and ${run.kills} processes were killed`;
+	const reached = run.reached[fault.point] ?? 0;
+	return reached < fault.hit
+		? undefined
+		: `the process passed ${fault.point} ${reached} times and was not killed at #${fault.hit}`;
+}
+
 /** At most two subprocess jobs per suite; drain started jobs before allowing test cleanup. */
 export async function pool<T>(width: number, jobs: readonly (() => Promise<T>)[]): Promise<T[]> {
 	if (!Number.isSafeInteger(width) || width < 1) throw new Error("pool width must be a positive integer");
