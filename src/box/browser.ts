@@ -1197,6 +1197,86 @@ export function openBrowser(options: BrowserOptions): Browser {
 		return said(s, await read(s, true, signal));
 	};
 
+	/**
+	 * Whether the owner's input can send something of theirs: a press (its release clicks), Enter, an address, back.
+	 * Only these wait for the computer's repair; a character, another key, a release, the pointer passing and the wheel
+	 * go to the page as it stands.
+	 */
+	const sends = (input: OwnerInput) =>
+		input.type === "navigate" ||
+		input.type === "back" ||
+		(input.type === "mouse" && input.action === "down") ||
+		(input.type === "key" && input.key === "Enter");
+	/** The owner's inputs reach the page one at a time, as they came: one that waits never lets a later one pass it. */
+	let inputs: Promise<void> = Promise.resolve();
+	const put = async (input: OwnerInput): Promise<void> => {
+		const s = session;
+		if (s === undefined || control !== "owner") throw new Refused("Take the browser first.");
+		if (sends(input)) await options.recover?.();
+		if (session !== s || control !== "owner") throw new Refused("Take the browser first.");
+		touch();
+		if (input.type === "navigate") {
+			let url: URL;
+			try {
+				url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(input.url) ? input.url : `https://${input.url}`);
+			} catch {
+				throw new Refused(`${input.url} is not an address.`);
+			}
+			if (url.protocol !== "http:" && url.protocol !== "https:") throw new Refused("Only http and https addresses.");
+			await s.cdp.send("Page.navigate", { url: url.href }, s.page);
+			return;
+		}
+		if (input.type === "back") {
+			const history = await s.cdp.send<{ currentIndex: number; entries: { id: number }[] }>(
+				"Page.getNavigationHistory",
+				{},
+				s.page,
+			);
+			const previous = history.entries[history.currentIndex - 1];
+			if (previous !== undefined) await s.cdp.send("Page.navigateToHistoryEntry", { entryId: previous.id }, s.page);
+			return;
+		}
+		if (input.type === "mouse") {
+			const at = {
+				x: Math.max(0, Math.min(VIEWPORT.width, input.x)),
+				y: Math.max(0, Math.min(VIEWPORT.height, input.y)),
+			};
+			if (input.action === "down") s.focusMoved = true;
+			if (input.action === "wheel")
+				await s.cdp.send(
+					"Input.dispatchMouseEvent",
+					{ type: "mouseWheel", ...at, deltaX: input.deltaX ?? 0, deltaY: input.deltaY ?? 0 },
+					s.page,
+				);
+			else
+				await s.cdp.send(
+					"Input.dispatchMouseEvent",
+					{
+						type: input.action === "down" ? "mousePressed" : input.action === "up" ? "mouseReleased" : "mouseMoved",
+						...at,
+						...(input.action === "move" ? {} : { button: input.button ?? "left", clickCount: 1 }),
+					},
+					s.page,
+				);
+			return;
+		}
+		// whatever the owner types is theirs: the field it lands in is sensitive from now on
+		if (s.focusMoved) {
+			s.focusMoved = false;
+			for (const tree of await frames(s))
+				for (const node of tree.nodes)
+					if (
+						node.backendDOMNodeId !== undefined &&
+						node.properties?.some((property) => property.name === "focused" && property.value.value === true)
+					)
+						s.typed.add(node.backendDOMNodeId);
+		}
+		if (input.type === "key" && (input.key === "Tab" || input.key === "Enter")) s.focusMoved = true;
+		if (input.type === "text") await s.cdp.send("Input.insertText", { text: input.text.slice(0, 10_000) }, s.page);
+		else if (KEYS[input.key] !== undefined) await press(s, input.key, input.modifiers ?? 0);
+		else if ([...input.key].length === 1) await s.cdp.send("Input.insertText", { text: input.key }, s.page);
+	};
+
 	return {
 		snapshot: (chat, stopped) =>
 			agent(stopped, async (signal) => {
@@ -1389,72 +1469,10 @@ export function openBrowser(options: BrowserOptions): Browser {
 			changed();
 			return view();
 		},
-		input: async (input) => {
-			const s = session;
-			if (s === undefined || control !== "owner") throw new Refused("Take the browser first.");
-			if (input.type !== "mouse" || (input.action !== "move" && input.action !== "wheel")) await options.recover?.();
-			if (session !== s || control !== "owner") throw new Refused("Take the browser first.");
-			touch();
-			if (input.type === "navigate") {
-				let url: URL;
-				try {
-					url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(input.url) ? input.url : `https://${input.url}`);
-				} catch {
-					throw new Refused(`${input.url} is not an address.`);
-				}
-				if (url.protocol !== "http:" && url.protocol !== "https:") throw new Refused("Only http and https addresses.");
-				await s.cdp.send("Page.navigate", { url: url.href }, s.page);
-				return;
-			}
-			if (input.type === "back") {
-				const history = await s.cdp.send<{ currentIndex: number; entries: { id: number }[] }>(
-					"Page.getNavigationHistory",
-					{},
-					s.page,
-				);
-				const previous = history.entries[history.currentIndex - 1];
-				if (previous !== undefined) await s.cdp.send("Page.navigateToHistoryEntry", { entryId: previous.id }, s.page);
-				return;
-			}
-			if (input.type === "mouse") {
-				const at = {
-					x: Math.max(0, Math.min(VIEWPORT.width, input.x)),
-					y: Math.max(0, Math.min(VIEWPORT.height, input.y)),
-				};
-				if (input.action === "down") s.focusMoved = true;
-				if (input.action === "wheel")
-					await s.cdp.send(
-						"Input.dispatchMouseEvent",
-						{ type: "mouseWheel", ...at, deltaX: input.deltaX ?? 0, deltaY: input.deltaY ?? 0 },
-						s.page,
-					);
-				else
-					await s.cdp.send(
-						"Input.dispatchMouseEvent",
-						{
-							type: input.action === "down" ? "mousePressed" : input.action === "up" ? "mouseReleased" : "mouseMoved",
-							...at,
-							...(input.action === "move" ? {} : { button: input.button ?? "left", clickCount: 1 }),
-						},
-						s.page,
-					);
-				return;
-			}
-			// whatever the owner types is theirs: the field it lands in is sensitive from now on
-			if (s.focusMoved) {
-				s.focusMoved = false;
-				for (const tree of await frames(s))
-					for (const node of tree.nodes)
-						if (
-							node.backendDOMNodeId !== undefined &&
-							node.properties?.some((property) => property.name === "focused" && property.value.value === true)
-						)
-							s.typed.add(node.backendDOMNodeId);
-			}
-			if (input.type === "key" && (input.key === "Tab" || input.key === "Enter")) s.focusMoved = true;
-			if (input.type === "text") await s.cdp.send("Input.insertText", { text: input.text.slice(0, 10_000) }, s.page);
-			else if (KEYS[input.key] !== undefined) await press(s, input.key, input.modifiers ?? 0);
-			else if ([...input.key].length === 1) await s.cdp.send("Input.insertText", { text: input.key }, s.page);
+		input: (input) => {
+			const next = inputs.then(() => put(input));
+			inputs = next.catch(() => undefined);
+			return next;
 		},
 		forget: async (site) => {
 			touch();

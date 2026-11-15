@@ -4,6 +4,7 @@ import { openBrowsers } from "../src/box/browsers.ts";
 import { until } from "./helpers.ts";
 
 const started = vi.hoisted(() => [] as { readonly command: readonly string[]; closed: boolean }[]);
+const sent = vi.hoisted(() => [] as { readonly method: string; readonly params: Record<string, unknown> }[]);
 vi.mock("../src/box/cdp.ts", async (original) => ({
 	...(await original<typeof import("../src/box/cdp.ts")>()),
 	Cdp: class {
@@ -16,7 +17,15 @@ vi.mock("../src/box/cdp.ts", async (original) => ({
 		on() {
 			return () => {};
 		}
-		async send(method: string) {
+		async send(method: string, params: Record<string, unknown> = {}) {
+			sent.push({ method, params });
+			if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "F", url: "about:blank" } } };
+			if (method === "Accessibility.getFullAXTree") {
+				// the walk takes a while: what comes behind it has every chance to pass it
+				await new Promise((resolve) => setImmediate(resolve));
+				return { nodes: [] };
+			}
+			if (method === "Page.getNavigationHistory") return { currentIndex: 1, entries: [{ id: 1 }, { id: 2 }] };
 			if (method === "Target.getTargets") return { targetInfos: [{ type: "page", targetId: "T" }] };
 			if (method === "Target.createTarget") return { targetId: "T" };
 			if (method === "Target.attachToTarget") return { sessionId: "S" };
@@ -41,7 +50,22 @@ const cleanups: (() => void)[] = [];
 afterEach(() => {
 	for (const close of cleanups.splice(0)) close();
 	started.length = 0;
+	sent.length = 0;
 });
+
+/** What the page was given of the owner's, in the order it got it. */
+const given = () =>
+	sent.flatMap(({ method, params }) =>
+		method === "Input.insertText"
+			? [`text ${String(params.text)}`]
+			: method === "Input.dispatchMouseEvent"
+				? [String(params.type)]
+				: method === "Input.dispatchKeyEvent" && params.type !== "keyUp"
+					? [`key ${String(params.key)}`]
+					: method === "Page.navigate" || method === "Page.navigateToHistoryEntry"
+						? [method]
+						: [],
+	);
 
 describe("optional browser preparation", () => {
 	it("owner takeover excludes agent actions before waiting for computer recovery", async () => {
@@ -115,6 +139,118 @@ describe("optional browser preparation", () => {
 		} finally {
 			recovery.ready([]);
 		}
+	});
+
+	it("typing waits on no repair: characters, keys that send nothing and a release reach the page during one", async () => {
+		const recovery = preparation();
+		let repairing = false;
+		const browser = openBrowser({
+			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
+			ensure: async () => {},
+			recover: async () => {
+				if (repairing) await recovery.command();
+			},
+			tell: async () => {},
+			log: () => {},
+		});
+		cleanups.push(browser.close);
+		await browser.forget("example.com");
+		await browser.hold(true);
+		repairing = true;
+		try {
+			await browser.input({ type: "text", text: "a" });
+			await browser.input({ type: "key", key: "b" });
+			await browser.input({ type: "key", key: "Backspace" });
+			await browser.input({ type: "key", key: "Tab" });
+			await browser.input({ type: "mouse", action: "up", x: 10, y: 10 });
+		} finally {
+			recovery.ready([]);
+		}
+		expect(recovery.command).not.toHaveBeenCalled();
+		expect(given()).toEqual(["text a", "text b", "key Backspace", "key Tab", "mouseReleased"]);
+	});
+
+	it("what can send waits for the repair: a press, Enter, an address and back, once each", async () => {
+		const recover = vi.fn(async () => {});
+		const browser = openBrowser({
+			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
+			ensure: async () => {},
+			recover,
+			tell: async () => {},
+			log: () => {},
+		});
+		cleanups.push(browser.close);
+		await browser.forget("example.com");
+		await browser.hold(true);
+		recover.mockClear();
+		await browser.input({ type: "mouse", action: "down", x: 10, y: 10 });
+		expect(recover).toHaveBeenCalledTimes(1);
+		await browser.input({ type: "mouse", action: "up", x: 10, y: 10 });
+		await browser.input({ type: "text", text: "hello" });
+		expect(recover).toHaveBeenCalledTimes(1);
+		await browser.input({ type: "key", key: "Enter" });
+		expect(recover).toHaveBeenCalledTimes(2);
+		await browser.input({ type: "navigate", url: "example.com" });
+		expect(recover).toHaveBeenCalledTimes(3);
+		await browser.input({ type: "back" });
+		expect(recover).toHaveBeenCalledTimes(4);
+		expect(given()).toEqual([
+			"mousePressed",
+			"mouseReleased",
+			"text hello",
+			"key Enter",
+			"Page.navigate",
+			"Page.navigateToHistoryEntry",
+		]);
+	});
+
+	it("the owner's inputs reach the page in the order sent, behind a press that waits for a repair", async () => {
+		const recovery = preparation();
+		let repairing = false;
+		const browser = openBrowser({
+			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
+			ensure: async () => {},
+			recover: async () => {
+				if (repairing) await recovery.command();
+			},
+			tell: async () => {},
+			log: () => {},
+		});
+		cleanups.push(browser.close);
+		await browser.forget("example.com");
+		await browser.hold(true);
+		repairing = true;
+		// all at once, none waited for: a click into a field, then what was typed there
+		const typed = [..."the quick brown fox"];
+		const all = Promise.all([
+			browser.input({ type: "mouse", action: "down", x: 10, y: 10 }),
+			browser.input({ type: "mouse", action: "up", x: 10, y: 10 }),
+			...typed.map((text) => browser.input({ type: "text", text })),
+			browser.input({ type: "key", key: "Enter" }),
+		]);
+		await until(() => recovery.command.mock.calls.length > 0);
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(given()).toEqual([]);
+		recovery.ready([]);
+		await all;
+		expect(given()).toEqual(["mousePressed", "mouseReleased", ...typed.map((text) => `text ${text}`), "key Enter"]);
+	});
+
+	it("a refused input holds back none of those behind it", async () => {
+		const browser = openBrowser({
+			setup: { command: async () => ["browser"], login: { username: "u", password: "p" } },
+			ensure: async () => {},
+			tell: async () => {},
+			log: () => {},
+		});
+		cleanups.push(browser.close);
+		await browser.forget("example.com");
+		await browser.hold(true);
+		const refused = browser.input({ type: "navigate", url: "file:///etc/passwd" });
+		const next = browser.input({ type: "text", text: "a" });
+		await expect(refused).rejects.toThrow("Only http and https addresses.");
+		await next;
+		expect(given()).toEqual(["text a"]);
 	});
 
 	it("an open browser brings the box up once: its actions, takeover and input cost no bring-up", async () => {
