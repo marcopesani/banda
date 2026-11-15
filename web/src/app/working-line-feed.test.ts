@@ -20,7 +20,7 @@ const render = (segments: readonly Segment[], outgoing: Parameters<typeof FeedVi
 	);
 const line = (html: string) => html.includes("data-working-line");
 
-it("while the agent works and has said nothing, its face and Working… stand at the foot, named for who works", () => {
+it("while the agent works and has shown nothing, its face and Working… stand at the foot, named for who works", () => {
 	const html = render([asked, working]);
 	expect(line(html)).toBe(true);
 	expect(html).toContain('aria-label="Mara is working"');
@@ -28,17 +28,16 @@ it("while the agent works and has said nothing, its face and Working… stand at
 	expect(html.indexOf("Find me a train")).toBeLessThan(html.indexOf("data-working-line"));
 });
 
-it("goes at the agent's first words, though its turn is still running; a line for what ran does not take it", () => {
+it("goes at the agent's first content, though its turn is still running", () => {
 	expect(line(render([asked, reply, working]))).toBe(false);
-	// what ran says nothing of whether the agent is done: the work after it still shows
+	// anything it shows counts, not only words: a line in the feed too
 	const effect: Segment = {
 		kind: "effect",
 		key: "41:effect",
 		label: "Read your calendar",
 		permission: { scope: "always" },
 	};
-	expect(line(render([asked, effect, working]))).toBe(true);
-	expect(line(render([asked, reply, effect, working]))).toBe(false);
+	expect(line(render([asked, effect, working]))).toBe(false);
 });
 
 it("comes back when a new turn begins: the owner's words, or a routine's wake", () => {
@@ -47,35 +46,6 @@ it("comes back when a new turn begins: the owner's words, or a routine's wake", 
 	const wake: Segment = { kind: "wake", key: "43", text: "Trains ran", routine: "trains" };
 	expect(line(render([asked, reply, wake, working]))).toBe(true);
 	expect(line(render([wake, reply, working]))).toBe(false);
-});
-
-it("comes back when the owner answers a card: the agent goes on from the answer", () => {
-	const ask = { type: "approval", tool: "cal__create_event", args: {}, prompt: "Add the event?" } as never;
-	const card = (ended?: "answered" | "dismissed"): Segment => ({
-		kind: "approval",
-		key: "41:ask",
-		ask,
-		label: "Add an event",
-		args: [],
-		...(ended === undefined
-			? { open: { wait: "w1", deadline: 0 } }
-			: { ended: { outcome: ended, said: ended === "answered" ? "Allowed" : "Dismissed" } }),
-	});
-	// allowed, and the call it allowed is running: the line stands below the card
-	const html = render([asked, card("answered"), working]);
-	expect(line(html)).toBe(true);
-	expect(html.indexOf("Add an event")).toBeLessThan(html.indexOf("data-working-line"));
-	expect(line(render([asked, card("dismissed"), working]))).toBe(true);
-	// what the agent says after the answer takes the line away again
-	expect(line(render([asked, card("answered"), reply, working]))).toBe(false);
-	// a question answered is the same
-	const question: Segment = {
-		kind: "question",
-		key: "42:ask",
-		ask: { type: "question", question: "Morning or evening?" } as never,
-		ended: { outcome: "answered", said: "Morning" },
-	};
-	expect(line(render([asked, reply, question, working]))).toBe(true);
 });
 
 it("stays below the owner's message both while sending and once queued", () => {

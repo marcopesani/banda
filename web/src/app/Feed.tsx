@@ -400,10 +400,6 @@ const sideOf = (segment: Segment): "owner" | "agent" | "line" => {
 /** What begins an agent's turn in its chat: the working line can show until the agent shows something. */
 const TURN_STARTS: ReadonlySet<Segment["kind"]> = new Set(["owner", "owner-message", "wake", "agentMessage"]);
 
-/** An ask that ended: answered, dismissed or lapsed, the agent's work goes on from there. */
-const resumes = (segment: Segment): boolean =>
-	(segment.kind === "approval" || segment.kind === "question") && segment.ended !== undefined;
-
 /** The transcript entry a segment stands for, from its key ("41", "41:ask", "answer:41"). */
 const entryOf = (key: string): number | undefined => {
 	const found = /\d+/.exec(key)?.[0];
@@ -467,8 +463,8 @@ export function FeedView({
 	const failed = tryAgainAfter(segments);
 	let run: { side: "owner" | "agent"; items: ReactNode[]; at?: number | undefined; key: string } | undefined;
 	let lastDay: string | undefined;
-	// whether the agent said anything since its turn began: the working line stands only until it does, however long
-	// the turn goes on, so the request that follows its answer draws nothing
+	// whether the agent showed anything since its turn began: the working line
+	// stands only until it does, however long the turn goes on
 	let shown = false;
 	let showWorking = false;
 	const flush = () => {
@@ -534,12 +530,9 @@ export function FeedView({
 			) : (
 				partOf(chat, who, segment, onOpenArtifact, agent, onRoutine, inspect, messageAuthor)
 			);
-		// what begins a turn: the owner's words, a routine's wake, another agent's message. Only the agent's own words
-		// end the line: a card the owner answered, a line for what ran or a notice says nothing of whether it is done,
-		// and the work after one (a call allowed, a long request) would otherwise show nothing at all
-		// and an ask that ended is the owner's turn given back: the agent goes on from their answer as from their words
-		if (TURN_STARTS.has(segment.kind) || resumes(segment)) shown = false;
-		else if (part !== null && segment.kind === "companion") shown = true;
+		// what begins a turn: the owner's words, a routine's wake, another agent's message
+		if (TURN_STARTS.has(segment.kind)) shown = false;
+		else if (part !== null) shown = true;
 		if (again && segment.kind === "companion") {
 			flush();
 			if (part !== null) {
