@@ -135,10 +135,12 @@ beforeAll(async () => {
 					window.opened = [];
 					function Fixture() {
 					 const [answered, setAnswered] = useState(location.search.includes('settled'));
+					 const [away, setAway] = useState(false);
 					 return <main style={{maxWidth:720,margin:'auto',padding:16,display:'flex',flexDirection:'column',gap:12}}>
 					  <button onClick={() => setAnswered(true)}>Answer them</button>
-					  <FeedView chat={1} who={{ name: 'Sancho', face }} agent="sancho" compact={false}
-					   segments={answered ? settled : open} onRoutine={(name) => window.opened.push(name)} />
+					  <button onClick={() => setAway(!away)}>Other chat</button>
+					  {away ? null : <FeedView chat={1} who={{ name: 'Sancho', face }} agent="sancho" compact={false}
+					   segments={answered ? settled : open} onRoutine={(name) => window.opened.push(name)} />}
 					 </main>;
 					}
 					createRoot(document.getElementById('root')).render(<StrictMode><Fixture /></StrictMode>);`;
@@ -239,6 +241,16 @@ for (const width of [390, 1280]) {
 				);
 				expect(spaced.length).toBe(5);
 				for (const gap of spaced) expect(gap).toBeLessThanOrEqual(8);
+				// the chat left and come back to: what folded is its row from the first paint, never the card again
+				await page.run(`${button("Other chat")}.click()`);
+				await page.until(`document.querySelectorAll('[data-done]').length === 0`);
+				await page.run(
+					`(() => { window.cards = 0; new MutationObserver(() => { if (document.body.textContent.includes('Approved, and allowed for this task') || ${button("Comment")}) window.cards++; }).observe(document.body, { childList: true, subtree: true, characterData: true }); })()`,
+				);
+				await page.run(`${button("Other chat")}.click()`);
+				await page.until(KINDS.map((kind) => `!!${row(kind)}`).join(" && "));
+				await new Promise((resolve) => setTimeout(resolve, 1200));
+				expect(await page.run(`window.cards`)).toBe(0);
 				// rows sit across the feed, centred, never wider than the page
 				expect(
 					await page.run<boolean>(

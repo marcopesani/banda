@@ -326,6 +326,7 @@ export function Settling({
 	row,
 	hold = 700,
 	fresh = true,
+	onFold,
 }: {
 	settled: boolean;
 	/** Seen open on this page, so its settling folds as the owner watches. False: already the row when it mounts. */
@@ -334,15 +335,22 @@ export function Settling({
 	row: ReactNode;
 	/** How long the settled card shows its result before folding. */
 	hold?: number;
+	/** The card folded here, watched: whoever remembers it as open forgets. */
+	onFold?: (() => void) | undefined;
 }) {
 	const reduced = useReducedMotion() === true;
 	const [folded, setFolded] = useState(settled && !fresh);
+	const folding = useRef(onFold);
+	folding.current = onFold;
 	useEffect(() => {
 		if (!settled) {
 			setFolded(false);
 			return;
 		}
-		const timer = setTimeout(() => setFolded(true), hold);
+		const timer = setTimeout(() => {
+			setFolded(true);
+			folding.current?.();
+		}, hold);
 		return () => clearTimeout(timer);
 	}, [settled, hold]);
 	// Height is driven only across the swap, then handed back to the content ("auto"), so a row opening its card inside

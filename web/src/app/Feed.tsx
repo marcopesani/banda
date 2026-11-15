@@ -51,7 +51,7 @@ import { FilePart } from "./FilePart.tsx";
 import { HarnessSessionPart } from "./HarnessSession.tsx";
 import { LiveView } from "./LiveBrowser.tsx";
 import { FollowedObject, MessageObjects, MessageText } from "./Objects.tsx";
-import { AskRef, approvalKind, didNotWords, didWords, sawOpen, wasOpen } from "./Settled.tsx";
+import { AskRef, approvalKind, didNotWords, didWords, sawFold, sawOpen, wasOpen } from "./Settled.tsx";
 import { approvalState, notDoneKind, questionState } from "./settled-states.ts";
 import { routineTitle } from "./titles.ts";
 
@@ -143,7 +143,7 @@ function ProposalFeedCard({ segment }: { segment: Extract<Segment, { kind: "prop
 				card={card}
 			/>
 		);
-	return <Settling settled fresh={wasOpen(segment.key)} card={card} row={row} />;
+	return <Settling settled fresh={wasOpen(segment.key)} onFold={() => sawFold(segment.key)} card={card} row={row} />;
 }
 
 /** A routine's file name as words: portugal-fun-fact reads Portugal fun fact. */
@@ -240,6 +240,7 @@ function RoutineLine({
 			<Settling
 				settled
 				fresh={wasOpen(segment.key)}
+				onFold={() => sawFold(segment.key)}
 				card={card}
 				row={
 					<Done
@@ -762,7 +763,9 @@ function partOf(
 						card={card}
 					/>
 				);
-			return <Settling settled fresh={wasOpen(segment.key)} card={card} row={row} />;
+			return (
+				<Settling settled fresh={wasOpen(segment.key)} onFold={() => sawFold(segment.key)} card={card} row={row} />
+			);
 		}
 		case "approval": {
 			const open = segment.open;
@@ -792,6 +795,7 @@ function partOf(
 				<Settling
 					settled
 					fresh={wasOpen(segment.key)}
+					onFold={() => sawFold(segment.key)}
 					card={card}
 					row={
 						<Done

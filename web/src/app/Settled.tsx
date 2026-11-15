@@ -21,6 +21,11 @@ export function wasOpen(key: string): boolean {
 	return seenOpen.has(key);
 }
 
+/** It folded as the owner watched: drawn again (the chat left and come back to), it is the row from the start. */
+export function sawFold(key: string): void {
+	seenOpen.delete(key);
+}
+
 const IRREGULAR: Record<string, string> = {
 	buy: "bought",
 	do: "did",
