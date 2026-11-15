@@ -139,8 +139,9 @@ export async function backupHome(
 		hit("backup:blobs");
 		const source = new DatabaseSync(join(home, STORE), { readOnly: true });
 		try {
-			// every page in one step, under one read snapshot: a daemon that keeps writing cannot make it start over
-			await backup(source, join(stage, STORE), { rate: -1 });
+			// every page in one step, under one read snapshot: a daemon that keeps writing cannot make it start over.
+			// The largest count of pages a step takes: the Node.js a release bundles refuses SQLite's -1 for "all"
+			await backup(source, join(stage, STORE), { rate: 0x7fffffff });
 		} finally {
 			source.close();
 		}
