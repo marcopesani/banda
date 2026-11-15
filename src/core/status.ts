@@ -136,19 +136,62 @@ export async function openWaits(
 		.map(({ id: _, ...wait }) => wait);
 }
 
+/**
+ * The chats whose agent is at work in a routine's run: a run's conversation is its own, apart from the chat it speaks
+ * in, so that chat's own tasks say nothing of it. A run counts for the chat it speaks in while that chat is its
+ * agent's; one that waits on the owner is not at work.
+ */
+async function routinesAtWork(
+	harness: Harness,
+	live: readonly TaskGraphNode[],
+	homes: { readonly [chat: string]: { readonly agent?: string } },
+	ctx: Context,
+): Promise<ReadonlySet<number>> {
+	const apart = [...new Set(live.flatMap((node) => (node.background ? [] : [Number(node.conversationId)])))].filter(
+		(chat) => homes[chat] === undefined,
+	);
+	const working = new Set<number>();
+	// the runs are read only while something works outside the chats: most pushes of the shell find nothing there
+	if (apart.length === 0) return working;
+	const runs = (await harness.snapshot(RoutineRuns, ctx))?.runs ?? {};
+	for (const chat of apart) {
+		const run = runs[chat];
+		const home = run === undefined ? undefined : homes[run.chat];
+		if (
+			run !== undefined &&
+			home !== undefined &&
+			(home.agent ?? LEAD) === run.agent &&
+			stateOf(live, chat) === "running"
+		)
+			working.add(run.chat);
+	}
+	return working;
+}
+
 export async function status(harness: Harness, ctx: Context = context): Promise<Status> {
 	const live = await nodes(harness, ctx);
 	const waits = await openWaits(harness, undefined, ctx, live);
 	const homes = (await harness.snapshot(Routes, ctx))?.chats ?? {};
+	const routines = await routinesAtWork(harness, live, homes, ctx);
 	const chats: ChatStatus[] = Object.entries(homes).map(([id, { origin, agent }]) => {
 		const chat = Number(id);
-		const state = stateOf(live, chat);
+		const own = stateOf(live, chat);
+		// a chat with nothing of its own going says what its agent's routines do: one waits on the owner here (its
+		// approval is shown in this chat), or one is at work
+		const state =
+			own !== "idle"
+				? own
+				: waits.some((wait) => wait.displayChat === chat)
+					? "waiting"
+					: routines.has(chat)
+						? "running"
+						: "idle";
 		return {
 			origin,
 			chat,
 			// a chat from before agents had files ran the lead
 			agent: (agent as string | undefined) ?? LEAD,
-			state: state === "idle" && waits.some((wait) => wait.displayChat === chat) ? "waiting" : state,
+			state,
 			unanswered: live.filter((node) => Number(node.conversationId) === chat && node.kind === "banda.turn").length,
 		};
 	});

@@ -40,6 +40,7 @@ import {
 	whenWords,
 	zoneWords,
 } from "../src/core/schedule.ts";
+import { stateOf, status } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import { startDaemon } from "../src/daemon.ts";
@@ -463,6 +464,26 @@ describe("run now", () => {
 		expect(record?.ranNow).toEqual(["a", "b"]);
 		expect(record?.wakes).toHaveLength(2);
 		await expect(core.runRoutine(harness, "nope", "c")).rejects.toThrow(/no routine/);
+		await harness.close(context);
+	});
+
+	it("its agent's chat says the agent works while a run goes, though the run is apart from it, and rests after", async () => {
+		const { harness, core, gate, gateway } = await setup("---\ndescription: Tea\ncron: 0 16 * * *\n---\nSay tea.\n");
+		let release = () => {};
+		gate.hold = new Promise((resolve) => {
+			release = resolve;
+		});
+		expect(await core.runRoutine(harness, "tea", "a")).toBe("ran");
+		// the run's conversation is its own: the chat it speaks in holds none of its work
+		const run = await until(async () => Object.entries((await harness.snapshot(RoutineRuns, context))?.runs ?? {})[0]);
+		const chat = run[1].chat;
+		expect(Number(run[0])).not.toBe(chat);
+		const row = async () => (await status(harness)).chats.find((each) => each.chat === chat);
+		await until(async () => (await row())?.state === "running");
+		expect(stateOf(Object.values((await harness.taskGraph(context)).value.tasks), chat)).toBe("idle");
+		release();
+		await until(() => gateway.sent.length === 1);
+		await until(async () => (await row())?.state === "idle");
 		await harness.close(context);
 	});
 });
