@@ -19,7 +19,11 @@ export const fingerprint = (id: string) => (id.slice(0, 16).match(/.{1,4}/g) ?? 
 /** What a pairing code carries. */
 export type PairingLink = { readonly ticket: string; readonly invite: string };
 
-/** The ticket and invite a `banda://pair` link carries; undefined when the text is not one. */
+/**
+ * The ticket and invite a pairing link carries; undefined when the text is not one. A link is `banda://pair?…`, what
+ * the phone's app opens, or the same pairing as an address a browser opens, the two after its `#pair?`: a code shows
+ * either, and so does a link the owner copies.
+ */
 export function readPairingLink(text: string): PairingLink | undefined {
 	let url: URL;
 	try {
@@ -27,9 +31,13 @@ export function readPairingLink(text: string): PairingLink | undefined {
 	} catch {
 		return undefined;
 	}
-	if (url.protocol !== "banda:" || url.host !== "pair") return undefined;
-	const ticket = url.searchParams.get("ticket");
-	const invite = url.searchParams.get("invite");
+	let carried: URLSearchParams;
+	if (url.protocol === "banda:" && url.host === "pair") carried = url.searchParams;
+	else if (url.protocol === "https:" && url.hash.startsWith("#pair?"))
+		carried = new URLSearchParams(url.hash.slice("#pair?".length));
+	else return undefined;
+	const ticket = carried.get("ticket");
+	const invite = carried.get("invite");
 	return ticket === null || invite === null || ticket === "" || invite === "" ? undefined : { ticket, invite };
 }
 
@@ -69,6 +77,7 @@ export const NOTES = {
 	expired: "The code expired before it was approved. Make a new one on your computer and scan it.",
 	unreachable: "Could not reach your computer. Check that it is on and banda is running, then scan again.",
 	notACode: "That is not a banda pairing code. Scan the one Settings → Devices shows on your computer.",
+	notALink: "That is not a banda pairing link. Copy the one Settings → Devices gives on your computer.",
 	noCamera: "This phone cannot scan codes. Open the code's link on this phone instead.",
 } as const;
 
@@ -278,6 +287,14 @@ export function pairing({ shell, scanner, ask, check, every = 2000 }: PairingDep
 			await pair(link, name);
 		},
 		pair,
+		/** A link the owner copied on the computer and pasted here, where there is no code to scan: then ask under `as`. */
+		async paste(text: string, as: string) {
+			++attempt;
+			name = as.trim();
+			const link = readPairingLink(text);
+			if (link === undefined) return toScan(NOTES.notALink);
+			await pair(link, name);
+		},
 		/** Only the owner comparing the ticket's computer with the desktop sends the invite. */
 		async confirm() {
 			if (stopped || current.step !== "confirm") return;

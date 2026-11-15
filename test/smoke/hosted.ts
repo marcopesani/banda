@@ -93,6 +93,17 @@ await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", resolve));
 // localhost: a secure context, as the hosted origin is, so the worker registers and the key can be sealed
 const url = `http://localhost:${(origin.address() as AddressInfo).port}/`;
 
+/** The files of a build that are the decoder a page reads a QR code with: jsQR, by a word of its own that stays in it. */
+const decoderIn = async (dir: string) => {
+	const found: string[] = [];
+	for (const name of await readdir(join(dir, "assets")))
+		if (name.endsWith(".js") && (await readFile(join(dir, "assets", name), "utf8")).includes("attemptBoth"))
+			found.push(name);
+	return found;
+};
+/** Whether a build's page asks every few seconds if its icon changed, as the page a daemon serves does. */
+const asksAfterIcon = async (dir: string) => (await readFile(join(dir, "index.html"), "utf8")).includes("icon-refresh");
+
 await mkdir(shots, { recursive: true });
 let failed = false;
 const check = (where: number | string, what: string, ok: boolean, detail: unknown = "") => {
@@ -115,6 +126,20 @@ try {
 		(await endpointIn(plain)).length === 0,
 		await endpointIn(plain),
 	);
+	check(
+		"build",
+		"the hosted build carries the decoder its page scans with, in a file of its own",
+		(await decoderIn(dist)).length === 1 && !(await decoderIn(dist))[0]?.startsWith("index-"),
+		await decoderIn(dist),
+	);
+	check(
+		"build",
+		"the build any other place serves carries no decoder",
+		(await decoderIn(plain)).length === 0,
+		await decoderIn(plain),
+	);
+	check("build", "the hosted page does not ask after an icon that cannot change", !(await asksAfterIcon(dist)));
+	check("build", "the page a daemon serves still asks after its icon", await asksAfterIcon(plain));
 
 	const shows = "document.querySelector('h1')?.textContent === 'Pair this phone with banda'";
 	for (const size of [

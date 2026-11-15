@@ -80,7 +80,7 @@ for (const width of [390, 1280])
 					// the code lives ten minutes from when it was made: what the countdown shows is bounded by the time that
 					// really passed around the click, not by a guess at how fast this machine is
 					const before = Date.now();
-					await click(page, button("Pair a phone"));
+					await click(page, button("Pair a device"));
 					await page.until(labelled("Code to scan with banda on your phone"));
 					await page.until(`${text}.includes('Works for ')`);
 					const countdownShown = /Works for (\d+):(\d\d)/.exec(await page.run<string>(text));
@@ -98,6 +98,12 @@ for (const width of [390, 1280])
 					const shown = await page.run<string>(text);
 					for (const word of [endpoint, "ticket", "relay", "endpoint", "banda://"])
 						expect(shown.toLowerCase()).not.toContain(word.toLowerCase());
+					// beside the code, before anything is opened: the pairing as a link to copy, for what cannot scan
+					expect(shown).toContain("No camera to scan with?");
+					const beside = await page.run<string[]>(
+						`[...document.querySelectorAll('[data-copy]')].filter(el => el.getClientRects().length > 0).map(el => el.dataset.copy)`,
+					);
+					expect(beside).toHaveLength(1);
 
 					await click(page, button("Details"));
 					await page.until(`${text}.includes('Pairing link')`);
@@ -116,6 +122,7 @@ for (const width of [390, 1280])
 					const opened = new URL(browser);
 					expect(`${opened.origin}${opened.pathname}${opened.search}`).toBe("https://app.banda.rocks/");
 					expect(carriedLink(opened.hash)).toBe(pairing);
+					expect(beside).toEqual([browser]);
 					// the code turns into that link when the owner says the phone has no app, and back
 					await click(page, button("No app? Use its browser"));
 					await page.until(labelled("Code to scan with your phone’s camera"));

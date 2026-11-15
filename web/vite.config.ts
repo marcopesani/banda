@@ -60,6 +60,23 @@ export function policyMeta(): Plugin {
 	};
 }
 
+/**
+ * The page asks every few seconds whether its icon changed, since the daemon draws it from the agent's face. The app's
+ * own origin serves one drawing, which changes only with a deploy, so the page built for it does not ask.
+ */
+export function stillIcon(): Plugin {
+	return {
+		name: "banda:still-icon",
+		apply: "build",
+		transformIndexHtml: (html) => {
+			if (!hosted) return html;
+			const asks = '<script src="/icon-refresh.js" defer></script>';
+			if (!html.includes(asks)) throw new Error("index.html no longer asks after its icon the way this build removes");
+			return html.replace(asks, "");
+		},
+	};
+}
+
 /** The files of emojibase-data's English locale the emoji picker reads. */
 export const EMOJIBASE_FILES = ["data.json", "messages.json"] as const;
 
@@ -111,6 +128,7 @@ export default defineConfig({
 		tailwindcss(),
 		stampWorker(),
 		policyMeta(),
+		stillIcon(),
 		vendorEmojibase(),
 		activityFixture(process.env.BANDA_ACTIVITY_FIXTURE),
 	],

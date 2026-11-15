@@ -14,6 +14,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import type { Connection } from "@number0/iroh";
+import { encode } from "uqr";
 import { expect, it } from "vitest";
 import { startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
@@ -133,51 +134,70 @@ async function bridge(daemon: string) {
 	};
 }
 
+/** A daemon reached on loopback, an invite of its owner's, and the app served as its own origin serves it. */
+async function start() {
+	const home = await tempHome();
+	if (SHOTS !== undefined) await mkdir(SHOTS, { recursive: true });
+	await writeFile(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
+	const daemon = await startDaemon({
+		home,
+		port: 0,
+		models: echoModels().models,
+		log: () => {},
+		box: hostBox(home),
+		remote: { reach: "loopback" },
+	});
+	const token = (await readDaemonFile(home))!.token!;
+	await skipShippedSkills(daemon.port, token);
+	const owner = async <T>(path: string, method = "GET", body?: object): Promise<T> => {
+		const response = await fetch(`http://127.0.0.1:${daemon.port}/api${path}`, {
+			method,
+			headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+			...(body === undefined ? {} : { body: JSON.stringify(body) }),
+		});
+		if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
+		return response.json() as Promise<T>;
+	};
+	// the invite binds the daemon's endpoint; its id is what the phone's screen shows for this computer
+	const invite = await owner<InviteView>("/devices/invites", "POST");
+	const computer = (await owner<DevicesView>("/devices")).endpoint!.id;
+	const endpoint = await bridge(computer);
+	const server = await webServer({
+		define: { __BANDA_HOSTED__: "true" },
+		// the decoder a scan may need is known from the start: found in the middle of one, Vite would reload the page
+		optimizeDeps: { include: ["jsqr"] },
+		plugins: [
+			{
+				name: "bridged-endpoint",
+				enforce: "pre",
+				// the build's own stand-in for a build that is no device, or the module itself: both are this one here
+				resolveId: (id) => (/(no-endpoint\.ts|banda_iroh_web\.js)$/.test(id) ? "\0bridged-endpoint" : undefined),
+				load: (id) => (id === "\0bridged-endpoint" ? endpoint.module : undefined),
+			},
+		],
+	});
+	return {
+		owner,
+		invite,
+		computer,
+		server,
+		close: async () => {
+			await server.close();
+			await endpoint.close();
+			await daemon.close();
+		},
+	};
+}
+
+const text = "document.body.innerText";
+const button = (label: string) =>
+	`[...document.querySelectorAll('button')].find((el) => el.getClientRects().length > 0 && el.textContent.trim() === ${JSON.stringify(label)})`;
+
 for (const width of [390, 1280])
 	it.skipIf(!hasChrome())(
 		`a browser pairs from a link, is the same device after a reload, and is sent back to pairing once revoked at ${width}px`,
 		async () => {
-			const home = await tempHome();
-			if (SHOTS !== undefined) await mkdir(SHOTS, { recursive: true });
-			await writeFile(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
-			const daemon = await startDaemon({
-				home,
-				port: 0,
-				models: echoModels().models,
-				log: () => {},
-				box: hostBox(home),
-				remote: { reach: "loopback" },
-			});
-			const token = (await readDaemonFile(home))!.token!;
-			await skipShippedSkills(daemon.port, token);
-			const owner = async <T>(path: string, method = "GET", body?: object): Promise<T> => {
-				const response = await fetch(`http://127.0.0.1:${daemon.port}/api${path}`, {
-					method,
-					headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-					...(body === undefined ? {} : { body: JSON.stringify(body) }),
-				});
-				if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
-				return response.json() as Promise<T>;
-			};
-			// the invite binds the daemon's endpoint; its id is what the phone's screen shows for this computer
-			const invite = await owner<InviteView>("/devices/invites", "POST");
-			const computer = (await owner<DevicesView>("/devices")).endpoint!.id;
-			const endpoint = await bridge(computer);
-			const server = await webServer({
-				define: { __BANDA_HOSTED__: "true" },
-				plugins: [
-					{
-						name: "bridged-endpoint",
-						enforce: "pre",
-						// the build's own stand-in for a build that is no device, or the module itself: both are this one here
-						resolveId: (id) => (/(no-endpoint\.ts|banda_iroh_web\.js)$/.test(id) ? "\0bridged-endpoint" : undefined),
-						load: (id) => (id === "\0bridged-endpoint" ? endpoint.module : undefined),
-					},
-				],
-			});
-			const text = "document.body.innerText";
-			const button = (label: string) =>
-				`[...document.querySelectorAll('button')].find((el) => el.getClientRects().length > 0 && el.textContent.trim() === ${JSON.stringify(label)})`;
+			const { owner, invite, computer, server, close } = await start();
 			const shoot = async (page: { shoot(file: string): Promise<void> }, name: string) => {
 				if (SHOTS !== undefined) await page.shoot(join(SHOTS, `hosted-${width}-${name}.png`));
 			};
@@ -270,10 +290,160 @@ for (const width of [390, 1280])
 					expect(page.errors()).toEqual([]);
 				});
 			} finally {
-				await server.close();
-				await endpoint.close();
-				await daemon.close();
+				await close();
 			}
 		},
 		120_000,
 	);
+
+/**
+ * A camera for the page: its picture is `code`, drawn as the computer's screen shows it. The page's own camera call
+ * answers with it, and `cameraLetGo` says whether the page has since stopped it.
+ */
+const camera = (code: string) => {
+	const { data } = encode(code, { ecc: "M", border: 2 });
+	return `(() => {
+		const matrix = ${JSON.stringify(data)};
+		const side = 6;
+		const canvas = document.createElement("canvas");
+		canvas.width = canvas.height = matrix.length * side;
+		const context = canvas.getContext("2d");
+		const draw = () => {
+			context.fillStyle = "#fff";
+			context.fillRect(0, 0, canvas.width, canvas.height);
+			context.fillStyle = "#000";
+			matrix.forEach((row, y) => row.forEach((dark, x) => { if (dark) context.fillRect(x * side, y * side, side, side); }));
+		};
+		draw();
+		// a stream of a canvas has a new frame only when the canvas is drawn
+		setInterval(draw, 60);
+		// each asking is given a stream of its own, as a camera gives: every one of them is the page's to stop
+		const given = [];
+		navigator.mediaDevices.getUserMedia = async () => {
+			const stream = canvas.captureStream(15);
+			given.push(stream);
+			return stream;
+		};
+		window.cameraLetGo = () =>
+			given.length > 0 && given.every((stream) => stream.getTracks().every((track) => track.readyState === "ended"));
+	})()`;
+};
+
+/** What reads the picture, by what the browser has: each is the page's `BarcodeDetector` before the scan starts. */
+const DECODERS = {
+	"the browser's own detector": undefined,
+	"the decoder the page carries, in a browser with no detector": "undefined",
+	"the decoder the page carries, when the browser's detector says it reads codes and then cannot": `class {
+		static getSupportedFormats = async () => ["qr_code"];
+		detect = async () => { throw new DOMException("Barcode detection service unavailable.", "NotSupportedError"); };
+	}`,
+};
+
+for (const [decoder, detector] of Object.entries(DECODERS))
+	it.skipIf(!hasChrome())(
+		`a phone's browser scans the code the computer shows, read by ${decoder}`,
+		async () => {
+			const { owner, invite, computer, server, close } = await start();
+			try {
+				await withPage(`${server.origin}/`, { width: 390, height: 844 }, async (page) => {
+					await page.until(button("Scan the code"));
+					// the code Settings shows by default, the one the phone's app reads: a page that scans reads it too
+					await page.run(camera(invite.pairing));
+					if (detector !== undefined)
+						await page.run(
+							`void Object.defineProperty(window, "BarcodeDetector", { value: ${detector}, configurable: true })`,
+						);
+					// this Chrome has a detector of its own that reads QR codes, or the first case would prove nothing of it
+					else expect(await page.run(`BarcodeDetector.getSupportedFormats()`)).toContain("qr_code");
+					await page.click(button("Scan the code"));
+					// read, the camera is closed and let go of, and pairing goes on as from a link
+					await page.until(button("The codes match · Pair"), 30_000);
+					expect(await page.run<string>(text)).toContain(fingerprint(computer));
+					expect(await page.run(`document.querySelector('[role="dialog"][aria-label="Scan the code"]') === null`)).toBe(
+						true,
+					);
+					expect(await page.run("window.cameraLetGo()")).toBe(true);
+					await page.click(button("The codes match · Pair"));
+					await page.until(`${text}.includes('Waiting for approval')`);
+					const [request] = (await owner<DevicesView>("/devices")).requests;
+					await owner(`/devices/requests/${request!.id}/approve`, "POST", { name: "A phone" });
+					await page.until(`${text}.includes('Sancho') && !${text}.includes('Waiting for')`);
+					expect(page.errors()).toEqual([]);
+				});
+			} finally {
+				await close();
+			}
+		},
+		120_000,
+	);
+
+it.skipIf(!hasChrome())(
+	"a phone's browser closes the camera without a code, and says so when it may not use one",
+	async () => {
+		const { server, close } = await start();
+		try {
+			await withPage(`${server.origin}/`, { width: 390, height: 844 }, async (page) => {
+				await page.until(button("Scan the code"));
+				// a picture with no code in it: nothing is read until the owner gives up
+				await page.run(
+					camera("").replace(
+						/const matrix = .*?;/,
+						"const matrix = Array.from({ length: 40 }, () => Array(40).fill(false));",
+					),
+				);
+				await page.click(button("Scan the code"));
+				await page.until(button("Cancel"));
+				await page.click(button("Cancel"));
+				await page.until(button("Scan the code"));
+				expect(await page.run("window.cameraLetGo()")).toBe(true);
+				// refused: the screen says what to do instead, and the paste field is still there
+				await page.run(
+					`navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("no", "NotAllowedError"); }`,
+				);
+				await page.click(button("Scan the code"));
+				await page.until(`${text}.includes('cannot use this phone’s camera')`);
+				await page.click(button("Close"));
+				await page.until(button("Pair with this link"));
+			});
+		} finally {
+			await close();
+		}
+	},
+	120_000,
+);
+
+it.skipIf(!hasChrome())(
+	"a browser on a computer has no code to scan: it pairs from the link the owner copied, and says so of anything else",
+	async () => {
+		const { owner, invite, computer, server, close } = await start();
+		try {
+			await withPage(`${server.origin}/`, { width: 1280, height: 844 }, async (page) => {
+				await page.until(button("Pair with this link"));
+				expect(await page.run(`${button("Scan the code")} === undefined`)).toBe(true);
+				expect(await page.run<string>(text)).toContain("Copy the link it gives and paste it here");
+				const paste = async (value: string) => {
+					await page.run(
+						`(() => { const el = [...document.querySelectorAll("input")].at(-1); el.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ""); el.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+					);
+					await page.input("Input.insertText", { text: value });
+					await page.click(button("Pair with this link"));
+				};
+				await paste("https://example.com/not-a-pairing");
+				await page.until(`${text}.includes(${JSON.stringify(NOTES.notALink)})`);
+				// the link Settings gives for a browser, whole, as it was copied
+				await paste(invite.browser);
+				await page.until(button("The codes match · Pair"), 30_000);
+				expect(await page.run<string>(text)).toContain(fingerprint(computer));
+				await page.click(button("The codes match · Pair"));
+				await page.until(`${text}.includes('Waiting for approval')`);
+				const [request] = (await owner<DevicesView>("/devices")).requests;
+				await owner(`/devices/requests/${request!.id}/approve`, "POST", { name: "A laptop" });
+				await page.until(`${text}.includes('Sancho') && !${text}.includes('Waiting for')`);
+				expect(page.errors()).toEqual([]);
+			});
+		} finally {
+			await close();
+		}
+	},
+	120_000,
+);

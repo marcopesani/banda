@@ -1,5 +1,5 @@
 /**
- * Settings' devices: the phones that reach banda from anywhere, as the owner. "Pair a phone" shows a code to scan,
+ * Settings' devices: the phones that reach banda from anywhere, as the owner. "Pair a device" shows a code to scan,
  * live for ten minutes; the phone that scans it asks to pair and waits here for the owner's Approve or Deny. Each paired
  * device is the owner's to rename or revoke (asked first). What identifies a device and how it reaches this computer
  * stays behind Details. On a device itself (`here` false) the list is all there is: the daemon pairs, renames and
@@ -129,7 +129,7 @@ export function DevicesSettings({
 									onClick={act.onPair}
 								>
 									<PlusIcon />
-									Pair a phone
+									Pair a device
 								</Button>
 							}
 						/>
@@ -200,7 +200,7 @@ function Pairing({
 							once
 						</p>
 					)}
-					<div className="mt-auto flex gap-2">
+					<div className="mt-auto flex flex-wrap gap-2">
 						{expired ? (
 							<Button size="sm" onClick={act.onPair}>
 								Make a new code
@@ -215,6 +215,14 @@ function Pairing({
 							</Button>
 						)}
 					</div>
+					{expired ? null : (
+						// what has no camera to point at this screen (a browser on a computer) takes the same pairing as a link
+						<p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink-2">
+							<span>No camera to scan with?</span>
+							<CopyText text={invite.browser} label="Copy link" />
+							<span>and paste it at app.banda.rocks.</span>
+						</p>
+					)}
 				</div>
 			</div>
 		</div>
@@ -410,7 +418,7 @@ function Details({
 								? "off (config.json remote.reach)"
 								: devices.remote === "unavailable"
 									? "not available: Iroh has no build for this computer"
-									: "starts when you pair a phone",
+									: "starts when you pair a device",
 						)
 					) : (
 						<>

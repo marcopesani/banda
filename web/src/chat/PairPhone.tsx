@@ -13,6 +13,8 @@ import { fingerprint, type PairingStep } from "../lib/pairing.ts";
 export type PairPhoneActions = {
 	readonly onScan?: ((name: string) => void) | undefined;
 	readonly onPairLink?: ((name: string) => void) | undefined;
+	/** A link the owner copied on the computer: given where the page takes one (a browser, which may have no camera). */
+	readonly onPaste?: ((link: string, name: string) => void) | undefined;
 	readonly onConfirm?: (() => void) | undefined;
 	readonly onAgain?: (() => void) | undefined;
 	readonly onRetry?: (() => void) | undefined;
@@ -127,14 +129,23 @@ export function PairPhone({ step, ...act }: { step: PairingStep } & PairPhoneAct
 
 function Scan({ step, act }: { step: Extract<PairingStep, { step: "scan" }>; act: PairPhoneActions }) {
 	const [name, setName] = useState(step.name);
+	const [pasted, setPasted] = useState("");
 	const id = useId();
 	const trimmed = name.trim();
 	const linked = step.link !== undefined;
+	// what this screen can do with no link in hand: scan, take a pasted link, or both
+	const scans = act.onScan !== undefined;
+	const pastes = !linked && act.onPaste !== undefined;
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
 		if (trimmed === "") return;
 		if (linked) act.onPairLink?.(trimmed);
-		else act.onScan?.(trimmed);
+		else if (scans) act.onScan?.(trimmed);
+		else paste();
+	};
+	const paste = () => {
+		if (trimmed === "" || pasted.trim() === "") return;
+		act.onPaste?.(pasted, trimmed);
 	};
 	return (
 		<Frame>
@@ -143,7 +154,9 @@ function Scan({ step, act }: { step: Extract<PairingStep, { step: "scan" }>; act
 				note={
 					linked
 						? "You opened a pairing code. Check which computer it names, then approve this phone there."
-						: "On your computer, open banda, then Settings → Devices → Pair a phone, and scan the code it shows."
+						: scans
+							? "On your computer, open banda, then Settings → Devices → Pair a device, and scan the code it shows."
+							: "On your computer, open banda, then Settings → Devices → Pair a device. Copy the link it gives and paste it here."
 				}
 			/>
 			<form onSubmit={submit} className="flex flex-col gap-4">
@@ -167,10 +180,40 @@ function Scan({ step, act }: { step: Extract<PairingStep, { step: "scan" }>; act
 						{step.note}
 					</p>
 				)}
-				<Button type="submit" size="lg" disabled={trimmed === ""}>
-					{linked ? null : <QrCodeIcon />}
-					{linked ? "Pair with this code" : "Scan the code"}
-				</Button>
+				{linked || scans ? (
+					<Button type="submit" size="lg" disabled={trimmed === ""}>
+						{linked ? null : <QrCodeIcon />}
+						{linked ? "Pair with this code" : "Scan the code"}
+					</Button>
+				) : null}
+				{pastes ? (
+					<div className="flex flex-col gap-1.5">
+						<label htmlFor={`${id}-link`} className="text-ui font-medium text-ink">
+							{scans ? "Or paste the pairing link" : "Pairing link"}
+						</label>
+						<Input
+							id={`${id}-link`}
+							value={pasted}
+							autoComplete="off"
+							autoCapitalize="none"
+							spellCheck={false}
+							aria-describedby={`${id}-link-note`}
+							onChange={(event) => setPasted(event.target.value)}
+						/>
+						<span id={`${id}-link-note`} className="text-meta text-ink-2">
+							On your computer, choose Copy link beside the code. It works once, for ten minutes.
+						</span>
+						<Button
+							type={scans ? "button" : "submit"}
+							size="lg"
+							variant={scans ? "outline" : "default"}
+							disabled={trimmed === "" || pasted.trim() === ""}
+							onClick={scans ? paste : undefined}
+						>
+							Pair with this link
+						</Button>
+					</div>
+				) : null}
 			</form>
 		</Frame>
 	);

@@ -91,16 +91,17 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] The app on an origin of its own, for a phone with no shell to install: `web/vercel.json` is a Vercel project
   rooted at `web/` that builds only the branch `app`, sends the app's files with the headers the daemon sends, and
   installs with its worker (`node test/smoke/hosted.ts`). There the app is a device through the browser's own Iroh
-  endpoint (`web/iroh`, built into `web/iroh/pkg` by its `build.sh` and committed), paired from the link Settings →
-  Devices gives for a browser. Open: a release moving `app` to its tag, by hand until then; a real iPhone, since
-  only Chrome and a WebKit build on a Mac have run it; scanning the code inside the page, for an app added to the
-  home screen, which a camera's link does not open; one origin serving daemons of more than one version; the
-  endpoint built in CI instead of committed, which alone would show its build came from its sources; a relay of the
-  owner's own, which that origin's policy does not name; a daemon whose relay changed since it was paired, whose new
-  address n0's lookup gives with the trailing dot WebKit refuses (only a ticket's address has it taken off); two
-  tabs of one browser, which do not hear of each other's pairing or forgetting; a browser that clears a site's
-  storage it has not seen for a while, which makes a new device of it; and the pairing screens' words, which say
-  "phone" on any browser
+  endpoint (`web/iroh`, built into `web/iroh/pkg` by its `build.sh` and committed), paired from the code Settings →
+  Devices shows, which the page scans with the phone's camera, or from its link, opened or pasted. Open: a release
+  moving `app` to its tag, by hand until then; a real iPhone, since only Chrome and a WebKit build on a Mac have run
+  it, and the camera those tests scan with is a drawing of the code; the notices of the crates compiled into the
+  committed endpoint, which THIRD_PARTY_NOTICES.md does not name; one origin serving daemons of more than one
+  version; the endpoint built in CI instead of committed, which alone would show its build came from its sources; a
+  relay of the owner's own, which that origin's policy does not name; a daemon whose relay changed since it was
+  paired, whose new address n0's lookup gives with the trailing dot WebKit refuses (only a ticket's address has it
+  taken off); two tabs of one browser, which do not hear of each other's pairing or forgetting; a browser that
+  clears a site's storage it has not seen for a while, which makes a new device of it; and the pairing screens'
+  words, which say "phone" on any browser
 - [ ] Run the release workflow's `materials` job once by hand (`build_target: all`, no tag) before the next tag: it
   has only run on a development Mac against alpha.14's downloads, never on a runner. Watch its disk use and its time
 - [ ] Decide how the owner's review of a release's sources and notices is recorded. The set exists only after the

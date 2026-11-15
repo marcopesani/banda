@@ -1070,10 +1070,12 @@ A phone with no banda app is a device through its browser: the app on an origin 
 the browser's own, in WebAssembly. A browser sends no UDP, so that endpoint reaches the daemon through a relay alone.
 The rest is the phone's: the same pairing, the same API, a key that is the device. That key is kept in the browser's
 storage for the origin, unsealed, since nothing a page can do seals a key from the page's own origin or from a copy of
-the browser's files: it is as safe as those two are. Its code is a link, whose ticket and invite come after the
-address's `#`, which no server is sent, and the app takes them out of the address bar as it reads them. Whoever serves
-that origin's files is trusted as the app is, since they are what the device runs: they are a release's build, they
-load nothing from anywhere else, and no other build carries the endpoint.
+the browser's files: it is as safe as those two are. Its code is the phone's, which the page reads with the camera
+where there is one to point at the computer's screen, and the same pairing as a link: pasted where there is none (a
+browser on a computer), or opened, its ticket and invite after the address's `#`, which no server is sent, and which
+the app takes out of the address bar as it reads them. Whoever serves that origin's files is trusted as the app is,
+since they are what the device runs: they are a release's build, they load nothing from anywhere else, and no other
+build carries the endpoint.
 
 ## Home
 `~/.banda` (`--home <dir>` or `BANDA_HOME`): `config.json`, `durable.db`, `search.db`, `blobs/`, `auth/`, `format`. The

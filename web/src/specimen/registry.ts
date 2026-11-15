@@ -375,7 +375,7 @@ export const SECTIONS: readonly Entry[] = [
 		title: "Pairing, on the phone",
 		group: "agent",
 		status: "app",
-		sources: ["web/src/chat/PairPhone.tsx"],
+		sources: ["web/src/chat/PairPhone.tsx", "web/src/chat/ScanCode.tsx"],
 	},
 	{ id: "qr", title: "QR code", group: "agent", status: "app", sources: ["web/src/components/QrCode.tsx"] },
 	{ id: "backups", title: "Backups", group: "agent", status: "app", sources: [BACKUPS, SETTINGS] },

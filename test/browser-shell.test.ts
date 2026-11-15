@@ -14,7 +14,7 @@ import {
 	type KeptStore,
 } from "../web/src/lib/browser-shell.ts";
 import { fromBase64, toBase64 } from "../web/src/lib/bytes.ts";
-import { pairing, readPairingLink } from "../web/src/lib/pairing.ts";
+import { NOTES, pairing, readPairingLink } from "../web/src/lib/pairing.ts";
 
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const bytes = (value: string) => new TextEncoder().encode(value);
@@ -414,5 +414,46 @@ describe("the browser's shell", () => {
 			"#/pair?ticket=a&invite=b",
 		])
 			expect(carriedLink(hash), hash).toBeUndefined();
+	});
+
+	it("pairs from a link its owner pasted, in the form the app reads or the one a browser opens, and says so of other text", async () => {
+		const flow = () =>
+			pairing({
+				shell: { ...world().shell(), saveFile: async () => ({ saved: false }) },
+				ask: async () => "pending",
+				check: async () => "unpaired",
+			});
+		for (const pasted of [
+			"banda://pair?ticket=ticket%3Ahome&invite=s3cr-et_",
+			// as it is copied on the computer, whatever came along with it
+			"  https://app.banda.rocks/#pair?ticket=ticket%3Ahome&invite=s3cr-et_\n",
+		]) {
+			const pairs = flow();
+			await pairs.start();
+			await pairs.paste(pasted, " A laptop ");
+			// the computer the link names is shown before anything is asked of it
+			expect(pairs.get(), pasted).toEqual({
+				step: "confirm",
+				name: "A laptop",
+				device: expect.any(String),
+				computer: "daemon-home",
+				link: { ticket: "ticket:home", invite: "s3cr-et_" },
+			});
+			pairs.stop();
+		}
+		for (const pasted of [
+			"",
+			"hello",
+			"https://app.banda.rocks/",
+			"https://app.banda.rocks/#/c/12",
+			"https://app.banda.rocks/#pair?ticket=ticket%3Ahome",
+			"http://app.banda.rocks/#pair?ticket=ticket%3Ahome&invite=s3cr-et_",
+		]) {
+			const pairs = flow();
+			await pairs.start();
+			await pairs.paste(pasted, "A laptop");
+			expect(pairs.get(), pasted).toEqual({ step: "scan", name: "A laptop", note: NOTES.notALink });
+			pairs.stop();
+		}
 	});
 });
