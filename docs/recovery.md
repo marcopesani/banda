@@ -32,9 +32,15 @@ Recheck these items against current code before implementation; an unchecked ite
 defect. Remove it only when its fix and acceptance evidence are recorded in a commit.
 
 - [ ] Prove blob file and directory persistence ordering on the supported filesystem (recovery.md)
-- [ ] Back up and restore from the app, with progress and failures; today only `banda backup` and `banda restore` do
+- [ ] Use the app's restore in the desktop app itself, on each platform: starting again from Settings, the restore
+  finished before the window opens, a second launch meanwhile, and Windows, where a folder with an open file does not
+  move. Its parts are tested; the whole was only used in a browser against a daemon started again by hand
+- [ ] Restore into a home that is new or does not start: first run and the desktop app's failure page offer nothing,
+  and `banda restore <backup>` is the only way
+- [ ] Show how far a long copy is in bytes, not only which step it is on, and let the owner stop it
 - [ ] Back up a container box's volumes (workspace, work, tools, browser): a backup carries the native computer's
-  folders only
+  folders only (and host mode's), so the app restores none where Docker keeps them
+- [ ] Stop a box a killed daemon left before a restore takes the home's place: it holds the earlier home's folders
 - [ ] Protect the secrets in a backup that leaves the computer: encryption, key custody, and what a lost key costs
 - [ ] Take backups on a schedule and before an update, and decide how many are kept
 - [ ] Qualify a restored home (R1, R2, R4): pending asks, routines and write-backs resume, completed sends are not

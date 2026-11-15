@@ -441,7 +441,7 @@ function Key({ value }: { value: string }) {
 }
 
 /** Copies its text; says Copied for a moment, or Couldn't copy when the browser refuses. */
-function CopyText({ text, label, icon = false }: { text: string; label: string; icon?: boolean }) {
+export function CopyText({ text, label, icon = false }: { text: string; label: string; icon?: boolean }) {
 	const [said, setSaid] = useState<"Copied" | "Couldn't copy" | undefined>(undefined);
 	useEffect(() => {
 		if (said === undefined) return;

@@ -4,13 +4,14 @@
  * the web UI the daemon serves. Closing the window leaves the daemon running, so routines still wake; Quit stops it. If
  * the shell crashes, the daemon lives on and the next launch attaches to it.
  */
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } from "electron";
 import { attentionFrom, NOTHING, tooltipOf, wantsOwner, withDot } from "./attention.js";
+import { backupFolder, profileHeld, restoreWaits } from "./backups.js";
 import { shellPath } from "./environment.js";
 import { failurePage, type Trouble, trouble } from "./trouble.js";
 
@@ -26,6 +27,18 @@ const profile =
 	!app.isPackaged && process.env.BANDA_HOME === undefined
 		? mkdtempSync(join(tmpdir(), "banda-desktop-refused-"))
 		: join(home, "desktop");
+// A restore the app made ready takes the home's place now, before this process opens anything in the home: its own
+// profile is a folder of it. The release does it (two renames, the home as it was kept beside its backups) and
+// declines while a daemon runs on the home; a second launch leaves it to the app that is already open.
+if (profile.startsWith(home) && restoreWaits(home) && !profileHeld(profile)) {
+	const { node, cli } = release();
+	spawnSync(node, [cli, "restore", "--finish"], {
+		env: { ...process.env, BANDA_HOME: home },
+		stdio: "ignore",
+		timeout: 60_000,
+		windowsHide: true,
+	});
+}
 mkdirSync(profile, { recursive: true, mode: 0o700 });
 app.setPath("userData", profile);
 
@@ -306,6 +319,26 @@ function answerFolders(): void {
 	});
 }
 
+/**
+ * For the home's backups in Settings, from the daemon's own page alone: show one in the system's file manager, by its
+ * name among the home's backups and never by a path; and start banda again, which is how a restore made ready takes
+ * the home's place (Quit stops the daemon first, and the app that starts next finishes the restore before its window).
+ */
+function answerBackups(): void {
+	ipcMain.handle("banda:reveal-backup", (event, name: unknown) => {
+		if (!fromOwnPage(event)) throw new Error("Only banda's own page may show a backup.");
+		const folder = backupFolder(home, name);
+		if (folder === undefined) return false;
+		shell.showItemInFolder(folder);
+		return true;
+	});
+	ipcMain.handle("banda:restart", (event) => {
+		if (!fromOwnPage(event)) throw new Error("Only banda's own page may start banda again.");
+		app.relaunch();
+		app.quit();
+	});
+}
+
 function show(): void {
 	if (window === undefined || window.isDestroyed()) return;
 	if (window.isMinimized()) window.restore();
@@ -409,6 +442,7 @@ else {
 		makeTray(release().icon);
 		answerFolders();
 		answerAttention();
+		answerBackups();
 		if (!app.isPackaged && process.env.BANDA_HOME === undefined) {
 			// a development shell never touches the owner's home (AGENTS.md "Never touch a live banda")
 			window = openWindow(

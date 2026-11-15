@@ -3,6 +3,7 @@ Unsigned pre-release for Apple silicon Macs on macOS 14 or newer, and for Linux 
 - Each agent's computer is a small virtual machine banda ships. It starts with the app, and with `banda serve`; Docker is not required. `banda serve --box container` still uses Docker when asked.
 - The browser downloads on first use. General settings shows its preparation and running pages.
 - Files and installed tools persist under `~/.banda/computer`.
+- Settings, General, Backups takes a backup of everything banda keeps, lists the backups in `~/.banda-backups` and restores one: banda starts again with it, and the home it replaced is kept there until you delete it. A backup is not encrypted and holds your keys and sign-ins.
 
 **Mac.** Open the DMG and drag banda to Applications. This build is not signed with an Apple Developer ID and not notarized, so macOS refuses to open it the first time. Follow [Apple's instructions for opening an unidentified app](https://support.apple.com/en-us/102445) (System Settings, Privacy & Security, Open Anyway) if you choose to install it.
 

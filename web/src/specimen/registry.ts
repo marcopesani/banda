@@ -100,6 +100,7 @@ const DRAFT = "web/src/app/DraftApproval.tsx";
 const CONNECT = "web/src/chat/Connect.tsx";
 const HARNESS = "web/src/chat/Harness.tsx";
 const DEVICES = "web/src/chat/Devices.tsx";
+const BACKUPS = "web/src/chat/Backups.tsx";
 const LOADING = "web/src/chat/Loading.tsx";
 const APPROVAL = "web/src/chat/Approval.tsx";
 const FACE = "web/src/chat/Face.tsx";
@@ -377,6 +378,14 @@ export const SECTIONS: readonly Entry[] = [
 		sources: ["web/src/chat/PairPhone.tsx"],
 	},
 	{ id: "qr", title: "QR code", group: "agent", status: "app", sources: ["web/src/components/QrCode.tsx"] },
+	{ id: "backups", title: "Backups", group: "agent", status: "app", sources: [BACKUPS, SETTINGS] },
+	{
+		id: "backups-states",
+		title: "Backups, each state",
+		group: "agent",
+		status: "app",
+		sources: [BACKUPS, "web/src/components/ui/progress.tsx"],
+	},
 	// Connections
 	{
 		id: "connections",

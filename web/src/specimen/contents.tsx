@@ -6,6 +6,7 @@ import type { ComponentType } from "react";
 import { ActivityOpenSection, ActivitySection } from "./agent/activity.tsx";
 import { AvatarCandidateSpecimen } from "./agent/avatar-candidate.tsx";
 import { AvatarCreator } from "./agent/avatar-creator.tsx";
+import { BackupsSection } from "./agent/backups.tsx";
 import { DevicesSection } from "./agent/devices.tsx";
 import { MemorySection } from "./agent/memory.tsx";
 import { PanelSections } from "./agent/panel.tsx";
@@ -61,6 +62,7 @@ export const CONTENTS: Readonly<Record<GroupId, readonly (readonly [string, Comp
 		["activity-open", ActivityOpenSection],
 		["settings", SettingsSections],
 		["devices", DevicesSection],
+		["backups", BackupsSection],
 	],
 	connections: [
 		["connect", ConnectSections],

@@ -887,12 +887,15 @@ export function AppSettings({
 	usage,
 	tierModels,
 	devices,
+	backups,
 	bring,
 	...act
 }: {
 	data: SettingsData;
 	tab?: SettingsTab;
 	memory?: ReactNode;
+	/** The home's backups, to take, restore and delete, on the computer banda runs on (`BackupsSettings`). */
+	backups?: ReactNode;
 	/** Bringing skills and agents from the other harnesses on this computer, on the desktop (`BringSettings`). */
 	bring?: ReactNode;
 	/** The phones paired, and pairing one (`DevicesSettings`). */
@@ -989,6 +992,7 @@ export function AppSettings({
 						onPrepareBrowser={act.onPrepareBrowser}
 					/>
 				)}
+				{backups}
 			</TabsContent>
 			{memory === undefined ? null : (
 				<TabsContent value="memory" className="flex flex-col gap-8">

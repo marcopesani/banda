@@ -70,6 +70,7 @@ it("refuses to resume a session outside the harness's newly connected folder", a
 		blobs,
 		config: { model: FAUX_MODEL },
 		home,
+		box: "host",
 		retrieval: searchService({
 			index: new Search(join(home, "search.db")),
 			blobs,

@@ -1081,6 +1081,16 @@ beside the home, checks that copy against the manifest, and only then gives it t
 damaged or incomplete backup, or a process killed on the way, leaves no home. A backup of a newer format than the
 build reads is refused. The backup is only read.
 
+**From the app** the owner takes a backup, sees those beside the home (`<home>-backups/`) and deletes one. The page
+names a backup by its folder's name, never a path, and only on the computer banda runs on. A running banda does not
+replace its own home, so its restore has two halves. The daemon makes it ready: the backup's copy, checked against the
+manifest, beside the others, and a note of it; the home is untouched, and a damaged backup ends there. The next start,
+before anything opens the home and with no daemon on it, moves the home aside among the backups and gives the copy
+its name: two renames, and which folders exist says which comes next, so a start after a kill goes on from there. The
+home as it was is kept until the owner deletes it, and goes back the same way. A start that cannot finish leaves the
+home it found and says why; it is not tried again unasked. Where Docker keeps the computer's files a backup does not
+hold them, and none is restored from the app.
+
 A backup holds the home's secrets as the home does, unencrypted, for the owner alone to read; its manifest detects
 damage, not a forgery by someone who can rewrite it.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** The minimal CLI (DESIGN.md "Clients"): `serve` runs the daemon; the other commands talk to it over loopback. */
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { OpenWait, Status } from "../core/status.ts";
 import { type Ask, fieldLines } from "../core/wait.ts";
@@ -41,6 +41,9 @@ usage:
                                      A backup holds the home's keys and sign-ins
   banda restore <backup>            check a backup against its manifest and make it
                                      the home, which must be empty, with no daemon
+  banda restore --finish            put a restore the app made ready in the home's
+                                     place, the home as it is kept beside its backups;
+                                     serve and the desktop app do this as they start
 
 options:
   --home <dir>   the home (default $BANDA_HOME or ~/.banda)`;
@@ -57,6 +60,7 @@ async function main(argv: string[]): Promise<number> {
 			to: { type: "string" },
 			"no-computer": { type: "boolean" },
 			"no-browser": { type: "boolean" },
+			finish: { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
 	});
@@ -171,21 +175,27 @@ async function main(argv: string[]): Promise<number> {
 	}
 	if (command === "backup") {
 		if (rest.length > 0) throw new Error("backup takes no argument; --to names its folder");
-		const { backupHome } = await import("../core/backup.ts");
-		const to =
-			values.to ??
-			join(
-				`${resolve(home)}-backups`,
-				new Date()
-					.toISOString()
-					.replace(/\.\d+Z$/, "Z")
-					.replaceAll(":", "-"),
-			);
+		const { backupHome, backupName, backupsOf } = await import("../core/backup.ts");
+		const to = values.to ?? join(backupsOf(home), backupName());
 		const { path, manifest } = await backupHome(home, to, {
 			...(values["no-computer"] ? { computer: false as const } : {}),
 			...(values["no-browser"] ? { browser: false as const } : {}),
 		});
 		console.log(`backed up ${home} into ${path}\n${held(manifest)}`);
+		return 0;
+	}
+	if (command === "restore" && values.finish) {
+		if (rest.length > 0) throw new Error("restore --finish takes no backup: the app chose it");
+		const { finishRestore } = await import("../core/backups.ts");
+		const outcome = await finishRestore(home, { log: (line) => console.error(line) });
+		console.log(
+			{
+				none: "no restore was ready",
+				waiting: `a banda daemon runs on ${home}: the restore waits until it has stopped`,
+				restored: `restored ${home}`,
+				kept: `the restore could not finish, and ${home} is as it was`,
+			}[outcome],
+		);
 		return 0;
 	}
 	if (command === "restore") {
