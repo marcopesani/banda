@@ -11,6 +11,7 @@ import { Value } from "typebox/value";
 import type { BoxSetup } from "./box.ts";
 import type { BrowserPreparation } from "./browser-preparation.ts";
 import { BROWSER_UID, browserStart } from "./browser-start.ts";
+import { importDockerComputer } from "./docker-import.ts";
 import { guardedProxy, type ProxyTransport, proxyReady, TRUST, TRUST_ENV } from "./guarded-proxy.ts";
 import { installedMicrovmAssets, type MicrovmAssets, microvmTarget } from "./microvm-assets.ts";
 import { BrowserDownloadError, downloadMicrovmBrowser } from "./microvm-download.ts";
@@ -194,6 +195,15 @@ async function image(computer: Runtime, asset: MicrovmAssets["box"], building: (
 
 async function exportsFor(home: string): Promise<string> {
 	const storage = join(home, "computer");
+	// a home that comes from the Docker computer brings its files, once: before this folder first exists
+	const fresh = await lstat(storage).then(
+		() => false,
+		() => true,
+	);
+	if (fresh) {
+		const brought = await importDockerComputer(home, storage);
+		if (brought.length > 0) console.log(`computer: brought ${brought.join(", ")} from Docker`);
+	}
 	await directory(storage);
 	for (const name of ["workspace", "work", "tools", "proxy"]) await directory(join(storage, name));
 	for (const name of ["ca", "kept"]) await directory(join(storage, "proxy", name));
