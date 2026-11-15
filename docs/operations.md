@@ -68,7 +68,8 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
 - [ ] Run the release workflow end to end and fix what each runner turns up (Windows fast tests, linux arm64 deb).
   Then install each artifact on a clean machine: the desktop app and the CLI archive are tried only on macOS arm64
 - [ ] Windows: a graceful daemon stop (Quit ends the process outright), and a pass over atomic renames and paths
-- [ ] A smaller release: bundle the daemon so provider SDKs and web-only packages don't ship whole
+- [ ] A smaller release: the proxy's image (the whole mitmproxy image, about a fifth of the download), Electron's
+  unused locales, and whether one Node could serve the app and the CLI
 - [ ] A signed release APK: the release workflow builds the APK unsigned, then signs it as
   `banda-<version>-android-arm64.apk` in a job of its own that runs no npm or Gradle, and refuses to tag one without
   banda's key in the repository's secrets (BANDA_ANDROID_KEYSTORE_BASE64, _KEYSTORE_PASSWORD, _KEY_ALIAS,
