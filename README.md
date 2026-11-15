@@ -43,11 +43,11 @@ sends, posts or can't be undone waits for your OK.
   the models it has, and what you ask never goes to a model provider.
 - **Desktop and phone.** The app runs on Apple silicon Macs and on Linux x64. An Android app pairs with it.
 
-> **Pre-release.** Expect rough edges and breaking changes, and run it on a machine you trust. The agents' computer
-> is kept apart from yours, but all your agents share it, and nothing inside it keeps one from another: code one
-> agent runs can read the others' files, and can go out to the network as another chat, so it can send to a site you
-> allowed only for a different agent. A computer for each agent is future work. Do not rely on banda to contain
-> hostile code or content yet ([SECURITY.md](SECURITY.md), [open work](docs/README.md)).
+> **First release.** Expect rough edges, and run it on a machine you trust. The agents' computer is kept apart from
+> yours, but all your agents share it, and nothing inside it keeps one from another: code one agent runs can read the
+> others' files, and can go out to the network as another chat, so it can send to a site you allowed only for a
+> different agent. A computer for each agent is future work. Do not rely on banda to contain hostile code or content
+> yet ([SECURITY.md](SECURITY.md), [open work](docs/README.md)).
 
 ## Get started
 

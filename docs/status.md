@@ -2,19 +2,16 @@
 
 ## Current work
 
-0.1.0-alpha.18 is published as a pre-release for Apple silicon Macs and Linux x64 (.deb), with both command-line
-archives, the Android APK, and the source and notice archives its own tag run assembled; the landing links its
-downloads. `release acceptance` passed on what it published: clean installs on a Mac runner and on Ubuntu 22.04 and
-the newest Ubuntu runner, and an upgrade from alpha.14 on Mac and Linux that kept the home. The published Mac app
-opened the owner's home (format 4) and is in daily use there. The computer banda ships is the default box on Mac and
-Linux; Docker is used only by name, on Windows, and once to bring an earlier home's files. alpha.13, alpha.15 and
-alpha.16 were tagged but published nothing.
-
-Open before 0.1.0: the owner's walk through the six launch workflows on the candidate; the computer starting on a
-Mac that never ran banda, and a person installing the x64 .deb on a physical Linux machine (no runner shows either);
-and how the owner's review of a release's sources and notices is recorded, since every release so far says nobody
-reviewed its set. The launch budgets hold on what was measured: artifacts, the browser and a fresh home's first
-answer were measured on one provider's small tier only, and `test/launch-budgets.json` names the rest as unmeasured.
+0.1.0 is the first release, for Apple silicon Macs and Linux x64 (.deb), with both command-line archives, the
+Android APK, and the source and notice archives its tag run assembled; its candidate was 0.1.0-alpha.18 plus the
+fixes on main after it. `release acceptance` passed on alpha.18's published downloads: clean installs on a Mac
+runner and on Ubuntu 22.04 and the newest Ubuntu runner, and an upgrade from alpha.14 on Mac and Linux that kept the
+home. The six launch workflows were walked on a throwaway home in a browser about 850 CSS pixels wide: all pass but
+stopping a run, which the app has no control for. Open after 0.1.0: Stop in the app; a run resumed after a crash
+reads "Stopped"; the computer on a Mac that never ran banda and the .deb on a physical Linux machine; phone width in
+a real browser; revoking a permission, an uncertain send and a real sign-in in the browser; how the owner's review of
+a release's sources and notices is recorded. The launch budgets hold where measured: artifacts, the browser and a
+fresh home's first answer on one provider's small tier only.
 
 The native-computer candidate is rebased onto current main. Routine requests now retain their original agent and
 execution after the run ends, and their existing approvals appear in that agent's chat. Archiving cancels retained

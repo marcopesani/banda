@@ -3,7 +3,7 @@
 banda runs agents that act on your behalf, so its boundaries matter: the box (the agent's computer), the egress proxy
 (the only way out, which adds credentials and holds writes for you), drafts and permissions (what may run without
 asking), and the browser. [DESIGN.md](DESIGN.md) states the rules; [docs/README.md](docs/README.md) tracks the open
-isolation, egress and browser findings. It is pre-release: do not rely on it to contain untrusted code or content yet.
+isolation, egress and browser findings. It is a first release: do not rely on it to contain untrusted code or content yet.
 
 ## What 0.1.0 does not protect
 
