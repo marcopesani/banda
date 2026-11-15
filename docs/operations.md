@@ -58,6 +58,12 @@ is uploaded separately, so an automatic build cannot replace the selected runtim
 Recheck these items against current code before implementation; an unchecked item is not a freshly verified
 defect. Remove it only when its fix and acceptance evidence are recorded in a commit.
 
+- [ ] The app on an origin of its own, for a phone with no shell to install: `web/vercel.json` is a Vercel project
+  rooted at `web/` that builds only the branch `app`, sends the app's files with the headers the daemon sends, and
+  installs with its worker (`node test/smoke/hosted.ts`). Open: the project and its domain on Vercel; a browser's
+  way to a daemon, as a paired device over Iroh from WebAssembly, where it reaches a relay alone; a release moving
+  `app` to its tag; and the page that origin shows a browser with no computer paired, which today asks for a link
+  no hosted page can use, so `app` stays unpushed until then
 - [ ] Rootless box, and a supervisor that alone holds the Docker socket
 - [ ] Bring a qualified native runtime on every platform. The reviewed Apple-silicon bundle includes it; Windows
   keeps its existing backend and Linux native acceptance remains open
