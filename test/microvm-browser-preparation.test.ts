@@ -76,12 +76,15 @@ if (args[0] === "image") {
   const vm = JSON.parse(readFileSync(path(args[1]), "utf8"));
   vm.status = args[0] === "start" ? "Running" : "Stopped";
   writeFileSync(path(args[1]), JSON.stringify(vm));
+  // a VM's processes end with it; its files stay
+  if (args[0] === "stop") rmSync(join(process.env.MSB_HOME, args[1] + ".guard"), { force: true });
   if (args[0] === "start" && args[1].endsWith("-browser")) appendFileSync(join(process.env.MSB_HOME, "browser-launches"), "launched\\n");
 } else if (args[0] === "inspect") {
   try { process.stdout.write(readFileSync(path(args[1]), "utf8")); }
   catch { process.stderr.write("sandbox not found: " + args[1]); process.exitCode = 1; }
 } else if (args[0] === "remove") {
   rmSync(path(args.at(-1)), { force: true });
+  rmSync(join(process.env.MSB_HOME, args.at(-1) + ".guard"), { force: true });
 } else if (args[0] === "exec") {
   const name = args[args.indexOf("--") - 1];
   const vm = JSON.parse(readFileSync(path(name), "utf8"));
@@ -99,11 +102,33 @@ if (args[0] === "image") {
       writeFileSync(path(name), JSON.stringify(vm));
     });
   }
+  const guard = join(process.env.MSB_HOME, name + ".guard");
+  if (args.includes("/banda/start.py")) {
+    appendFileSync(join(process.env.MSB_HOME, "guard-log"), "start\\n");
+    writeFileSync(guard, "{}");
+  }
   if (args.includes("/banda/ctl.py")) {
     if (args.at(-1) === "ping") appendFileSync(join(process.env.MSB_HOME, "pings"), "ping\\n");
-    process.stdout.write(args.at(-1) === "ping" ? JSON.stringify({ up: true }) : "{}");
+    if (args.at(-1) === "config") appendFileSync(join(process.env.MSB_HOME, "guard-log"), "config\\n");
+    process.stdout.write(args.at(-1) === "ping" ? JSON.stringify({ up: existsSync(guard) }) : "{}");
   }
-  if (args.includes("/banda/connect.py")) process.stdin.pipe(process.stdout);
+  if (args.includes("/banda/connect.py")) {
+    if (!existsSync(guard)) process.exit(1);
+    // the guard's answer to a request with no login; anything else comes back as it went
+    process.stdin.on("data", (data) => {
+      if (String(data).startsWith("GET http://banda.invalid/ ")) {
+        appendFileSync(join(process.env.MSB_HOME, "knocks"), "knock\\n");
+        const body = "banda: this proxy needs banda's login\\n";
+        process.stdout.write("HTTP/1.1 407 Proxy Authentication Required\\r\\ncontent-length: " + body.length + "\\r\\n\\r\\n" + body);
+      } else process.stdout.write(data);
+    });
+    process.stdin.on("end", () => process.exit(0));
+    // a connection ends with its VM
+    setInterval(() => {
+      try { if (JSON.parse(readFileSync(path(name), "utf8")).status !== "Running" || !existsSync(guard)) process.exit(1); }
+      catch { process.exit(1); }
+    }, 20);
+  }
 }
 `,
 			{ mode: 0o700 },
@@ -151,6 +176,9 @@ if (args[0] === "image") {
 		browserLaunches: () => readFile(join(cache, "browser-launches"), "utf8"),
 		implicitStarts: () => readFile(join(cache, "implicit-starts"), "utf8").catch(() => ""),
 		pings: async () => (await readFile(join(cache, "pings"), "utf8").catch(() => "")).split("\n").length - 1,
+		knocks: async () => (await readFile(join(cache, "knocks"), "utf8").catch(() => "")).split("\n").length - 1,
+		guardLog: async () => (await readFile(join(cache, "guard-log"), "utf8").catch(() => "")).trim().split("\n"),
+		killGuard: async () => rm(join(cache, `${await proxy()}.guard`)),
 		vmNames: async () => (await readdir(cache)).filter((entry) => /^banda-microvm-.*\.json$/.test(entry)),
 		pauseBoxCreate: async () => {
 			await mkdir(cache, { recursive: true, mode: 0o700 });
@@ -387,6 +415,97 @@ describe.skipIf(process.platform !== "darwin" && process.platform !== "linux")(
 				const before = await pings();
 				await ensure();
 				expect((await pings()) - before).toBe(1);
+			} finally {
+				await close();
+			}
+		});
+		it("is intact only while a tether stands to the proxy its last preparation left told", async () => {
+			const { setup, ensure, egress, stopProxy, proxyState, implicitStarts, knocks, close } = await fixture(true);
+			const intact = () => setup.intact?.() === true;
+			let release = () => {};
+			try {
+				expect(intact()).toBe(false);
+				await ensure();
+				// the guard has yet to answer the knock: nothing is known until it does
+				await until(intact);
+				expect(await knocks()).toBe(1);
+				// another preparation finds the same proxy: the tether stays, and nothing knocks again
+				await ensure();
+				expect(intact()).toBe(true);
+				expect(await knocks()).toBe(1);
+				// a push asked for and not yet over: the proxy is between two states
+				let reading = () => {};
+				const read = new Promise<void>((resolve) => {
+					reading = resolve;
+				});
+				const held = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				egress.source(async () => {
+					reading();
+					await held;
+					return { credentials: [] };
+				});
+				const pushing = egress.configure();
+				expect(intact()).toBe(false);
+				await read;
+				expect(intact()).toBe(false);
+				release();
+				expect(await pushing).toBe("told");
+				expect(intact()).toBe(true);
+				// the proxy lost: the tether falls with it, and starts nothing
+				await stopProxy();
+				await until(() => !intact());
+				expect(await implicitStarts()).toBe("");
+				expect(await proxyState()).toContain('"status":"Stopped"');
+				// only a preparation ties another, to the proxy it started and told
+				await ensure();
+				await until(intact);
+				expect(await knocks()).toBe(2);
+				expect(await implicitStarts()).toBe("");
+				await close();
+				expect(intact()).toBe(false);
+			} finally {
+				release();
+				await close();
+			}
+		});
+		it("the guard's process lost alone fells the tether, and the next preparation starts and ties another", async () => {
+			const { setup, ensure, killGuard, proxyState, knocks, guardLog, close } = await fixture(true);
+			const intact = () => setup.intact?.() === true;
+			try {
+				await ensure();
+				await until(intact);
+				await killGuard();
+				await until(() => !intact());
+				expect(await proxyState()).toContain('"status":"Running"');
+				await ensure();
+				await until(intact);
+				expect(await knocks()).toBe(2);
+				expect((await guardLog()).filter((line) => line === "start")).toHaveLength(2);
+			} finally {
+				await close();
+			}
+		});
+		it("a push that does not tell the proxy leaves the computer not intact until it is prepared again", async () => {
+			const { setup, ensure, egress, knocks, close } = await fixture(true);
+			const intact = () => setup.intact?.() === true;
+			try {
+				await ensure();
+				await until(intact);
+				egress.source(async () => {
+					throw new Error("the store is closed");
+				});
+				expect(await egress.configure()).toBe("stopped");
+				expect(intact()).toBe(false);
+				// a preparation that cannot tell the proxy either ties nothing
+				await expect(ensure()).rejects.toThrow("could not be configured");
+				expect(intact()).toBe(false);
+				expect(await knocks()).toBe(1);
+				egress.source(async () => ({ credentials: [] }));
+				await ensure();
+				await until(intact);
+				expect(await knocks()).toBe(2);
 			} finally {
 				await close();
 			}

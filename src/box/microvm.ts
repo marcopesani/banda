@@ -297,7 +297,66 @@ function forwarding(
 		});
 		await chmod(path, 0o600);
 	};
-	return { ensure, close, path };
+	return { ensure, close, path, listening: () => server?.listening === true };
+}
+
+/** What a tether asks: a request with no login, which only banda's guard answers this way, and which it keeps nothing of. */
+const KNOCK = "GET http://banda.invalid/ HTTP/1.1\r\nHost: banda.invalid\r\n\r\n";
+const KNOCK_ANSWER = /^HTTP\/1\.[01] 407 [^\r\n]*\r\n(?:[^\r\n]+\r\n)*\r\nbanda: /;
+/** How often a tether knocks again: well inside the ten minutes after which the proxy drops a silent connection. */
+const KNOCK_MS = 120_000;
+
+/**
+ * A connection held open to the proxy's port, over the path a box's requests take (the runtime's exec channel, the
+ * proxy's own connector). It stands once the guard answered a knock on it, and for as long as the connection does:
+ * that ends with the guard's process or its VM, so a tether that stands says the guard that answered is the one there
+ * now, at no cost to whoever asks. One that fell says nothing, and nothing brings it back but a new one.
+ */
+export function tether(computer: Pick<Runtime, "stream">, proxy: string, every = KNOCK_MS) {
+	const child = computer.stream({
+		name: proxy,
+		user: "1000:1000",
+		argv: ["/usr/local/bin/python3", "/banda/connect.py"],
+	});
+	let fallen = false;
+	let answered = false;
+	let asked = false;
+	let heard = "";
+	const fall = () => {
+		if (fallen) return;
+		fallen = true;
+		clearInterval(knocking);
+		child.kill("SIGKILL");
+	};
+	const knock = () => {
+		// a knock the guard never answered: it is there, perhaps, but not as it was
+		if (asked) return fall();
+		asked = true;
+		heard = "";
+		child.stdin.write(KNOCK);
+	};
+	const knocking = setInterval(knock, every);
+	knocking.unref();
+	child.stderr.resume();
+	child.stdin.on("error", fall);
+	child.once("error", fall);
+	child.once("close", fall);
+	child.stdout.on("data", (chunk: Buffer) => {
+		heard += chunk.toString("latin1");
+		const head = heard.indexOf("\r\n\r\n");
+		if (head === -1) {
+			if (heard.length > 8192) fall();
+			return;
+		}
+		const length = Number(/\r\ncontent-length: *(\d+)\r\n/i.exec(heard.slice(0, head + 2))?.[1] ?? Number.NaN);
+		if (!asked || !(length <= 8192)) return fall();
+		if (heard.length < head + 4 + length) return;
+		if (heard.length > head + 4 + length || !KNOCK_ANSWER.test(heard)) return fall();
+		asked = false;
+		answered = true;
+	});
+	knock();
+	return { fall, fallen: () => fallen, stands: () => answered && !fallen };
 }
 
 /** The command VM starts alone; the isolated browser VM is prepared on its first use. */
@@ -339,17 +398,37 @@ export function microvmBox(input: string): BoxSetup {
 	};
 	const baseWork = new Set<Promise<void>>();
 	let proxyWork: Promise<void> = Promise.resolve();
+	/** Bring-ups and pushes of the proxy asked for and not yet over: while there is one, the proxy is between two states. */
+	let transitions = 0;
 	const transition = <T>(operation: () => Promise<T>): Promise<T> => {
 		assertOpen();
+		transitions++;
 		const next = proxyWork.then(() => {
 			assertOpen();
 			return operation();
 		});
-		proxyWork = next.then(
-			() => undefined,
-			() => undefined,
-		);
+		const over = () => {
+			transitions--;
+		};
+		proxyWork = next.then(over, over);
 		return next;
+	};
+	/** The tether to the proxy the last bring-up left told; every push since told it too, or felled the tether. */
+	let tied: ReturnType<typeof tether> | undefined;
+	const untie = () => {
+		tied?.fall();
+		tied = undefined;
+	};
+	/** A push of the config, as the pusher makes it; anything but the proxy told leaves no tether standing. */
+	const push = async () => {
+		try {
+			const pushed = await guarded.egress.configure();
+			if (pushed !== "told") untie();
+			return pushed;
+		} catch (error) {
+			untie();
+			throw error;
+		}
 	};
 	const loaded = () =>
 		(loading ??= canonicalHome(homeArg)
@@ -426,11 +505,13 @@ export function microvmBox(input: string): BoxSetup {
 			if (existing.config.manifest_digest !== manifest) throw new Error("The computer has a different image.");
 			if (existing.status !== "Running") await current.run(["start", vmName], undefined, 120_000, startup.signal);
 		}
+		const found = existing?.status === "Running";
 		const running = await current.inspect(vmName, startup.signal);
 		if (running === undefined) throw new Error("The computer disappeared while starting.");
 		owned(running, current.home, generation);
 		if (running.config.network.ports.length !== 0) throw new Error("The computer must not publish host network ports.");
 		assertOpen();
+		return found;
 	};
 	const forward = async (role: "box" | "browser") => {
 		assertOpen();
@@ -518,7 +599,7 @@ export function microvmBox(input: string): BoxSetup {
 			proxy: await image(current, current.assets.proxy, building, startup.signal),
 		};
 		await transition(async () => {
-			await bringUp("proxy", current.assets.proxy, manifests.proxy, [
+			const found = await bringUp("proxy", current.assets.proxy, manifests.proxy, [
 				"--memory",
 				"512M",
 				"--cpus",
@@ -535,7 +616,14 @@ export function microvmBox(input: string): BoxSetup {
 				]),
 			]);
 			// a guard that answers is asked once: this runs before every command
-			if (!(await proxyReady(transport))) {
+			let answering = false;
+			try {
+				answering = await proxyReady(transport);
+			} finally {
+				// a proxy started here, or one that cannot say it is there, is not the one a tether was to
+				if (!found || !answering) untie();
+			}
+			if (!answering) {
 				await current.detach(
 					{ name: names.proxy, user: "1000:1000", argv: ["/usr/local/bin/python3", "/banda/start.py"] },
 					startup.signal,
@@ -547,8 +635,9 @@ export function microvmBox(input: string): BoxSetup {
 					await new Promise((done) => setTimeout(done, 150));
 				}
 			}
-			if ((await guarded.egress.configure()) !== "told")
-				throw new Error("The computer's network guard could not be configured.");
+			if ((await push()) !== "told") throw new Error("The computer's network guard could not be configured.");
+			assertOpen();
+			if (tied?.fallen() !== false) tied = tether(current, names.proxy);
 		});
 		const socket = await forward("box");
 		await bringUp("box", current.assets.box, manifests.box, [
@@ -652,7 +741,7 @@ export function microvmBox(input: string): BoxSetup {
 			configure: async () =>
 				transition(async () => {
 					await retirePriorGenerations();
-					return guarded.egress.configure();
+					return push();
 				}),
 		},
 		browser: {
@@ -673,9 +762,16 @@ export function microvmBox(input: string): BoxSetup {
 			}),
 		},
 		ensure,
+		intact: () =>
+			!closed &&
+			!startup.signal.aborted &&
+			transitions === 0 &&
+			tied?.stands() === true &&
+			[...bridges.values()].every((bridge) => bridge.listening()),
 		close: () =>
 			(closing ??= (async () => {
 				closed = true;
+				untie();
 				browserSet({ state: "idle" });
 				startup.abort();
 				await Promise.allSettled(baseWork);
@@ -683,6 +779,7 @@ export function microvmBox(input: string): BoxSetup {
 				await loading?.catch(() => undefined);
 				await takingOver?.catch(() => undefined);
 				await proxyWork;
+				untie();
 				if (computer === undefined) return;
 				let failure: unknown;
 				for (const operation of [
