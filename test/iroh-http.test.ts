@@ -1,6 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { frameRequest, readResponse } from "../web/src/lib/iroh-http.ts";
 
@@ -62,7 +63,13 @@ describe("HTTP over an Iroh stream, as the browser's shell frames it", () => {
 				{
 					method: "POST",
 					url: "/api/devices/pair?x=1",
-					headers: { host: "banda", connection: "close", "content-type": "application/json", "content-length": "15" },
+					headers: {
+						host: "banda",
+						connection: "close",
+						"accept-encoding": "gzip",
+						"content-type": "application/json",
+						"content-length": "15",
+					},
 					body: '{"invite":"ü"}',
 				},
 			]);
@@ -76,7 +83,9 @@ describe("HTTP over an Iroh stream, as the browser's shell frames it", () => {
 		expect(() => frameRequest("GET", "/a\r\nx: y", {})).toThrow("not a path");
 		expect(() => frameRequest("GET", "api", {})).toThrow("not a path");
 		expect(() => frameRequest("GET /x HTTP/1.1\r\n", "/", {})).toThrow("not a method");
-		expect(text(frameRequest("GET", "/", {}))).toBe("GET / HTTP/1.1\r\nhost: banda\r\nconnection: close\r\n\r\n");
+		expect(text(frameRequest("GET", "/", {}))).toBe(
+			"GET / HTTP/1.1\r\nhost: banda\r\nconnection: close\r\naccept-encoding: gzip\r\n\r\n",
+		);
 	});
 
 	it("reads a body by its length, in chunks, or to the stream's end, however the bytes are cut", async () => {
@@ -116,6 +125,41 @@ describe("HTTP over an Iroh stream, as the browser's shell frames it", () => {
 		expect(text((await reader.read()).value as Uint8Array)).toBe("data: 22");
 		await reader.cancel();
 		expect(cancelled).toBe(true);
+	});
+
+	it("says it unpacks gzip whatever the app asked for, and hands the app a packed body unpacked", async () => {
+		const head = text(
+			frameRequest("GET", "/api/chats/1/items", { "accept-encoding": "br", accept: "application/json" }),
+		);
+		expect(head).toContain("\r\naccept-encoding: gzip\r\n");
+		expect(head).not.toContain("br");
+		const body = JSON.stringify({ items: Array.from({ length: 400 }, (_, id) => ({ id, text: `entry ${id}` })) });
+		const packed = gzipSync(body);
+		expect(packed.length).toBeLessThan(body.length / 3);
+		const answers = {
+			chunked: [
+				"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nContent-Encoding: gzip\r\ntransfer-encoding: chunked\r\n\r\n",
+				`${packed.length.toString(16)}\r\n`,
+				packed.subarray(0, 7),
+				packed.subarray(7),
+				"\r\n0\r\n\r\n",
+			],
+			length: [
+				`HTTP/1.1 200 OK\r\ncontent-encoding: gzip\r\ncontent-length: ${packed.length}\r\n\r\n`,
+				packed.subarray(0, packed.length - 3),
+				packed.subarray(packed.length - 3),
+			],
+		};
+		for (const [kind, pieces] of Object.entries(answers)) {
+			const response = await readResponse(streamOf(...pieces));
+			// the body the app reads is the one the daemon made: nothing of how it travelled is left on it
+			expect(response.headers.get("content-encoding"), kind).toBeNull();
+			expect(response.headers.get("content-length"), kind).toBeNull();
+			expect(await response.text(), kind).toBe(body);
+		}
+		// an answer that is not packed is read as it is
+		const plain = await readResponse(streamOf("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"));
+		expect(await plain.text()).toBe("ok");
 	});
 
 	it("gives a status that carries no body none, and says what a broken answer broke on", async () => {

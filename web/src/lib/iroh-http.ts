@@ -5,7 +5,7 @@
  */
 
 /** Headers the shell sets itself: the app's would contradict the framing. */
-const OWN = new Set(["host", "connection", "content-length", "transfer-encoding", "authorization"]);
+const OWN = new Set(["host", "connection", "content-length", "transfer-encoding", "authorization", "accept-encoding"]);
 
 const encoder = new TextEncoder();
 
@@ -19,7 +19,8 @@ export function frameRequest(
 	if (!path.startsWith("/") || /[\r\n ]/.test(path)) throw new Error(`not a path: ${path}`);
 	if (!/^[A-Z]+$/.test(method)) throw new Error(`not a method: ${method}`);
 	// the daemon ignores Host over Iroh; HTTP/1.1 needs one
-	let head = `${method} ${path} HTTP/1.1\r\nhost: banda\r\nconnection: close\r\n`;
+	// a body may come through a relay that carries little: the daemon packs what it sends a device that says it unpacks
+	let head = `${method} ${path} HTTP/1.1\r\nhost: banda\r\nconnection: close\r\naccept-encoding: gzip\r\n`;
 	for (const [name, value] of Object.entries(headers)) {
 		const key = name.toLowerCase();
 		if (OWN.has(key) || !/^[a-z0-9-]+$/.test(key) || /[\r\n]/.test(value)) continue;
@@ -161,5 +162,12 @@ export async function readResponse(stream: ReadableStream<Uint8Array>): Promise<
 		// the app stopped reading: the daemon's side of the Iroh stream is stopped
 		cancel: (reason) => reader.cancel(reason),
 	});
+	// packed by the daemon for the way here: the app reads the body it would have read on the daemon's own page
+	if ((headers.get("content-encoding") ?? "").toLowerCase() === "gzip") {
+		headers.delete("content-encoding");
+		headers.delete("content-length");
+		const unpacked = body.pipeThrough(new DecompressionStream("gzip") as ReadableWritablePair<Uint8Array, Uint8Array>);
+		return new Response(unpacked, { status, headers });
+	}
 	return new Response(body, { status, headers });
 }

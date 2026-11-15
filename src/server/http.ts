@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createGzip, gzipSync, constants as zlib } from "node:zlib";
 import { defaultAvatarFace } from "../core/avatar-face.ts";
 import { avatarIcons, avatarManifest, ICON_FILES, type IconPath } from "../core/avatar-icon.ts";
 import { type Attachment, safeName, sizeOf, tooBig } from "../core/blobs.ts";
@@ -1026,21 +1027,32 @@ async function events<E = LiveEvent>(
 	drop: (event: E) => boolean = () => false,
 ): Promise<void> {
 	let ended = false;
+	const packed = packs(res.req) ? createGzip() : undefined;
+	packed?.pipe(res);
 	const write = (event: E) => {
 		// a stream that ended takes nothing more: what a producer still had to say has no reader
-		if (ended || res.writableEnded || drop(event)) return;
+		if (ended || res.writableEnded || res.destroyed || drop(event)) return;
 		if (!res.headersSent)
 			res.writeHead(200, {
 				"content-type": "text/event-stream",
 				"cache-control": "no-store",
 				"x-accel-buffering": "no",
+				...(packed === undefined ? {} : { "content-encoding": "gzip" }),
 			});
-		res.write(`data: ${JSON.stringify(event)}\n\n`);
+		const frame = `data: ${JSON.stringify(event)}\n\n`;
+		if (packed === undefined) return void res.write(frame);
+		packed.write(frame);
+		// an event leaves as it is written, not when the packer has enough to fill a block
+		packed.flush(zlib.Z_SYNC_FLUSH);
 	};
 	const found = await run(write);
 	ended = true;
-	if (!found) return reply(res, 404, { error: missing });
-	res.end();
+	if (!found) {
+		packed?.destroy();
+		return reply(res, 404, { error: missing });
+	}
+	if (packed === undefined) res.end();
+	else packed.end();
 }
 
 /** The owner's input on the live view, checked field by field: coordinates in the page's pixels. */
@@ -1122,8 +1134,22 @@ async function file(res: ServerResponse, web: string, pathname: string): Promise
 	res.end(index);
 }
 
+/** The least an answer weighs before it is packed: under it the packing saves nothing worth its header. */
+const PACKED_FROM = 1024;
+
+/**
+ * Whether an answer to `req` is packed (gzip): a device's, when it says it unpacks. A device may reach the daemon
+ * through a relay that carries tens of kilobytes a second, where a chat's page is seconds of waiting and a third of
+ * that packed. The daemon's own page is on this computer, where packing would only cost.
+ */
+const packs = (req: IncomingMessage) =>
+	endpointOf(req.socket) !== undefined && /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+
 function reply(res: ServerResponse, code: number, body: unknown) {
-	res.writeHead(code, { "content-type": "application/json" }).end(JSON.stringify(body));
+	const text = JSON.stringify(body);
+	if (text.length < PACKED_FROM || !packs(res.req))
+		return void res.writeHead(code, { "content-type": "application/json" }).end(text);
+	res.writeHead(code, { "content-type": "application/json", "content-encoding": "gzip" }).end(gzipSync(text));
 }
 
 /** A request the daemon refuses as given: answered 400 with its message. */

@@ -1,6 +1,6 @@
 /** Shared skills, from the accepted workspace files. Draft box changes never appear as usable instructions. */
 import { BookOpenIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import {
 	acceptSkill,
 	acceptSkills,
 	chooseShippedSkills,
+	runsOnDevice,
 	type ShippedSkillView,
 	type SkillView,
 	saveSkill,
@@ -21,23 +22,71 @@ import { NAME_RULE, offersLeft, skillFormState } from "../lib/skill-page.ts";
 
 const CHANGED = "banda.skills-changed";
 
+/**
+ * The skills, read once for every place that shows them, and never by two requests at a time: the list carries each
+ * skill's text and files, so it is large (a megabyte in a home with a dozen skills). The daemon's own page reads it
+ * again every `EVERY`, which costs it nothing. A device does not: its bytes may come through a relay that carries tens
+ * of kilobytes a second, where asking again every few seconds leaves no room for anything else. It reads again when
+ * the app comes back to the front, and when a skill was changed from here.
+ */
+const EVERY = 15_000;
+const EMPTY: SkillView[] = [];
+const store = (() => {
+	let list = EMPTY;
+	let reading: Promise<void> | undefined;
+	let timer: ReturnType<typeof setInterval> | undefined;
+	const readers = new Set<() => void>();
+	/** Whoever asks while it is being read waits for that reading; a reading asked for meanwhile follows it, once. */
+	let again = false;
+	/** Whether the list was ever read: a place that shows it later is handed what is known, and asks nothing. */
+	let known = false;
+	const reload = (): Promise<void> => {
+		if (reading !== undefined) {
+			again = true;
+			return reading;
+		}
+		reading = (async () => {
+			try {
+				do {
+					again = false;
+					list = await skills();
+					known = true;
+					for (const reader of readers) reader();
+				} while (again);
+			} finally {
+				reading = undefined;
+			}
+		})();
+		return reading;
+	};
+	const quietly = () => void reload().catch(() => {});
+	const fronted = () => {
+		if (document.visibilityState === "visible") quietly();
+	};
+	return {
+		get: () => list,
+		reload,
+		subscribe(reader: () => void) {
+			readers.add(reader);
+			if (readers.size === 1) {
+				if (!known && reading === undefined) quietly();
+				addEventListener(CHANGED, quietly);
+				if (runsOnDevice) document.addEventListener("visibilitychange", fronted);
+				else timer = setInterval(quietly, EVERY);
+			}
+			return () => {
+				readers.delete(reader);
+				if (readers.size > 0) return;
+				removeEventListener(CHANGED, quietly);
+				document.removeEventListener("visibilitychange", fronted);
+				clearInterval(timer);
+			};
+		},
+	};
+})();
+
 export function useSkills() {
-	const [list, setList] = useState<SkillView[]>([]);
-	const reload = useCallback(async () => {
-		setList(await skills());
-	}, []);
-	useEffect(() => {
-		void reload().catch(() => {});
-		const timer = setInterval(() => {
-			void reload().catch(() => {});
-		}, 15_000);
-		addEventListener(CHANGED, reload);
-		return () => {
-			clearInterval(timer);
-			removeEventListener(CHANGED, reload);
-		};
-	}, [reload]);
-	return { list, reload };
+	return { list: useSyncExternalStore(store.subscribe, store.get), reload: store.reload };
 }
 
 const changed = () => dispatchEvent(new Event(CHANGED));

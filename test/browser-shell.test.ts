@@ -204,7 +204,7 @@ describe("the browser's shell", () => {
 		expect(answered.headers).toEqual({ "content-type": "application/json" });
 		expect(text(fromBase64(answered.body))).toBe('{"state":"pending"}');
 		expect(seen).toEqual([
-			'POST /api/devices/pair HTTP/1.1\r\nhost: banda\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: 33\r\n\r\n{"invite":"s","name":"A browser"}',
+			'POST /api/devices/pair HTTP/1.1\r\nhost: banda\r\nconnection: close\r\naccept-encoding: gzip\r\ncontent-type: application/json\r\ncontent-length: 33\r\n\r\n{"invite":"s","name":"A browser"}',
 		]);
 	});
 

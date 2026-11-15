@@ -20,6 +20,7 @@ import type {
 	ControlView,
 	FilePreview,
 	Item,
+	LiveEvent,
 	MemoryView,
 	OwnerInput,
 	Posted,
@@ -175,7 +176,19 @@ export const allowHost = (agent: string, host: string) =>
 
 /** The page's one stream (`one-stream.ts`), over the daemon's `GET /api/events?chat=`. */
 const one = oneStream((path, onEvent, signal) => stream<ShellEvent>(path, onEvent, signal));
-export const { events, shellEvents, takeReopen } = one;
+/**
+ * A device's streams, each its own: the shell read once, and a chat's live events from the chat's own stream. A
+ * device holds as many streams as it asks for, and what it is short of is bytes (a browser reaches the daemon through
+ * a relay that carries tens of kilobytes a second): the one stream reopens for every chat, and the daemon then sends
+ * the shell again, whole.
+ */
+const apart: typeof one = {
+	events: (chat, onEvent, signal) => stream<LiveEvent>(`/chats/${chat}/events`, onEvent, signal),
+	shellEvents: (onEvent, signal) =>
+		stream<ShellEvent>("/events", (event) => void (event.type === "live" || onEvent(event)), signal),
+	takeReopen: () => false,
+};
+export const { events, shellEvents, takeReopen } = transport.identified ? apart : one;
 
 /** Watch chat `chat`'s browser tab: its state, and its page live, until `signal` aborts or the stream ends. */
 export const browserEvents = (chat: number, onEvent: (event: ViewEvent) => void, signal: AbortSignal) =>

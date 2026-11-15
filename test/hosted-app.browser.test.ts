@@ -37,6 +37,8 @@ async function bridge(daemon: string) {
 	/** The connections dialed, each its dial's own. */
 	const links = new Map<string, Connection>();
 	const streams = new Map<string, Duplex>();
+	/** What the devices asked the daemon for, each as its request's first words: a method and a path. */
+	const sent: string[] = [];
 	const body = async (req: http.IncomingMessage) => {
 		const chunks: Buffer[] = [];
 		for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -77,6 +79,7 @@ async function bridge(daemon: string) {
 				const socket = streams.get(url.searchParams.get("stream") ?? "");
 				if (socket === undefined) return void res.writeHead(404).end();
 				streams.delete(url.searchParams.get("stream") ?? "");
+				sent.push(asked.subarray(0, asked.indexOf(" HTTP/1.1")).toString());
 				res.writeHead(200, { "content-type": "application/octet-stream" });
 				socket.pipe(res);
 				socket.on("error", () => res.destroy());
@@ -126,6 +129,7 @@ async function bridge(daemon: string) {
 		};`;
 	return {
 		module,
+		asked: () => [...sent],
 		close: async () => {
 			server.closeAllConnections();
 			server.close();
@@ -181,6 +185,7 @@ async function start() {
 		invite,
 		computer,
 		server,
+		asked: endpoint.asked,
 		close: async () => {
 			await server.close();
 			await endpoint.close();
@@ -295,6 +300,52 @@ for (const width of [390, 1280])
 		},
 		120_000,
 	);
+
+it.skipIf(!hasChrome())(
+	"a device reads the shell once and a chat from the chat's own stream, and asks the daemon for nothing while nothing happens",
+	async () => {
+		const { owner, invite, server, asked, close } = await start();
+		const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		try {
+			await withPage(`${server.origin}/${new URL(invite.browser).hash}`, { width: 1280, height: 844 }, async (page) => {
+				await page.until(button("Pair with this code"));
+				await page.click(button("Pair with this code"));
+				await page.until(button("The codes match · Pair"));
+				await page.click(button("The codes match · Pair"));
+				await page.until(`${text}.includes('Waiting for approval')`);
+				const [request] = (await owner<DevicesView>("/devices")).requests;
+				await owner(`/devices/requests/${request!.id}/approve`, "POST", { name: "A browser" });
+				await page.until("document.querySelector('textarea') !== null");
+				await page.run("document.querySelector('textarea').focus()");
+				await page.input("Input.insertText", { text: "hello" });
+				for (const type of ["keyDown", "keyUp"])
+					await page.input("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+				await page.until(`${text}.includes('re: hello')`);
+				// the app at rest: nothing new asked for a while
+				for (let last = -1; last !== asked().length; ) {
+					last = asked().length;
+					await pause(2500);
+				}
+				const before = asked();
+				const got = before.filter((line) => line.startsWith("GET ")).map((line) => line.slice(4));
+				// its bytes may cross a relay that carries little: the shell, which is megabytes in a home that is lived in,
+				// is read once, where a page on the daemon's own origin reopens its one stream for every chat
+				expect(got.filter((path) => path.startsWith("/api/events"))).toEqual(["/api/events"]);
+				// (asked twice here, of the one chat: this page is the development build, which mounts every reader twice)
+				expect(new Set(got.filter((path) => /^\/api\/chats\/\d+\/events$/.test(path))).size).toBe(1);
+				// read once, by however many places show it
+				expect(got.filter((path) => path === "/api/skills")).toHaveLength(1);
+				// longer than any timer the app keeps: on the daemon's own page the skills are read again every 15 s
+				await pause(17_000);
+				expect(asked().slice(before.length)).toEqual([]);
+				expect(page.errors()).toEqual([]);
+			});
+		} finally {
+			await close();
+		}
+	},
+	120_000,
+);
 
 /**
  * A camera for the page: its picture is `code`, drawn as the computer's screen shows it. The page's own camera call

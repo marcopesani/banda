@@ -4,7 +4,9 @@
  * the owner revokes it.
  */
 import { stat, writeFile } from "node:fs/promises";
+import type http from "node:http";
 import { join } from "node:path";
+import { createGunzip, gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
@@ -153,6 +155,61 @@ describe("remote reach over Iroh", () => {
 		} finally {
 			await phone.close();
 			await other.close();
+			await daemon.close();
+		}
+	});
+
+	it("packs what it sends a device that says it unpacks, each event as it is written, and nothing for its own page", async () => {
+		const home = await tempHome();
+		const { daemon, owner } = await start(home);
+		const phone = await testDevice();
+		try {
+			const invite = await owner<InviteView>("POST", "/devices/invites");
+			await phone.dial(invite.ticket);
+			await phone.request("POST", "/api/devices/pair", { invite: invite.secret, name: "Pixel" });
+			await owner("POST", `/devices/requests/${phone.id}/approve`, {});
+			const whole = async (res: http.IncomingMessage) => {
+				const chunks: Buffer[] = [];
+				for await (const chunk of res) chunks.push(chunk as Buffer);
+				return Buffer.concat(chunks);
+			};
+			const { token } = (await readDaemonFile(home))!;
+			const own = (path: string) =>
+				fetch(`http://127.0.0.1:${daemon.port}${path}`, {
+					headers: { authorization: `Bearer ${token}`, "accept-encoding": "gzip" },
+				});
+			// an answer long enough to be worth packing, among what a new home answers
+			let long: string | undefined;
+			for (const path of ["/api/capabilities", "/api/agents"])
+				if (long === undefined && (await (await own(path)).text()).length >= 4096) long = path;
+			expect(long).toBeDefined();
+			const plain = await whole(await phone.stream(long!));
+			const asked = await phone.stream(long!, { "accept-encoding": "gzip, br" });
+			expect(asked.headers["content-encoding"]).toBe("gzip");
+			const packed = await whole(asked);
+			expect(gunzipSync(packed).equals(plain)).toBe(true);
+			expect(packed.length).toBeLessThan(plain.length / 2);
+			// a device that does not say so is sent the answer as it is, and a short answer is never packed
+			expect((await phone.stream(long!)).headers["content-encoding"]).toBeUndefined();
+			const short = await phone.stream("/api/devices/pair", { "accept-encoding": "gzip" });
+			expect(short.headers["content-encoding"]).toBeUndefined();
+			expect(JSON.parse((await whole(short)).toString())).toEqual({ state: "paired" });
+			// the daemon's own page is on this computer: packing would only cost
+			expect((await own(long!)).headers.get("content-encoding")).toBeNull();
+
+			// a stream of events is packed too, and an event is read when it was written, not when the stream ends
+			const stream = await phone.stream("/api/events", { "accept-encoding": "gzip" });
+			expect(stream.headers["content-encoding"]).toBe("gzip");
+			const shell = events(stream.pipe(createGunzip()) as unknown as http.IncomingMessage);
+			expect((await shell.next<ShellEvent>((event) => event.type === "chats")).type).toBe("chats");
+			await owner("PUT", `/devices/${phone.id}`, { name: "Mine" });
+			const renamed = await shell.next<ShellEvent>(
+				(event) => event.type === "devices" && event.devices.devices.some((device) => device.name === "Mine"),
+			);
+			expect(renamed.type).toBe("devices");
+			stream.destroy();
+		} finally {
+			await phone.close();
 			await daemon.close();
 		}
 	});

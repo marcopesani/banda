@@ -15,7 +15,7 @@ export type Device = {
 	dial(ticket: string): Promise<Connection>;
 	request(method: string, path: string, body?: unknown, headers?: http.OutgoingHttpHeaders): Promise<Answer>;
 	/** A request whose response is a stream: its response, to read as it comes. */
-	stream(path: string): Promise<http.IncomingMessage>;
+	stream(path: string, headers?: http.OutgoingHttpHeaders): Promise<http.IncomingMessage>;
 	close(): Promise<void>;
 };
 
@@ -72,9 +72,9 @@ export async function testDevice({ reach = "loopback" }: { reach?: "loopback" | 
 				req.on("error", reject);
 				req.end(body === undefined ? undefined : JSON.stringify(body));
 			}),
-		stream: (path) =>
+		stream: (path, headers = {}) =>
 			new Promise((resolve, reject) => {
-				const req = open("GET", path, {});
+				const req = open("GET", path, headers);
 				req.on("response", resolve);
 				req.on("error", reject);
 				req.end();

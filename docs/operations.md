@@ -102,6 +102,13 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
   taken off); two tabs of one browser, which do not hear of each other's pairing or forgetting; a browser that
   clears a site's storage it has not seen for a while, which makes a new device of it; and the pairing screens'
   words, which say "phone" on any browser
+- [ ] What a device is sent, which is what it waits for where a relay throttles (n0's: about 46 KB/s from one endpoint,
+  measured, and its log says so). In a home that is lived in the shell's first push is 1.44 MB, of which coding
+  sessions are 707 KB (`harnesses.sessions`) and the connections' tools 589 KB (`capabilities`), each sent again whole
+  when one changes; the skills list is 948 KB, read for its names; a chat's first page is 70 KB to 2 MB. Packed they
+  are a fifth to a third of that, and `test/hosted-app.browser.test.ts` holds an idle device to asking nothing. Open:
+  the shell without the sessions' and the tools' bulk, a skills list of names, a chat's first page by weight, the
+  phone's shell asking for packed answers as the browser's does, and a relay of the owner's own.
 - [ ] Run the release workflow's `materials` job once by hand (`build_target: all`, no tag) before the next tag: it
   has only run on a development Mac against alpha.14's downloads, never on a runner. Watch its disk use and its time
 - [ ] Decide how the owner's review of a release's sources and notices is recorded. The set exists only after the

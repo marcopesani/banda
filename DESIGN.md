@@ -1077,6 +1077,12 @@ the app takes out of the address bar as it reads them. Whoever serves that origi
 since they are what the device runs: they are a release's build, they load nothing from anywhere else, and no other
 build carries the endpoint.
 
+A device is short of bytes where the daemon's own page is not: a phone on a mobile network, and a browser, whose every
+byte crosses a relay that may throttle it (n0's lets an endpoint send tens of kilobytes a second). So the daemon packs
+what it sends a device that says it unpacks; the app on a device reads the shell once, and a chat's events from the
+chat's own stream, where the daemon's own page reopens its one stream for every chat and is sent the shell again; and
+a device reads nothing again on a timer.
+
 ## Home
 `~/.banda` (`--home <dir>` or `BANDA_HOME`): `config.json`, `durable.db`, `search.db`, `blobs/`, `auth/`, `format`. The
 workspace lives in the box.
