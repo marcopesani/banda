@@ -10,8 +10,9 @@
  * the chats of the agent that asked. The response is foreign content, framed as data.
  *
  * A host permission is also pushed into the proxy's config (`permittedHosts`), so a write there goes straight through
- * as it happens (a `git push` run again succeeds), credentials set at the proxy, unless it carries a credential of its
- * own; the proxy records each before sending it, and the next intake logs it as sent, with its bytes' hash.
+ * as it happens (a `git push` run again succeeds), credentials set at the proxy, a credential its command set
+ * included; unless it is on the floor (`onFloor`): it carries one of its own where the proxy sets the owner's, or is the
+ * browser's. The proxy records each before sending it, and the next intake logs it as sent, with its bytes' hash.
  *
  * The daemon talks to the proxy through `EgressControl` alone, which the container box implements over `docker exec`.
  */
@@ -97,6 +98,11 @@ export type EgressControl = {
 	ack(chat: number, readBytes: number, tickets: readonly string[], ctx: Context): Promise<void>;
 	/** Send `request` exactly as held, to the address its host resolves to now if public; credentials swapped in. */
 	replay(request: HeldRequest, ctx: Context): Promise<Replayed>;
+	/**
+	 * Whether the proxy sets a credential of the owner's on a request to this host over this scheme. A proxy that
+	 * cannot say is taken to set one (`swappedOf`).
+	 */
+	swaps?(request: Pick<HeldRequest, "scheme" | "host">, ctx: Context): Promise<boolean>;
 };
 
 export type IntakeSource = "tool" | "recovery";
@@ -105,13 +111,18 @@ export type NotSent = "websocket" | "limit" | "missing" | "inactive" | "repeat";
 export type KeptTicket = HeldRequest & { readonly kept: number; readonly notSent?: NotSent };
 export type Retained = { readonly ids: readonly string[]; readonly notSent: Readonly<Record<string, NotSent>> };
 
-/** Retain each own-chat ticket with its release/approval or explicit not-sent resolution, in the same commit. */
+/**
+ * Retain each own-chat ticket with its release/approval or explicit not-sent resolution, in the same commit.
+ * `swapped`: the tickets whose host the proxy sets a credential of the owner's for (`swappedOf`, asked before the
+ * commit); without it every one is taken to be.
+ */
 export type Retain = (
 	tx: Tx,
 	chat: number,
 	held: readonly HeldRequest[],
 	now: number,
 	source: IntakeSource,
+	swapped?: ReadonlySet<string>,
 ) => Promise<Retained>;
 
 /** The proxy's control, with transactional retention of held tickets and their disposition. */
@@ -301,9 +312,9 @@ export function routeOf(request: Pick<HeldRequest, "method" | "scheme" | "host" 
 }
 
 /**
- * Headers that carry a credential, and query parameters that do: a request the box sends with one is on the floor. The
- * proxy holds the same sets (policy.py SECRET_HEADERS, SECRET_QUERY), so it never sends one straight through under a
- * host permission. A credential inside a body is not looked for.
+ * Headers that carry a credential, and query parameters that do: a request the box sends with one carries a credential
+ * of its own. The proxy holds the same sets (policy.py SECRET_HEADERS, SECRET_QUERY) and the same floor (`onFloor`,
+ * policy.py `on_floor`). A credential inside a body is not looked for.
  */
 export const SECRET_HEADERS = new Set([
 	"authorization",
@@ -317,7 +328,7 @@ export const SECRET_HEADERS = new Set([
 ]);
 export const SECRET_QUERY = new Set(["access_token", "token", "api_key", "apikey", "private_token"]);
 
-/** Whether a request carries a credential of its own, in a header or its path's query: then it is on the floor. */
+/** Whether a request carries a credential of its own, in a header or its path's query. */
 export function ownCredential(headers: readonly (readonly [string, string])[], path = ""): boolean {
 	if (headers.some(([key]) => SECRET_HEADERS.has(key.trim().toLowerCase()))) return true;
 	const at = path.indexOf("?");
@@ -336,11 +347,65 @@ export const fromBrowser = (request: Pick<HeldRequest, "headers">): boolean =>
 	request.headers.some(([key, value]) => key.trim().toLowerCase() === FROM_HEADER && value === "browser");
 
 /**
- * The draft for a stored request: its method, address, headers and body as a person reads them, and, for the daemon,
- * the ticket that names its exact bytes, the route a permission would bind, and the host a host permission would.
+ * Whether a held request is on the floor, asked about every time whatever the owner allowed: it carries a credential
+ * of its own, and either the proxy sets one of the owner's for its host (`swapped`: the two would go together, or the
+ * owner's in the other's place) or it is the browser's, whose cookies are the owner's sessions. A credential a command
+ * set, where the proxy sets none, acts as whoever it is and never as the owner: that request is as any other write.
  */
-export function draftArgs(request: HeldRequest): JsonObject {
+export const onFloor = (request: Pick<HeldRequest, "headers" | "path">, swapped: boolean): boolean =>
+	ownCredential(request.headers, request.path) && (swapped || fromBrowser(request));
+
+/** A host as the proxy compares it (policy.py `name`): lower case, no trailing dot, no brackets. */
+const named = (host: string) =>
+	host
+		.trim()
+		.toLowerCase()
+		.replace(/\.$/, "")
+		.replace(/^\[(.*)\]$/, "$1");
+
+/**
+ * Whether the proxy, given `credentials`, sets one on a request to this host over this scheme, as its own lookup
+ * reads them (policy.py `credential_for`): the host by name, over the scheme each names (https unless it says http).
+ */
+export const setsCredential = (
+	credentials: readonly { readonly host: string; readonly scheme?: "http" }[],
+	request: Pick<HeldRequest, "scheme" | "host">,
+): boolean =>
+	credentials.some((one) => named(one.host) === named(request.host) && (one.scheme ?? "https") === request.scheme);
+
+/**
+ * The tickets among `held` whose host the proxy sets a credential of the owner's for, asked only of those carrying
+ * one of their own. A proxy that cannot say, or fails to, is taken to set one: the floor as it was.
+ */
+export async function swappedOf(
+	egress: EgressControl,
+	held: readonly HeldRequest[],
+	ctx: Context,
+): Promise<ReadonlySet<string>> {
+	const swapped = new Set<string>();
+	// asked once for each host: what the proxy sets is read from the store and the home
+	const asked = new Map<string, boolean>();
+	for (const one of held) {
+		if (!ownCredential(one.headers, one.path)) continue;
+		const server = `${one.scheme}://${one.host}`;
+		let sets = asked.get(server);
+		if (sets === undefined) {
+			sets = egress.swaps === undefined ? true : await egress.swaps(one, ctx).catch(() => true);
+			asked.set(server, sets);
+		}
+		if (sets) swapped.add(one.ticket);
+	}
+	return swapped;
+}
+
+/**
+ * The draft for a stored request: its method, address, headers and body as a person reads them, and, for the daemon,
+ * the ticket that names its exact bytes, the route a permission would bind, the host a host permission would, and
+ * `_own` when the credential it carries is its command's alone (not `onFloor`; `swapped` unless the proxy said not).
+ */
+export function draftArgs(request: HeldRequest, swapped = true): JsonObject {
 	return {
+		...(ownCredential(request.headers, request.path) && !onFloor(request, swapped) ? { _own: true } : {}),
 		method: request.method,
 		address: addressWords(addressOf(request)),
 		// credentials masked: the ticket names the exact bytes, so none is written into the draft
@@ -470,8 +535,9 @@ export async function sweepReceipts(
 		const sent = settled(taken.sent ?? [], chat, at);
 		if (own.length === 0 && sent.length === 0) continue;
 		if (mode === "recover") fault("recovery:taken");
+		const swapped = await swappedOf(egress, own, ctx);
 		const kept = await harness.commit(async (tx) => {
-			const held = mode === "recover" ? await egress.retain(tx, chat, own, at, "recovery") : { ids: [] };
+			const held = mode === "recover" ? await egress.retain(tx, chat, own, at, "recovery", swapped) : { ids: [] };
 			const keptSent = await keepSent(tx, chat, sent, at);
 			return { done: [...held.ids, ...keptSent.done], logged: keptSent.logged };
 		}, ctx);
@@ -504,8 +570,15 @@ export async function intake(
 	if (taken.held.length === 0 && sent.length === 0 && taken.reads.length === 0) return "";
 	fault("intake");
 	if (sent.length > 0) fault("intake:sent");
+	const swapped = await swappedOf(egress, own, ctx);
+	const floor = (held: HeldRequest) => onFloor(held, swapped.has(held.ticket));
+	/** What puts a held request on the floor, as its command's agent is told. */
+	const carries = (held: HeldRequest) =>
+		fromBrowser(held)
+			? "the browser's session"
+			: "a credential of its own to a host banda sets the owner's credential for";
 	const kept = await api.commit(async (tx) => {
-		const held = await egress.retain(tx, chat, own, now, "tool");
+		const held = await egress.retain(tx, chat, own, now, "tool", swapped);
 		await keepSent(tx, chat, sent, now);
 		if (taken.reads.length > 0)
 			await log(tx, { at: now, what: `Read from ${taken.reads.join(", ")}`, chat, outside: "read" });
@@ -526,8 +599,8 @@ export async function intake(
 				(kept.notSent[held.ticket] === "missing" || kept.notSent[held.ticket] === "inactive"
 					? "This chat no longer has an active agent or group. The request will not be sent."
 					: kept.notSent[held.ticket] === "websocket"
-						? ownCredential(held.headers, held.path)
-							? "A WebSocket is a stream, never sent as one request, and one carrying a credential of its own is never " +
+						? floor(held)
+							? `A WebSocket is a stream, never sent as one request, and one carrying ${carries(held)} is never ` +
 								"let through: it will not be sent. Open it without that credential."
 							: `A WebSocket is a stream, never sent as one request: ask the owner to allow ${permittedHost(held)} with ` +
 								"ask_hosts (with every other host the task needs), then run the command again."
@@ -543,8 +616,8 @@ export async function intake(
 									"answered 403 in its place, so it may say it failed (a git push does): that is this hold, not its " +
 									"server refusing it. You will be told how it ended, with the response if it was sent. There is " +
 									"nothing to call: go on or end your turn, and do not send it again yourself." +
-									(ownCredential(held.headers, held.path)
-										? ""
+									(floor(held)
+										? ` It carries ${carries(held)}, so they are asked every time.`
 										: ` Before your next writes there, you can ask the owner to allow ${permittedHost(held)} with ask_hosts.`)),
 		);
 	}
@@ -610,7 +683,9 @@ export function proposeSendTool(
 		parameters,
 		effect: "unsafe",
 		describe: (args) => `send ${String(drafted(args).method)} ${String(drafted(args).address)}`,
+		// a credential of its own puts it on the floor, unless the daemon drafted it as its command's alone (`draftArgs`)
 		floor: (args) =>
+			drafted(args)._own !== true &&
 			ownCredential(
 				String(drafted(args).headers)
 					.split("\n")
@@ -631,7 +706,7 @@ export function proposeSendTool(
 			const held = await stored(api, args.ticket, ctx);
 			if (held === undefined) return `there is no held request with ticket ${args.ticket}: send it again to get one`;
 			if (held.chat !== Number(api.conversationId)) return `ticket ${args.ticket} is another chat's`;
-			return draftArgs(held) as JsonObject;
+			return draftArgs(held, (await swappedOf(egress, [held], ctx)).has(held.ticket)) as JsonObject;
 		},
 		run: async (args, { api }, ctx): Promise<ToolExecutionResult> => {
 			const ticket = String((args as JsonObject)._ticket);

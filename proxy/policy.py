@@ -253,9 +253,10 @@ def is_write(method, headers, url=""):
 
 
 DEFAULT_PORTS = {"http": 80, "https": 443}
-# Headers that carry a credential, as the daemon's floor names them (egress.ts SECRET_HEADERS), and query parameters
-# that do (SECRET_QUERY): a request the box sends with one is on the floor, never covered by a permission. A credential
-# inside a body is not looked for: what a body carries is its own format's.
+# Headers that carry a credential, as the daemon names them (egress.ts SECRET_HEADERS), and query parameters that do
+# (SECRET_QUERY): a request the box sends with one carries a credential of its own, and is on the floor, never covered
+# by a permission, where the proxy sets one of the owner's (`on_floor`). A credential inside a body is not looked for:
+# what a body carries is its own format's.
 SECRET_HEADERS = {
     "authorization",
     "cookie",
@@ -288,11 +289,21 @@ def permitted_host(scheme, host, port):
 
 
 def own_credentials(headers, path=""):
-    """Whether a request carries a credential of its own, in a header or its query: then it is on the floor."""
+    """Whether a request carries a credential of its own, in a header or its query."""
     if any(key.strip().lower() in SECRET_HEADERS for key, _ in headers):
         return True
     query = urlsplit(path).query
     return any(key.strip().lower() in SECRET_QUERY for key in parse_qs(query, keep_blank_values=True))
+
+
+def on_floor(scheme, host, headers, path, credentials):
+    """
+    Whether a write of a command's is on the floor, held whatever host the owner allowed: it carries a credential of its
+    own to a host the proxy sets one of the owner's for (`credential_for`, the same lookup that sets it), so the two
+    would go together, or the owner's in the other's place, with nobody asked. A credential the command set, where the
+    proxy sets none, acts as whoever it is and never as the owner: that write is as any other.
+    """
+    return own_credentials(headers, path) and bool(credential_for(host, credentials, scheme))
 
 
 def host_covers(allowed, spelled):
@@ -323,17 +334,17 @@ def host_covers(allowed, spelled):
     return named == "*" or (named.startswith("*.") and other_name.endswith(named[1:]))
 
 
-def direct_write(scheme, host, port, headers, path, permitted):
+def direct_write(scheme, host, port, headers, path, permitted, credentials):
     """
     Whether a write goes straight through, as it happens: its host is one the owner allowed for its chat's agent
     (`permitted`, which the daemon's config names for that chat, exactly or by a pattern `host_covers` reads), and it
-    carries no credential of its own (the floor). A WebSocket upgrade there opens a stream, recorded as it opens.
-    Anything else is held.
+    is not on the floor (`on_floor`, by the `credentials` the daemon gave). A WebSocket upgrade there opens a stream,
+    recorded as it opens. Anything else is held.
     """
     spelled = permitted_host(scheme, host, port)
     if not any(host_covers(allowed, spelled) for allowed in permitted):
         return False
-    return not own_credentials(headers, path)
+    return not on_floor(scheme, host, headers, path, credentials)
 
 
 def is_websocket(headers):
@@ -342,16 +353,21 @@ def is_websocket(headers):
     return "websocket" in upgrade.lower()
 
 
-def held_words(ticket, scheme, host, port, headers, path=""):
+def held_words(ticket, scheme, host, port, headers, path, credentials):
     """What the box hears of a write held as `ticket`: that it waits, and how the next one goes straight through."""
     said = f"this request writes, so it waits for the owner: ticket {ticket}. It has not been sent."
-    if is_websocket(headers) and own_credentials(headers, path):
+    floor = on_floor(scheme, host, headers, path, credentials)
+    if is_websocket(headers) and floor:
         return (
-            f"{said} A WebSocket is a stream, never sent as one request, and one carrying a credential of its own is "
-            "never let through: it will not be sent. Open it without that credential."
+            f"{said} A WebSocket is a stream, never sent as one request, and one carrying a credential of its own to "
+            "a host banda sets the owner's for is never let through: it will not be sent. Open it without that "
+            "credential."
         )
-    if own_credentials(headers, path):
-        return f"{said} It carries a credential of its own, so the owner is asked every time."
+    if floor:
+        return (
+            f"{said} It carries a credential of its own to a host banda sets the owner's credential for, so the "
+            "owner is asked every time. Leave yours out and banda sets the owner's."
+        )
     allowed = permitted_host(scheme, host, port)
     if is_websocket(headers):
         return (

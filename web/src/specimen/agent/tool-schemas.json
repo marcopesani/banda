@@ -958,7 +958,7 @@
 		}
 	},
 	"ask_hosts": {
-		"description": "Ask the owner to allow you hosts, several at once, before you need them: anything you send there (any method, WebSockets included, e.g. Nostr relays or a streaming API) then goes straight through, from any of your chats, until the owner takes it back; but a request carrying a credential of its own (a Cookie, an Authorization or key header, a token in its address) still waits for the owner each time. Reads never need this. Ask for what the task needs: exact names first, a pattern (*.example.com) when the names are many under one domain, * only when the owner asked for it.",
+		"description": "Ask the owner to allow you hosts, several at once, before you need them: anything you send there (any method, WebSockets included, e.g. Nostr relays or a streaming API) then goes straight through, from any of your chats, until the owner takes it back, with any credential you set on it yourself (a Cookie, an Authorization or key header, a token in its address); only where banda sets the owner's credential for the host does a request carrying one of its own still wait for the owner each time. Reads never need this. Ask for what the task needs: exact names first, a pattern (*.example.com) when the names are many under one domain, * only when the owner asked for it.",
 		"parameters": {
 			"type": "object",
 			"required": ["hosts", "why"],

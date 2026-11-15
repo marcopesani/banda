@@ -12,8 +12,9 @@ The egress proxy's addon (DESIGN.md "The box", Network): every request from the 
 - A write (any method but GET, HEAD and OPTIONS, a WebSocket upgrade) is held as a ticket and answered 403: the daemon
   takes it into its store, and the proxy sends it only when the owner approved it (the control script's replay).
   A write to a host the owner allowed for the agent its chat runs (the daemon's config names them by chat) goes
-  straight through, recorded for the daemon before it is sent and its outcome noted after, unless it carries a
-  credential of its own (the floor). A WebSocket opened there streams: its opening is the write recorded, its frames
+  straight through, recorded for the daemon before it is sent and its outcome noted after, a credential its command
+  set included; unless it carries one of its own to a host a credential of the owner's is set for (the floor), the
+  two never going together unasked. A WebSocket opened there streams: its opening is the write recorded, its frames
   pass, and what the server sends is scrubbed of credentials. Every other WebSocket is cut.
 - Credentials the daemon gave for a host are set at the proxy, never in the box, and scrubbed from what comes back;
   none on a request that acts as nobody (web_fetch's reads).
@@ -238,7 +239,8 @@ class Egress:
         # the hosts the owner allowed for the agent this chat runs, as the daemon names them by chat; nothing the box says
         by_chat = cfg.get("permitted") or {}
         permitted = by_chat.get(str(chat), []) if isinstance(by_chat, dict) else []
-        if writes and policy.direct_write(scheme, host, port, headers, flow.request.path, permitted):
+        credentials = cfg.get("credentials", [])
+        if writes and policy.direct_write(scheme, host, port, headers, flow.request.path, permitted, credentials):
             # a host the owner allowed takes this chat's writes as they happen: recorded before it is sent, so the
             # daemon logs every one; what comes back is foreign
             body = flow.request.raw_content or b""
@@ -255,7 +257,7 @@ class Egress:
             refuse(
                 flow,
                 403,
-                policy.held_words(ticket, scheme, host, port, headers, flow.request.path),
+                policy.held_words(ticket, scheme, host, port, headers, flow.request.path, credentials),
                 {"x-banda-ticket": ticket},
             )
             return None
