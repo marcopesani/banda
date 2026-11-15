@@ -215,8 +215,8 @@ export async function stageMicrovmBundle(options: { root: string; out: string; t
 	const distribution =
 		redistribution === "reviewed"
 			? {
-					title: "Mac distribution reviewed",
-					note: "The source and third-party notice packet for these exact native and image inputs has been accepted for this unsigned Mac pre-release. Matching corresponding sources and third-party notices ship as release assets. The inventory records selected source and dependency inputs.",
+					title: `${target} distribution reviewed`,
+					note: `The source and third-party notice packet for these exact native and image inputs has been accepted for this ${target} pre-release. Matching corresponding sources and third-party notices ship as release assets. The inventory records selected source and dependency inputs.`,
 				}
 			: {
 					title: "distribution review pending",
@@ -270,6 +270,7 @@ export async function stageMicrovmBundle(options: { root: string; out: string; t
 				: {
 						...common,
 						target,
+						redistribution,
 						vendorArchiveSha256: MICROVM_PLATFORMS[target].sha256,
 						firmware: await notice("libkrunfw.so.5.6.1"),
 					};

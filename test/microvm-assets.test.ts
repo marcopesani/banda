@@ -263,7 +263,9 @@ describe("installed computer assets", () => {
 			expect(loaded.firmware).toBe(join(await realpath(root), vendor.firmware));
 			await expect(readMicrovmAssets(root, "darwin-arm64")).rejects.toThrow(/different operating system or CPU/);
 			await writeFile(join(root, "manifest.json"), JSON.stringify({ ...linux, redistribution: "reviewed" }));
-			await expect(readMicrovmAssets(root, target)).rejects.toThrow(/manifest/);
+			if (target === "linux-x64")
+				await expect(readMicrovmAssets(root, target)).resolves.toHaveProperty("target", target);
+			else await expect(readMicrovmAssets(root, target)).rejects.toThrow(/manifest/);
 		},
 	);
 });

@@ -198,6 +198,7 @@ export const MicrovmManifest = Type.Union([
 		{
 			...manifest,
 			target: Type.Literal("linux-x64"),
+			redistribution: Type.Union([Type.Literal("review-required"), Type.Literal("reviewed")]),
 			vendorArchiveSha256: Type.Literal(MICROVM_PLATFORMS["linux-x64"].sha256),
 			firmware: file("libkrunfw.so.5.6.1"),
 		},

@@ -14,13 +14,6 @@ const runtimeBuild = Type.Object(
 			{ additionalProperties: false },
 		),
 		lockSha256: hash,
-		environment: Type.Object(
-			{
-				platform: Type.Literal("darwin"),
-				minimumVersion: Type.String({ pattern: "^[0-9]+(?:\\.[0-9]+){1,2}$" }),
-			},
-			{ additionalProperties: false },
-		),
 		compiler: Type.Object(
 			{
 				...MicrovmRuntimeBuild.properties.compiler.properties,
@@ -33,17 +26,36 @@ const runtimeBuild = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export const ComputerDistributionReview = Type.Object(
+const inputs = {
+	applicationVersion: version,
+	vendorArchiveSha256: hash,
+	msbSha256: hash,
+	firmwareSha256: hash,
+};
+const darwinReview = Type.Object(
 	{
 		catalogSha256: hash,
 		inputs: Type.Object(
 			{
-				applicationVersion: version,
+				...inputs,
 				target: Type.Literal("darwin-arm64"),
-				vendorArchiveSha256: hash,
-				runtimeBuild,
-				msbSha256: hash,
-				firmwareSha256: hash,
+				runtimeBuild: Type.Object(
+					{
+						...runtimeBuild.properties,
+						environment: Type.Object(
+							{
+								platform: Type.Literal("darwin"),
+								minimumVersion: Type.String({ pattern: "^[0-9]+(?:\\.[0-9]+){1,2}$" }),
+							},
+							{ additionalProperties: false },
+						),
+						compiler: Type.Object(
+							{ ...runtimeBuild.properties.compiler.properties, target: Type.Literal("aarch64-apple-darwin") },
+							{ additionalProperties: false },
+						),
+					},
+					{ additionalProperties: false },
+				),
 				images: Type.Object(
 					{ ...MicrovmImages.properties, target: Type.Literal("linux-arm64") },
 					{ additionalProperties: false },
@@ -54,22 +66,67 @@ export const ComputerDistributionReview = Type.Object(
 	},
 	{ additionalProperties: false },
 );
+const linuxReview = Type.Object(
+	{
+		catalogSha256: hash,
+		inputs: Type.Object(
+			{
+				...inputs,
+				target: Type.Literal("linux-x64"),
+				runtimeBuild: Type.Object(
+					{
+						...runtimeBuild.properties,
+						environment: Type.Object(
+							{
+								platform: Type.Literal("linux"),
+								image: Type.String({ pattern: "^quay\\.io/pypa/manylinux_[A-Za-z0-9_]+_x86_64@sha256:[a-f0-9]{64}$" }),
+								glibc: Type.String({ pattern: "^[0-9]+\\.[0-9]+$" }),
+							},
+							{ additionalProperties: false },
+						),
+						compiler: Type.Object(
+							{ ...runtimeBuild.properties.compiler.properties, target: Type.Literal("x86_64-unknown-linux-gnu") },
+							{ additionalProperties: false },
+						),
+					},
+					{ additionalProperties: false },
+				),
+				images: Type.Object(
+					{ ...MicrovmImages.properties, target: Type.Literal("linux-x64") },
+					{ additionalProperties: false },
+				),
+			},
+			{ additionalProperties: false },
+		),
+	},
+	{ additionalProperties: false },
+);
+export const ComputerDistributionReviews = Type.Object(
+	{
+		"darwin-arm64": darwinReview,
+		"linux-x64": Type.Optional(linuxReview),
+	},
+	{ additionalProperties: false },
+);
 
-type DistributionInputs = Omit<
-	Static<typeof ComputerDistributionReview>["inputs"],
-	"target" | "images" | "runtimeBuild"
-> & {
+type DistributionInputs = Omit<Static<typeof darwinReview>["inputs"], "target" | "images" | "runtimeBuild"> & {
 	target: MicrovmTarget;
 	images: MicrovmImages;
-	runtimeBuild: MicrovmRuntimeBuild | Static<typeof runtimeBuild>;
+	runtimeBuild:
+		| MicrovmRuntimeBuild
+		| Static<typeof darwinReview>["inputs"]["runtimeBuild"]
+		| Static<typeof linuxReview>["inputs"]["runtimeBuild"];
 };
 
-export function computerDistribution({ review, inputs }: { review: unknown; inputs: DistributionInputs }) {
-	if (!Value.Check(ComputerDistributionReview, review)) throw new Error("The computer distribution review is invalid.");
-	return isDeepStrictEqual(review.inputs, inputs) ? "reviewed" : "review-required";
+export function computerDistribution({ reviews, inputs }: { reviews: unknown; inputs: DistributionInputs }) {
+	if (!Value.Check(ComputerDistributionReviews, reviews))
+		throw new Error("The computer distribution review is invalid.");
+	if (inputs.target === "linux-arm64") return "review-required";
+	const review = reviews[inputs.target];
+	return review && isDeepStrictEqual(review.inputs, inputs) ? "reviewed" : "review-required";
 }
 
 export async function readComputerDistribution(inputs: DistributionInputs) {
-	const review: unknown = JSON.parse(await readFile(new URL("computer-distribution.json", import.meta.url), "utf8"));
-	return computerDistribution({ review, inputs });
+	const reviews: unknown = JSON.parse(await readFile(new URL("computer-distribution.json", import.meta.url), "utf8"));
+	return computerDistribution({ reviews, inputs });
 }
