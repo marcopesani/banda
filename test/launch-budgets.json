@@ -13,9 +13,11 @@
 		"research, work": { "requests": 20, "costUsd": 1, "firstWordsS": 180 },
 		"coding agent, return": { "requests": 10, "costUsd": 1, "firstWordsS": 130 },
 		"connection": { "requests": 14, "costUsd": 0.8, "firstWordsS": 100 },
+		"browser": { "requests": 12, "costUsd": 0.02, "firstWordsS": 30, "measuredOn": "anthropic small tier" },
 		"routine": { "requests": 20, "costUsd": 1.7 }
 	},
 	"cache": { "warmRequestsReadingUnderHalfPercent": 5, "hitRatePercent": 85, "hitRateFromRequests": 100 },
 	"measuredPaths": ["anthropic small tier by API key", "openai large tier"],
-	"unmeasured": ["artifacts", "browser", "a first answer on a fresh home"]
+	"measuredOnSmallTierOnly": ["artifacts (as work)", "browser", "a first answer on a fresh home (as answer)"],
+	"unmeasured": ["artifacts, browser and a fresh home's first answer on any path but the anthropic small tier"]
 }
