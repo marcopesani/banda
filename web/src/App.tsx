@@ -1,18 +1,19 @@
 /**
  * The app: the shell (`app/Shell.tsx`) once the page holds the owner's token; without one, or with one the daemon no
- * longer takes, the page says where its link is. In the phone's native shell there is no token: the app opens once
- * the phone is a paired device (`app/PairDevice.tsx`). `#/specimen` shows every component, with no token needed.
+ * longer takes, the page says where its link is. In the phone's native shell, and in a browser on the app's own origin,
+ * there is no token: the app opens once this is a paired device (`app/PairDevice.tsx`). `#/specimen` shows every
+ * component, with no token needed.
  */
 
-/** The phone's native shell, when the page runs in it: read once, as the transport is. */
-const native = nativeShell();
+/** The shell the app is a device through, when it has one (the phone's, or the browser's on the app's own origin): read once, as the transport is. */
+const native = deviceShell();
 
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { PairDevice } from "./app/PairDevice.tsx";
 import { Shell } from "./app/Shell.tsx";
 import { hasToken, onToken, onUnauthorized } from "./lib/api.ts";
-import { nativeShell } from "./lib/transport.ts";
+import { deviceShell } from "./lib/transport.ts";
 
 /** The specimen, loaded when its hash is opened: the app does not carry it. */
 const Specimen = lazy(() => import("./routes/Specimen.tsx").then((module) => ({ default: module.Specimen })));

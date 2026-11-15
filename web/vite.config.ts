@@ -8,10 +8,17 @@ import { dirname, join } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { APP_POLICY, FRAME_POLICY } from "../src/server/policy.ts";
+import { APP_POLICY, FRAME_POLICY, HOSTED_POLICY } from "../src/server/policy.ts";
 import { activityFixture } from "./scripts/activity-fixture.ts";
 
 const daemon = `http://127.0.0.1:${process.env.BANDA_PORT ?? "7787"}`;
+
+/**
+ * Whether this build is the one the app's own origin serves (web/vercel.json sets `BANDA_HOSTED`). What only that
+ * build does, being a device through a browser's own Iroh endpoint, is written behind `__BANDA_HOSTED__`, so the build
+ * the daemon serves and the one the phone's shell carries are made without that code and its WebAssembly.
+ */
+const hosted = process.env.BANDA_HOSTED === "1";
 
 /** Stamps the service worker's cache name with the build's id (a hash of its files' names), so each build caches anew. */
 function stampWorker(): Plugin {
@@ -47,7 +54,7 @@ export function policyMeta(): Plugin {
 			if (!html.includes(charset)) throw new Error("index.html has no charset meta to put the policy after");
 			return html.replace(
 				charset,
-				`${charset}\n\t\t<meta http-equiv="Content-Security-Policy" content="${APP_POLICY}" />`,
+				`${charset}\n\t\t<meta http-equiv="Content-Security-Policy" content="${hosted ? HOSTED_POLICY : APP_POLICY}" />`,
 			);
 		},
 	};
@@ -107,8 +114,22 @@ export default defineConfig({
 		vendorEmojibase(),
 		activityFixture(process.env.BANDA_ACTIVITY_FIXTURE),
 	],
+	define: { __BANDA_HOSTED__: JSON.stringify(hosted) },
 	// shadcn's components import each other through `@/`
-	resolve: { alias: { "@": `${import.meta.dirname}/src` } },
+	resolve: {
+		alias: [
+			{ find: "@", replacement: `${import.meta.dirname}/src` },
+			// the browser's endpoint and its WebAssembly go into the hosted build alone
+			...(hosted
+				? []
+				: [
+						{
+							find: /^.*\/iroh\/pkg\/banda_iroh_web\.js$/,
+							replacement: `${import.meta.dirname}/src/lib/no-endpoint.ts`,
+						},
+					]),
+		],
+	},
 	build: { outDir: "dist", emptyOutDir: true, target: "es2022" },
 	server: {
 		port: 5173,
