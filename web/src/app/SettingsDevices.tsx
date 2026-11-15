@@ -23,7 +23,7 @@ export function SettingsDevices() {
 			making={making}
 			onPair={() => {
 				setMaking(true);
-				void attempt("make a code to pair a phone", makeInvite)
+				void attempt("make a code to pair a device", makeInvite)
 					.then((made) => {
 						if (made !== undefined) setInvite({ pairing: made.pairing, browser: made.browser, expires: made.expires });
 					})

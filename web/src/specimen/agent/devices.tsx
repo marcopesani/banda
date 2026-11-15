@@ -2,6 +2,7 @@ import { type ReactNode, useContext, useState } from "react";
 import type { DevicesView } from "../../../../src/server/api.ts";
 import { DevicesSettings, type ShownInvite } from "../../chat/Devices.tsx";
 import { PairPhone } from "../../chat/PairPhone.tsx";
+import { ScanCode } from "../../chat/ScanCode.tsx";
 import { SettingsPage } from "../../chat/Settings.tsx";
 import { QrCode } from "../../components/QrCode.tsx";
 import { NOTES, type PairingStep } from "../../lib/pairing.ts";
@@ -82,6 +83,13 @@ function Example() {
 	);
 }
 
+/** The camera's view held inside a phone's frame, where the app lays it over the whole screen. */
+const HELD = "relative z-auto h-full";
+/** A camera that is still opening, and one the owner refused: the two states that stand still. */
+const NEVER = () => new Promise<MediaStream>(() => {});
+const REFUSED = () => Promise.reject(new Error("refused"));
+const READS_NOTHING = async () => async () => undefined;
+
 /** A phone's screen, at a phone's size, whatever the stage's width. */
 const PhoneFrame = ({ children }: { children: ReactNode }) => (
 	<div className="h-[40rem] w-full max-w-[24rem] overflow-hidden rounded-tile border border-line-soft [&_main]:min-h-full">
@@ -129,7 +137,7 @@ export function DevicesSection() {
 		<>
 			<Section
 				id="devices"
-				note="Pair a phone, approve its ask, rename or revoke it. Endpoint ids stay behind Details."
+				note="Pair a device, approve its ask, rename or revoke it. Endpoint ids stay behind Details."
 			>
 				{frame(<Example />)}
 			</Section>
@@ -155,19 +163,31 @@ export function DevicesSection() {
 			</Section>
 			<Section
 				id="pair-phone"
-				note="The phone app before it is a device: scan, ask, wait, approved; then each state on its own."
+				note="The phone app before it is a device: scan, ask, wait, approved; then each state on its own. A browser scans in the page or takes a pasted link: both, a link alone, the camera opening, the camera refused."
 			>
 				<PhoneFrame>
 					<PairExample />
 				</PhoneFrame>
 				<PhoneFrame>
-					<PairPhone step={{ step: "scan", name: "Pixel 9" }} />
+					<PairPhone step={{ step: "scan", name: "Pixel 9" }} onScan={() => {}} />
 				</PhoneFrame>
 				<PhoneFrame>
 					<PairPhone step={{ step: "scan", name: "Pixel 9", link: { ticket: "endpoint", invite: "secret" } }} />
 				</PhoneFrame>
 				<PhoneFrame>
-					<PairPhone step={{ step: "scan", name: "Pixel 9", note: NOTES.revoked }} />
+					<PairPhone step={{ step: "scan", name: "Pixel 9", note: NOTES.revoked }} onScan={() => {}} />
+				</PhoneFrame>
+				<PhoneFrame>
+					<PairPhone step={{ step: "scan", name: "Ana’s iPhone" }} onScan={() => {}} onPaste={() => {}} />
+				</PhoneFrame>
+				<PhoneFrame>
+					<PairPhone step={{ step: "scan", name: "Ana’s laptop", note: NOTES.notALink }} onPaste={() => {}} />
+				</PhoneFrame>
+				<PhoneFrame>
+					<ScanCode className={HELD} camera={NEVER} reader={READS_NOTHING} onCode={() => {}} onClose={() => {}} />
+				</PhoneFrame>
+				<PhoneFrame>
+					<ScanCode className={HELD} camera={REFUSED} reader={READS_NOTHING} onCode={() => {}} onClose={() => {}} />
 				</PhoneFrame>
 				<PhoneFrame>
 					<PairPhone step={{ step: "asking", name: "Ana's phone", device: PIXEL }} />

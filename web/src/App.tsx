@@ -15,6 +15,19 @@ import { Shell } from "./app/Shell.tsx";
 import { hasToken, onToken, onUnauthorized } from "./lib/api.ts";
 import { deviceShell } from "./lib/transport.ts";
 
+/** Whether this is the build the app's own origin serves, set by web/vite.config.ts; no other build defines it true. */
+declare const __BANDA_HOSTED__: boolean | undefined;
+
+/**
+ * The camera's view for a page that scans a pairing code itself, loaded when the owner asks to scan. Only the build
+ * the app's own origin serves is such a page (the phone's app has a scanner of its own), so only it carries the view
+ * and the decoder behind it.
+ */
+const ScanCode =
+	typeof __BANDA_HOSTED__ !== "undefined" && __BANDA_HOSTED__
+		? lazy(() => import("./app/PageScan.tsx").then((module) => ({ default: module.PageScan })))
+		: undefined;
+
 /** The specimen, loaded when its hash is opened: the app does not carry it. */
 const Specimen = lazy(() => import("./routes/Specimen.tsx").then((module) => ({ default: module.Specimen })));
 
@@ -45,7 +58,7 @@ export function App() {
 		);
 	if (native !== undefined)
 		return (
-			<PairDevice shell={native}>
+			<PairDevice shell={native} {...(ScanCode === undefined ? {} : { ScanCode })}>
 				<Shell />
 				<Toaster />
 			</PairDevice>
