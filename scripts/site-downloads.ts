@@ -47,39 +47,30 @@ const escapeHtml = (value: string) =>
 
 export function updateDownloads(html: string, releases: Release[]) {
 	const files = downloadFiles(releases);
-	const used = new Set<Release>();
 	let count = 0;
 	const updated = html.replace(
 		/<(a|span) data-file="([^"]+)"[^>]*>(.*?)<\/\1>/gs,
 		(_match, _tag: string, key: string, content: string) => {
 			const file = files.get(key);
 			const linux = key.startsWith("desktop/linux/");
-			const label = linux
-				? content.replace(/Linux[^<]*$/, file ? "Linux (Debian, x64)" : "Linux (Debian, x64) unavailable")
-				: content;
+			// the hero's shortcut names the platform alone; the downloads list says which package it is
+			const name = /Linux \(/.test(content) ? "Linux (Debian, x64)" : "Linux";
+			const label = linux ? content.replace(/Linux[^<]*$/, name) : content;
 			if (!file) {
-				if (linux) return `<span data-file="${key}">${label}</span>`;
+				// what the latest release lacks stays in its place, disabled: the page dims a span that names a file
+				if (linux) return `<span data-file="${key}" title="Not in the latest release">${label}</span>`;
 				throw new Error(`No published download for ${key}`);
 			}
 			const url = new URL(file.url);
 			if (url.origin !== "https://github.com" || !url.pathname.startsWith("/purrgrammer/banda/releases/download/")) {
 				throw new Error(`Not a banda release download: ${file.url}`);
 			}
-			used.add(file.release);
 			count++;
 			return `<a data-file="${key}" href="${escapeHtml(file.url)}">${label}</a>`;
 		},
 	);
 	if (!count) throw new Error("No download links found in landing page");
-	const checksums = [...used].map((release) => {
-		const asset = release.assets.find((asset) => asset.name === "SHA256SUMS");
-		if (!asset) throw new Error(`Missing checksums for ${release.tag_name}`);
-		return `<a href="${escapeHtml(asset.browser_download_url)}">Checksums (${escapeHtml(release.tag_name)})</a>`;
-	});
-	return updated.replace(
-		/<!-- checksums:start -->.*?<!-- checksums:end -->/s,
-		`<!-- checksums:start -->${checksums.join(" · ")}<!-- checksums:end -->`,
-	);
+	return updated;
 }
 
 if (import.meta.main) {

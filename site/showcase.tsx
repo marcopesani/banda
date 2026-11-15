@@ -2,7 +2,7 @@
  * The page's showcase: short chats drawn by the app's own components, with the specimen's invented data, each in a
  * `[data-showcase]` placeholder of index.html. Each draws in a shadow root holding the app's stylesheet, so neither the
  * page's styles nor the app's reach the other. A showcase is a picture of the app, not the app: it is inert, and its
- * placeholder says in words what it shows.
+ * placeholder says in words what it shows. The header's menu (nav.tsx) draws the same way, and is the one live part.
  */
 import { CalendarClockIcon, EyeIcon } from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useSyncExternalStore } from "react";
@@ -24,6 +24,7 @@ import { ATLAS, MARA, OTTO, PAGE, PR, ROWS, SANCHO } from "@/specimen/fixtures.t
 import { askSession, EXECUTE_ASK, sessionAt } from "@/specimen/harness/harness.tsx";
 import { ChatScreen } from "@/specimen/screens/screens.tsx";
 import { StageContext } from "@/specimen/stage.tsx";
+import { Nav } from "./nav.tsx";
 import css from "./showcase.css?inline";
 
 /** The specimen's thread, down to what Otto's answer rests on: the post, Ana's approval and the deploy. */
@@ -218,28 +219,41 @@ const SHOWCASES: Readonly<Record<string, () => ReactNode>> = {
  * Some rules hold only at the document: a shadow root ignores `@property` and `@font-face`. Those join the page once;
  * the rest is each shadow root's, with the tokens the app keeps on `:root` kept on the root's host instead.
  */
+let sheet: CSSStyleSheet | undefined;
 function stylesheet(): CSSStyleSheet {
+	if (sheet) return sheet;
 	const documentWide = /@(?:property|font-face)\s*[^{]*\{[^}]*\}/g;
 	const page = document.createElement("style");
 	page.textContent = (css.match(documentWide) ?? []).join("\n");
 	document.head.append(page);
-	const sheet = new CSSStyleSheet();
+	sheet = new CSSStyleSheet();
 	sheet.replaceSync(css.replace(documentWide, "").replaceAll(":root", ":host"));
 	return sheet;
 }
 
+/** A shadow root on the placeholder, holding the app's stylesheet and one element to draw in. */
+function stage(placeholder: HTMLElement, className: string): HTMLElement {
+	const shadow = placeholder.attachShadow({ mode: "open" });
+	shadow.adoptedStyleSheets = [stylesheet()];
+	const host = document.createElement("div");
+	// inherited properties cross into a shadow root: the hero's centred text must not
+	host.className = `text-start font-sans text-ink antialiased ${className}`;
+	shadow.append(host);
+	return host;
+}
+
 export function mountShowcases(placeholders: Iterable<HTMLElement>): void {
-	const sheet = stylesheet();
 	for (const placeholder of placeholders) {
 		const draw = SHOWCASES[placeholder.dataset.showcase ?? ""];
 		if (draw === undefined || placeholder.shadowRoot) continue;
-		const shadow = placeholder.attachShadow({ mode: "open" });
-		shadow.adoptedStyleSheets = [sheet];
-		const host = document.createElement("div");
+		const host = stage(placeholder, "flex h-full flex-col gap-3 bg-transparent");
 		host.inert = true;
-		// inherited properties cross into a shadow root: the hero's centred text must not
-		host.className = "flex h-full flex-col gap-3 bg-transparent text-start font-sans text-ink antialiased";
-		shadow.append(host);
 		createRoot(host).render(draw());
 	}
+}
+
+/** The header's menu, in place of the plain links the page ships with. */
+export function mountNav(placeholder: HTMLElement): void {
+	if (placeholder.shadowRoot) return;
+	createRoot(stage(placeholder, "flex justify-end")).render(<Nav />);
 }

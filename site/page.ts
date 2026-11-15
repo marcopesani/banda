@@ -53,13 +53,18 @@ if (list) {
 for (const count of document.querySelectorAll("[data-acp-count]"))
 	count.textContent = `${registry.agents.length} agents`;
 
+// the hero's showcase is on screen as the page opens, so the header's menu rides the same fetch
+const nav = document.getElementById("site-nav");
 const showcases = [...document.querySelectorAll<HTMLElement>("[data-showcase]")];
 if (showcases.length > 0) {
 	const near = new IntersectionObserver(
 		(entries) => {
 			if (!entries.some((entry) => entry.isIntersecting)) return;
 			near.disconnect();
-			void import("./showcase.tsx").then(({ mountShowcases }) => mountShowcases(showcases));
+			void import("./showcase.tsx").then(({ mountNav, mountShowcases }) => {
+				if (nav) mountNav(nav);
+				mountShowcases(showcases);
+			});
 		},
 		{ rootMargin: "800px 0px" },
 	);

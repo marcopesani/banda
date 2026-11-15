@@ -170,7 +170,7 @@ for (const width of [390, 1440]) {
 				expect(await page.run(`document.querySelectorAll('span[data-file="desktop/linux/x64/deb"]').length`)).toBe(2);
 				expect(
 					await page.run(
-						`[...document.querySelectorAll('[data-file="desktop/linux/x64/deb"]')].every(el => el.tagName === 'SPAN' && el.textContent.includes('Linux (Debian, x64) unavailable') && !el.hasAttribute('href') && !el.hasAttribute('role') && !el.hasAttribute('tabindex'))`,
+						`[...document.querySelectorAll('[data-file="desktop/linux/x64/deb"]')].every(el => el.tagName === 'SPAN' && /^Linux( \\(Debian, x64\\))?$/.test(el.textContent.trim()) && !el.hasAttribute('href') && !el.hasAttribute('role') && !el.hasAttribute('tabindex'))`,
 					),
 				).toBe(true);
 				expect(await page.run(`document.querySelectorAll('a[href$=".AppImage"]').length`)).toBe(0);

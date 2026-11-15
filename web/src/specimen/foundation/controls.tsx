@@ -11,6 +11,15 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+	NavigationMenu,
+	NavigationMenuContent,
+	NavigationMenuItem,
+	NavigationMenuLink,
+	NavigationMenuList,
+	NavigationMenuTrigger,
+	navigationMenuTriggerStyle,
+} from "@/components/ui/navigation-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -48,6 +57,27 @@ export function Controls() {
 				<Button variant="ghost">Don't</Button>
 				<Button variant="destructive">Sign out</Button>
 				<Button variant="link">What it was</Button>
+			</Group>
+			<Group label="Navigation menu (the site's header): a panel of links, then plain links">
+				<div className="h-44">
+					<NavigationMenu aria-label="Specimen">
+						<NavigationMenuList>
+							<NavigationMenuItem>
+								<NavigationMenuTrigger>Features</NavigationMenuTrigger>
+								<NavigationMenuContent className="w-56">
+									<NavigationMenuLink href="#/specimen?section=controls">Agents</NavigationMenuLink>
+									<NavigationMenuLink href="#/specimen?section=controls">Connections</NavigationMenuLink>
+									<NavigationMenuLink href="#/specimen?section=controls">Watches</NavigationMenuLink>
+								</NavigationMenuContent>
+							</NavigationMenuItem>
+							<NavigationMenuItem>
+								<NavigationMenuLink href="#/specimen?section=controls" className={navigationMenuTriggerStyle}>
+									Get started
+								</NavigationMenuLink>
+							</NavigationMenuItem>
+						</NavigationMenuList>
+					</NavigationMenu>
+				</div>
 			</Group>
 			<Group label="Sizes and icons">
 				<Button size="lg">Sign in to start</Button>

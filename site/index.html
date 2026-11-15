@@ -39,7 +39,6 @@
 	--ink: light-dark(oklch(0.2 0 0), oklch(0.955 0 0));
 	--ink-2: light-dark(oklch(0.48 0 0), oklch(0.73 0 0));
 	--focus: light-dark(oklch(0.56 0 0), oklch(0.64 0 0));
-	--alive: light-dark(oklch(0.5 0.14 152), oklch(0.74 0.15 152));
 	--font-text: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 	--font-code: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	--measure: 64rem;
@@ -52,7 +51,8 @@ body {
 	-webkit-font-smoothing: antialiased;
 }
 a { color: inherit; }
-span[data-file] { color: var(--ink-2); }
+/* a download the latest release lacks: in its place, disabled */
+:where(span[data-file], li:has(> span[data-file]) > span) { color: var(--ink-2); opacity: 0.5; cursor: default; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 6px; }
 img { display: block; max-width: 100%; height: auto; }
 .wrap { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; padding: 0 var(--gutter); }
@@ -61,9 +61,12 @@ img { display: block; max-width: 100%; height: auto; }
 header .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
 .mark { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 18px; text-decoration: none; }
 .mark img { width: 28px; height: 28px; }
-nav { display: flex; gap: 20px; font-size: 15px; color: var(--ink-2); }
-nav a { text-decoration: none; white-space: nowrap; }
-nav a:hover { color: var(--ink); }
+/* the plain links, until the app's menu (nav.tsx) draws in their place: the same row, at the same height */
+.site-nav { min-height: 36px; }
+.site-nav nav { display: flex; align-items: center; gap: 2px; font-size: 15px; font-weight: 500; color: var(--ink-2); }
+.site-nav a { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 8px; text-decoration: none; white-space: nowrap; }
+.site-nav a.icon { width: 36px; padding: 0; justify-content: center; }
+.site-nav a:hover { color: var(--ink); background: var(--paper-3); }
 
 /* hero */
 .hero { text-align: center; padding-block: 56px 40px; }
@@ -76,12 +79,6 @@ nav a:hover { color: var(--ink); }
 @keyframes arrive { from { opacity: 0; translate: 0 16px; scale: 0.8; } }
 h1 { font-size: clamp(34px, 8vw, 64px); line-height: 1.05; letter-spacing: -0.03em; font-weight: 700; margin: 0 auto 16px; text-wrap: pretty; }
 .lede { font-size: clamp(17px, 2.4vw, 20px); color: var(--ink-2); max-width: 38rem; margin: 0 auto 32px; text-wrap: pretty; }
-.alpha {
-	display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border-radius: 999px;
-	background: var(--alive); color: var(--paper); font-size: 12px; font-weight: 700; letter-spacing: 0.06em;
-	text-transform: uppercase;
-}
-.mark .alpha { height: 20px; padding: 0 8px; font-size: 11px; margin-left: -2px; }
 
 .cta { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .button {
@@ -186,15 +183,27 @@ code {
 .pf-linux { mask-image: url(./platforms/linux.svg); }
 .pf-android { mask-image: url(./platforms/android.svg); }
 
-.fine { margin-top: 20px; color: var(--ink-2); font-size: 14px; }
-.fine a, .section-lede a { color: inherit; text-underline-offset: 3px; }
+.section-lede a { color: inherit; text-underline-offset: 3px; }
 
-footer { margin-top: 96px; border-top: 1px solid var(--line-soft); }
-footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; padding-top: 24px; padding-bottom: 40px; font-size: 14px; color: var(--ink-2); }
-footer nav { gap: 16px; }
+/* the footer: who banda is, then every link of the page and the project, grouped */
+footer { margin-top: 96px; border-top: 1px solid var(--line-soft); background: var(--paper-2); font-size: 15px; color: var(--ink-2); }
+footer .wrap { padding-block: 48px 32px; }
+.foot { display: grid; grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); gap: 40px 28px; }
+.foot .mark { color: var(--ink); width: max-content; }
+.foot-about { margin: 12px 0 0; max-width: 18rem; text-wrap: pretty; }
+.foot h2 { font-size: 13px; font-weight: 600; letter-spacing: 0; line-height: 1.55; color: var(--ink); margin: 0 0 10px; }
+.foot-links { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.foot-links :where(a) { text-decoration: none; }
+.foot-links :where(a):hover { color: var(--ink); }
+.legal { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line-soft); font-size: 14px; }
+.legal :where(a) { text-underline-offset: 3px; }
 
 @media (max-width: 720px) {
-	header nav a:not(:last-child) { display: none; }
+	.site-nav a:not(:first-child, :last-child) { display: none; }
+	.foot { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.foot > div:first-child { grid-column: 1 / -1; }
+	.foot-links :where(a) { display: inline-flex; align-items: center; min-height: 32px; }
+	.foot-links { gap: 2px; }
 	.hero { padding-top: 32px; }
 	.band { zoom: 0.6; }
 	.grid, .steps, .downloads, .chats, .chats.one { grid-template-columns: minmax(0, 1fr); }
@@ -214,15 +223,14 @@ footer nav { gap: 16px; }
 <body>
 <header>
 	<div class="wrap">
-		<a class="mark" href="/"><img src="../web/public/icon.svg" alt="">banda<span class="alpha">Alpha</span></a>
-		<nav aria-label="Main">
-			<a href="#what" class="hide-sm">What it does</a>
-			<a href="#connections" class="hide-sm">Connections</a>
-			<a href="#acp" class="hide-sm">Coding agents</a>
-			<a href="#models" class="hide-sm">Models</a>
-			<a href="#start">Get started</a>
-			<a href="https://github.com/purrgrammer/banda">GitHub</a>
-		</nav>
+		<a class="mark" href="/"><img src="../web/public/icon.svg" alt="">banda</a>
+		<div id="site-nav" class="site-nav">
+			<nav aria-label="Main">
+				<a href="#what">Features</a>
+				<a href="#start">Get started</a>
+				<a class="icon" href="https://github.com/purrgrammer/banda" title="GitHub"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" role="img"><title>GitHub</title><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>
+			</nav>
+		</div>
 	</div>
 </header>
 
@@ -236,7 +244,7 @@ footer nav { gap: 16px; }
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>
 				<span id="download-label">Download banda</span>
 			</a>
-			<div class="sub platforms" id="download-sub"><a data-file="desktop/mac/arm64/dmg" href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.12/banda-0.1.0-alpha.12-mac-arm64.dmg"><i class="pf pf-macos" aria-hidden="true"></i>macOS, Apple silicon</a><span data-file="desktop/linux/x64/deb"><i class="pf pf-linux" aria-hidden="true"></i>Linux (Debian, x64) unavailable</span><a data-file="phone/android/arm64/apk" href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.11/banda-0.1.0-alpha.11-android-arm64.apk"><i class="pf pf-android" aria-hidden="true"></i>Android</a><a href="#downloads">All downloads</a></div>
+			<div class="sub platforms" id="download-sub"><a data-file="desktop/mac/arm64/dmg" href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.12/banda-0.1.0-alpha.12-mac-arm64.dmg"><i class="pf pf-macos" aria-hidden="true"></i>macOS</a><span data-file="desktop/linux/x64/deb" title="Not in the latest release"><i class="pf pf-linux" aria-hidden="true"></i>Linux</span><a data-file="phone/android/arm64/apk" href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.11/banda-0.1.0-alpha.11-android-arm64.apk"><i class="pf pf-android" aria-hidden="true"></i>Android</a><a href="#downloads">All downloads</a></div>
 		</div>
 		<div class="shot" data-showcase="app" role="img" aria-label="A group chat with Sancho and Mara: you ask for a Lisbon weekend, Sancho checks your calendar, Mara finds flights, and both get to work.">
 			<img src="../docs/screenshots/group.png" width="2560" height="1600" alt="">
@@ -379,7 +387,7 @@ footer nav { gap: 16px; }
 					<p>The app, with banda inside.</p>
 					<ul>
 						<li><a data-file="desktop/mac/arm64/dmg" href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.12/banda-0.1.0-alpha.12-mac-arm64.dmg">macOS, Apple silicon</a><span>.dmg</span></li>
-						<li><span data-file="desktop/linux/x64/deb">Linux (Debian, x64) unavailable</span><span>.deb</span></li>
+						<li><span data-file="desktop/linux/x64/deb" title="Not in the latest release">Linux (Debian, x64)</span><span>.deb</span></li>
 					</ul>
 				</div>
 				<div>
@@ -398,20 +406,48 @@ footer nav { gap: 16px; }
 					</ul>
 				</div>
 			</div>
-			<p class="fine"><!-- checksums:start --><a href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.12/SHA256SUMS">Checksums (v0.1.0-alpha.12)</a> · <a href="https://github.com/purrgrammer/banda/releases/download/v0.1.0-alpha.11/SHA256SUMS">Checksums (v0.1.0-alpha.11)</a><!-- checksums:end --> · <a id="downloads-notes" href="https://github.com/purrgrammer/banda/releases">Release notes</a> · macOS: the first time, System Settings → Privacy &amp; Security → Open Anyway.</p>
 		</div>
 	</section>
 </main>
 
 <footer>
 	<div class="wrap">
-		<span>banda · AGPL-3.0</span>
-		<nav aria-label="Footer">
-			<a href="https://github.com/purrgrammer/banda">Source</a>
-			<a href="https://github.com/purrgrammer/banda/releases">Releases</a>
-			<a href="https://github.com/purrgrammer/banda/blob/main/DESIGN.md">How it works</a>
-			<a href="https://github.com/purrgrammer/banda/blob/main/SECURITY.md">Security</a>
-		</nav>
+		<div class="foot">
+			<div>
+				<a class="mark" href="/"><img src="../web/public/icon.svg" alt="">banda</a>
+				<p class="foot-about">A band of agents that work with you.</p>
+			</div>
+			<nav aria-labelledby="foot-product">
+				<h2 id="foot-product">Product</h2>
+				<ul class="foot-links">
+					<li><a href="#what">Agents</a></li>
+					<li><a href="#connections">Connections</a></li>
+					<li><a href="#watches">Watches</a></li>
+					<li><a href="#acp">Coding agents</a></li>
+					<li><a href="#models">Models</a></li>
+				</ul>
+			</nav>
+			<nav aria-labelledby="foot-download">
+				<h2 id="foot-download">Download</h2>
+				<ul class="foot-links">
+					<li><a href="#start">Get started</a></li>
+					<li><a href="#downloads">All downloads</a></li>
+					<li><a href="https://github.com/purrgrammer/banda/releases">Release notes</a></li>
+				</ul>
+			</nav>
+			<nav aria-labelledby="foot-project">
+				<h2 id="foot-project">Project</h2>
+				<ul class="foot-links">
+					<li><a href="https://github.com/purrgrammer/banda">Source</a></li>
+					<li><a href="https://github.com/purrgrammer/banda/blob/main/DESIGN.md">How it works</a></li>
+					<li><a href="https://github.com/purrgrammer/banda/blob/main/SECURITY.md">Security</a></li>
+					<li><a href="https://github.com/purrgrammer/banda/issues">Issues</a></li>
+				</ul>
+			</nav>
+		</div>
+		<div class="legal">
+			<span>Open source under <a href="https://github.com/purrgrammer/banda/blob/main/LICENSE">AGPL-3.0</a></span>
+		</div>
 	</div>
 </footer>
 
