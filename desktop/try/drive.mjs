@@ -6,11 +6,17 @@
  *   node drive.mjs x11|wayland <out>            the installed Linux package, on a display started here (linux.sh),
  *                                               with the home an owner gets: ~/.banda of a fresh container
  *   node drive.mjs mac <out> <banda.app's executable>   on this Mac's own screen; BANDA_HOME names a throwaway home
+ *
+ * Asked for by name, and never otherwise (release acceptance asks; `npm run desktop:linux` and `desktop:try` do not):
+ *   BANDA_TRY_COMPUTER=1      the computer must come up as the one banda ships, and stay up
+ *   BANDA_TRY_STEPS=<module>  its default export runs while the app is open, with `check` and what this run knows
+ *                             (upgrade.mjs: an owner's state before an upgrade, and what is left of it after)
  */
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const [session = "x11", out = "/out", given] = process.argv.slice(2);
 const mac = session === "mac";
@@ -132,6 +138,67 @@ async function page() {
 	return { url: target.url, send, evaluate, shot, close: () => socket.close() };
 }
 
+/** The last of the daemon's own log, for a failure that it explains better than its API does. */
+const logged = () => (read(join(home, "daemon.log")) ?? "(no daemon.log)").split("\n").slice(-40).join("\n");
+
+/**
+ * The computer as Settings shows it, from the stream the web UI reads (`GET /api/events`): it must come up as the
+ * virtual machine banda ships, behind its network guard, and still be up a while later. Offline is an answer, and the
+ * wrong one: the daemon's reason and its log go into the failure.
+ */
+async function computer(daemon, within = 300_000, hold = 10_000) {
+	const started = Date.now();
+	const gone = new AbortController();
+	const late = setTimeout(() => gone.abort(), within * slow);
+	const states = [];
+	let last;
+	let up;
+	try {
+		const response = await fetch(`http://127.0.0.1:${daemon.port}/api/events`, {
+			headers: { authorization: `Bearer ${daemon.token}` },
+			signal: gone.signal,
+		});
+		if (!response.ok || response.body === null) throw new Error(`the daemon's events answered ${response.status}`);
+		let buffered = "";
+		const settled = () => up !== undefined && Date.now() - up.at >= hold;
+		// the stream says nothing while nothing changes, so the wait for "still up" has its own clock
+		const held = setInterval(() => settled() && gone.abort(), 250);
+		try {
+			for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+				buffered += chunk;
+				for (let end = buffered.indexOf("\n\n"); end >= 0; end = buffered.indexOf("\n\n")) {
+					const data = buffered.slice(0, end);
+					buffered = buffered.slice(end + 2);
+					if (!data.startsWith("data: ")) continue;
+					const event = JSON.parse(data.slice(6));
+					if (event.type !== "computer") continue;
+					last = event.computer;
+					if (states.at(-1) !== last.state) states.push(last.state);
+					if (last.state === "offline")
+						throw new Error(`the computer is offline: ${last.why ?? JSON.stringify(last)}\n${logged()}`);
+					if (last.state !== "up") up = undefined;
+					else if (up === undefined) up = { at: Date.now(), seconds: Math.round((Date.now() - started) / 1000) };
+				}
+			}
+		} finally {
+			clearInterval(held);
+		}
+		if (!settled()) throw new Error(`the daemon's events ended; the computer was ${JSON.stringify(last)}`);
+	} catch (error) {
+		if (!gone.signal.aborted) throw error;
+		if (up === undefined || Date.now() - up.at < hold)
+			throw new Error(
+				`the computer was not up within ${(within * slow) / 1000}s: ${JSON.stringify(last)} after ${states.join(", ")}\n${logged()}`,
+			);
+	} finally {
+		clearTimeout(late);
+		gone.abort();
+	}
+	if (last.box !== "microvm" || last.network !== "guarded")
+		throw new Error(`the computer is not the guarded one banda ships: ${JSON.stringify(last)}`);
+	return { box: last.box, network: last.network, states, seconds: up.seconds };
+}
+
 /** The app's own processes: as /proc has them, or on a Mac as ps does. */
 function processes() {
 	const found = [];
@@ -208,7 +275,7 @@ async function main() {
 	const opened = await check("opens its window on the daemon", async () => {
 		window = await page();
 		if (!window.url.startsWith("http://")) {
-			const said = await window.evaluate("document.body.innerText");
+			const said = await window.evaluate("document.body?.innerText ?? ''");
 			throw new Error(`the app showed its failure page: ${said.slice(0, 600)}`);
 		}
 		daemon = JSON.parse(readFileSync(join(home, "daemon.json"), "utf8"));
@@ -225,11 +292,11 @@ async function main() {
 	if (opened) {
 		await check("shows its first screen at desktop and phone width", async () => {
 			const text = await until("the first screen", async () => {
-				const said = (await window.evaluate("document.body.innerText")).trim();
+				const said = (await window.evaluate("document.body?.innerText ?? ''")).trim();
 				return said.length > 20 ? said : undefined;
 			});
 			const said = text.replace(/\s+/g, " ").slice(0, 120);
-			writeFileSync(join(out, "first-screen.txt"), `${await window.evaluate("document.body.innerText")}\n`);
+			writeFileSync(join(out, "first-screen.txt"), `${await window.evaluate("document.body?.innerText ?? ''")}\n`);
 			try {
 				await pause(1500);
 				await window.shot("desktop.png");
@@ -267,6 +334,14 @@ async function main() {
 				}
 				return renderers[0].user === main.user ? "setuid sandbox" : "user namespace sandbox";
 			});
+		if (process.env.BANDA_TRY_COMPUTER === "1") await check("starts its computer", () => computer(daemon));
+		const asked = process.env.BANDA_TRY_STEPS;
+		if (asked !== undefined)
+			// a step that throws outside its own checks must not leave the app open behind this run
+			await check(`runs ${asked.slice(asked.lastIndexOf("/") + 1)}`, async () => {
+				const steps = await import(pathToFileURL(resolve(asked)).href);
+				await steps.default({ check, until, computer, daemon, home, out, installed, mac, slow });
+			});
 		await check("a second launch hands over to the first", async () => {
 			const second = launch(env);
 			await until("the second launch's exit", () => second.exitCode !== null || second.signalCode !== null, 30_000);
@@ -284,7 +359,7 @@ async function main() {
 			if (again.token !== daemon.token) throw new Error("the home's token changed");
 			await until(
 				"the first screen",
-				async () => (await window.evaluate("document.body.innerText")).trim().length > 20,
+				async () => (await window.evaluate("document.body?.innerText ?? ''")).trim().length > 20,
 			);
 			window.close();
 			await quit(shell, again);

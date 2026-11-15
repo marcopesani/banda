@@ -133,6 +133,18 @@ runtime isolation, provider setup, autostart, sleep/wake, offline startup and fu
 Interrupt download, verification, installation and activation of an update; recover deliberately without opening a
 store using an incompatible binary. Restore the pre-update recovery set when store compatibility requires it.
 
+A release is accepted from what it published, not from what was built: the `release acceptance` workflow, given
+the tag and the release before it, downloads the Mac image and the Linux package on runners that hold no checkout's
+dependencies, checks them against the release's `SHA256SUMS`, installs them as the release notes say and uses the
+installed app (window, first screen at both widths, second launch, quit, reopen). On Linux the computer must come up
+as the guarded virtual machine. A home the earlier release made, with what an owner can make without a provider (a
+chat, an attached file, a memory fact, the companion's name), must open in the new one with all of it, the home as it
+was kept beside it when the format moved, and `banda backup` then `banda restore` giving a second home that holds it
+too. Its `acceptance.json` says passed, failed, not exercised or not applicable for each, with the assets' hashes; a
+job that left no evidence failed. What it cannot see stays a person's check on a clean machine: Gatekeeper's dialog
+and Open Anyway, the computer on a Mac (GitHub's Apple silicon runners cannot start a virtual machine), an answer
+from a model, Wayland, Linux ARM64 and the phone.
+
 Complete a proposed seven consecutive days of owner use after the last release-blocking fix, exercising all six
 workflows, at least one reboot, one provider outage, one backup restoration and one interrupted update. A shorter
 trial requires an explicit scope decision, not elapsed time treated as success.

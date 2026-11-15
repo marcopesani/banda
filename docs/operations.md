@@ -74,6 +74,11 @@ staging and the tests stop when the two differ, so a new Electron cannot ship wi
   The release workflow's optional native-computer check runs `scripts/verify-computer.ts`; ordinary release
   smoke checks do not exercise the VM. By default the browser archive is supplied locally with its exact pinned
   bytes. `BANDA_VERIFY_PUBLIC_BROWSER=1` exercises its published URL; public delivery remains a separate check.
+- [ ] Dispatch `release acceptance` for the first release after 0.1.0-alpha.14 (upgrading from it) and for 0.1.0,
+  and settle what its first runs show: the installed app's sandbox and `/dev/kvm` on both Ubuntu runners, a Mac
+  runner's app with its computer offline, and the two releases' API agreeing on what is made before the upgrade.
+  Then check by hand, on a Mac that never ran banda, what no runner sees: Gatekeeper's Open Anyway on the
+  downloaded image, and the computer starting from `/Applications`.
 - [ ] Spike the Windows native computer's directory ACLs, local named-pipe permissions and VM mount isolation
   before selecting it in the desktop app. The current runtime ships Windows binaries and requires WHP;
   the banda adapter is not qualified for Windows. The native Mac computer requires Apple silicon and macOS 14 or newer.

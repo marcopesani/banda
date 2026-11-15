@@ -1,0 +1,270 @@
+# What a published release does on machines that never saw a checkout's dependencies: its downloads are fetched from
+# the release, checked against its SHA256SUMS, installed as an owner installs them and used through the app; and a home
+# the release before it made is opened by this one. It builds nothing and publishes nothing. The checkout brings only
+# the scripts that do the checking (scripts/release-acceptance.ts, desktop/try/), never `npm ci`.
+#
+# Not here: Gatekeeper's own dialog on a Mac (see `macInstall`), the computer on a Mac (GitHub's Apple silicon runners
+# have no nested virtualization), a model's answer (no provider is signed in), Wayland, and the phone's APK.
+name: release acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to accept (v0.1.0-alpha.15)
+        type: string
+        required: true
+      previous:
+        description: The release to upgrade from (v0.1.0-alpha.14)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-acceptance-${{ inputs.tag }}-${{ inputs.previous }}
+  cancel-in-progress: false
+
+env:
+  GH_REPO: ${{ github.repository }}
+  TAG: ${{ inputs.tag }}
+  PREVIOUS: ${{ inputs.previous }}
+  # a shared runner is slower than the desks drive.mjs's waits were set on
+  BANDA_TRY_SLOW: "2"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-22.04]
+    name: clean install (linux-x64, ${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release-acceptance.ts
+            desktop/try
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - name: Download the published package and check it against the release's sums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release-acceptance.ts assets --tag "$TAG" --asset linux
+          --downloads "$RUNNER_TEMP/downloads" --out "$RUNNER_TEMP/evidence"
+      - name: Install it with apt
+        run: >-
+          node scripts/release-acceptance.ts linux-install
+          --package "$RUNNER_TEMP/downloads/banda-${TAG#v}-linux-amd64.deb" --out "$RUNNER_TEMP/evidence"
+      - name: Use the installed app as its owner, and start its computer
+        run: bash desktop/try/runner.sh "$RUNNER_TEMP/evidence/app" BANDA_TRY_COMPUTER=1 "BANDA_TRY_SLOW=$BANDA_TRY_SLOW"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: acceptance-linux-${{ matrix.runner }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+
+  mac-install:
+    name: clean install (mac-arm64)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      APP: /Applications/banda.app/Contents
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release-acceptance.ts
+            desktop/try
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      # drive.mjs asks a Mac for its home by name, so that it can never be an owner's
+      - name: The runner is an Apple silicon Mac, and the home a folder of this run
+        run: |
+          test "$(uname -m)" = arm64
+          echo "BANDA_HOME=$RUNNER_TEMP/home" >> "$GITHUB_ENV"
+      - name: Download the published image and check it against the release's sums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/release-acceptance.ts assets --tag "$TAG" --asset mac
+          --downloads "$RUNNER_TEMP/downloads" --out "$RUNNER_TEMP/evidence"
+      - name: Copy banda into Applications, and clear its quarantine as Open Anyway does
+        run: >-
+          node scripts/release-acceptance.ts mac-install
+          --dmg "$RUNNER_TEMP/downloads/banda-${TAG#v}-mac-arm64.dmg" --out "$RUNNER_TEMP/evidence"
+      # the computer is not asked for: this runner cannot start a virtual machine, and the summary says so
+      - name: Use the installed app
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence/app"
+          "$APP/Resources/banda/node/node" desktop/try/drive.mjs mac "$RUNNER_TEMP/evidence/app" "$APP/MacOS/banda"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: acceptance-mac
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+
+  upgrade-linux:
+    name: upgrade (linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      STEPS: ${{ github.workspace }}/desktop/try/upgrade.mjs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release-acceptance.ts
+            desktop/try
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - name: Download both published packages and check them against their releases' sums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-acceptance.ts assets --tag "$PREVIOUS" --asset linux \
+            --downloads "$RUNNER_TEMP/downloads/previous" --out "$RUNNER_TEMP/evidence/previous"
+          node scripts/release-acceptance.ts assets --tag "$TAG" --asset linux \
+            --downloads "$RUNNER_TEMP/downloads/tag" --out "$RUNNER_TEMP/evidence/tag"
+      - name: Install the release upgraded from
+        run: >-
+          node scripts/release-acceptance.ts linux-install
+          --package "$RUNNER_TEMP/downloads/previous/banda-${PREVIOUS#v}-linux-amd64.deb"
+          --out "$RUNNER_TEMP/evidence/previous"
+      - name: Use it, and make what an owner can with no provider
+        run: >-
+          bash desktop/try/runner.sh "$RUNNER_TEMP/evidence/seed" "BANDA_TRY_SLOW=$BANDA_TRY_SLOW"
+          "BANDA_TRY_STEPS=$STEPS" BANDA_UPGRADE=seed "BANDA_UPGRADE_STATE=$RUNNER_TEMP/upgrade-state" "BANDA_UPGRADE_VERSION=${PREVIOUS#v}"
+      - name: Install the release over it
+        run: >-
+          node scripts/release-acceptance.ts linux-install
+          --package "$RUNNER_TEMP/downloads/tag/banda-${TAG#v}-linux-amd64.deb"
+          --out "$RUNNER_TEMP/evidence/tag"
+      - name: Open the same home, start its computer, and find what was made
+        run: >-
+          bash desktop/try/runner.sh "$RUNNER_TEMP/evidence/check" BANDA_TRY_COMPUTER=1 "BANDA_TRY_SLOW=$BANDA_TRY_SLOW"
+          "BANDA_TRY_STEPS=$STEPS" BANDA_UPGRADE=check "BANDA_UPGRADE_STATE=$RUNNER_TEMP/upgrade-state" "BANDA_UPGRADE_VERSION=${TAG#v}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: acceptance-upgrade-linux
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+
+  # the app and the daemon's part of the upgrade; the computer cannot start on this runner
+  upgrade-mac:
+    name: upgrade (mac-arm64)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      APP: /Applications/banda.app/Contents
+      BANDA_TRY_STEPS: ${{ github.workspace }}/desktop/try/upgrade.mjs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release-acceptance.ts
+            desktop/try
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - name: The runner is an Apple silicon Mac, and the home a folder of this run
+        run: |
+          test "$(uname -m)" = arm64
+          echo "BANDA_HOME=$RUNNER_TEMP/home" >> "$GITHUB_ENV"
+          echo "BANDA_UPGRADE_STATE=$RUNNER_TEMP/upgrade-state" >> "$GITHUB_ENV"
+      - name: Download both published images and check them against their releases' sums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-acceptance.ts assets --tag "$PREVIOUS" --asset mac \
+            --downloads "$RUNNER_TEMP/downloads/previous" --out "$RUNNER_TEMP/evidence/previous"
+          node scripts/release-acceptance.ts assets --tag "$TAG" --asset mac \
+            --downloads "$RUNNER_TEMP/downloads/tag" --out "$RUNNER_TEMP/evidence/tag"
+      - name: Install the release upgraded from
+        run: >-
+          node scripts/release-acceptance.ts mac-install
+          --dmg "$RUNNER_TEMP/downloads/previous/banda-${PREVIOUS#v}-mac-arm64.dmg"
+          --out "$RUNNER_TEMP/evidence/previous"
+      - name: Use it, and make what an owner can with no provider
+        env:
+          BANDA_UPGRADE: seed
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence/seed"
+          BANDA_UPGRADE_VERSION=${PREVIOUS#v} "$APP/Resources/banda/node/node" desktop/try/drive.mjs mac \
+            "$RUNNER_TEMP/evidence/seed" "$APP/MacOS/banda"
+      - name: Install the release over it
+        run: >-
+          node scripts/release-acceptance.ts mac-install
+          --dmg "$RUNNER_TEMP/downloads/tag/banda-${TAG#v}-mac-arm64.dmg"
+          --out "$RUNNER_TEMP/evidence/tag"
+      - name: Open the same home, and find what was made
+        env:
+          BANDA_UPGRADE: check
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence/check"
+          BANDA_UPGRADE_VERSION=${TAG#v} "$APP/Resources/banda/node/node" desktop/try/drive.mjs mac \
+            "$RUNNER_TEMP/evidence/check" "$APP/MacOS/banda"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: acceptance-upgrade-mac
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+
+  # One record of the whole run. A job that left no evidence failed; the Mac's computer is never passed.
+  summary:
+    name: acceptance summary
+    if: always()
+    needs: [linux-install, mac-install, upgrade-linux, upgrade-mac]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release-acceptance.ts
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: acceptance-*
+          path: ${{ runner.temp }}/evidence
+      - name: Gather every job's evidence
+        run: >-
+          node scripts/release-acceptance.ts summary --tag "$TAG" --previous "$PREVIOUS"
+          --evidence "$RUNNER_TEMP/evidence" --out "$RUNNER_TEMP/acceptance"
+          --expect acceptance-linux-ubuntu-latest --expect acceptance-linux-ubuntu-22.04 --expect acceptance-mac
+          --expect acceptance-upgrade-linux --expect acceptance-upgrade-mac
+      - name: Say it in the run's summary
+        if: always()
+        run: test ! -f "$RUNNER_TEMP/acceptance/summary.md" || cat "$RUNNER_TEMP/acceptance/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: release-acceptance
+          path: ${{ runner.temp }}/acceptance
+          if-no-files-found: ignore
