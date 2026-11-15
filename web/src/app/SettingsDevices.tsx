@@ -25,7 +25,7 @@ export function SettingsDevices() {
 				setMaking(true);
 				void attempt("make a code to pair a phone", makeInvite)
 					.then((made) => {
-						if (made !== undefined) setInvite({ pairing: made.pairing, expires: made.expires });
+						if (made !== undefined) setInvite({ pairing: made.pairing, browser: made.browser, expires: made.expires });
 					})
 					.finally(() => setMaking(false));
 			}}

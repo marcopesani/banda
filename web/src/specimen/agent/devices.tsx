@@ -14,6 +14,7 @@ const IPAD = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
 const OLD = "9e8d7c6b5a4938271605f4e3d2c1b0a99e8d7c6b5a4938271605f4e3d2c1b0a9";
 const INVITE: ShownInvite = {
 	pairing: `banda://pair?ticket=${"endpointa".repeat(12)}&invite=Qm9va3NBbmRUZWFfc2VjcmV0X2ludml0ZQ`,
+	browser: `https://app.banda.rocks/#pair?ticket=${"endpointa".repeat(12)}&invite=Qm9va3NBbmRUZWFfc2VjcmV0X2ludml0ZQ`,
 	expires: NOW + 9 * 60_000 + 41_000,
 };
 

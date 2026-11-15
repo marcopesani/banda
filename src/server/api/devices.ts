@@ -45,13 +45,15 @@ export type DevicesView = {
 /**
  * `POST /api/devices/invites`: a new invite, single use, live until `expires`. `pairing` is what the QR code carries:
  * `banda://pair?ticket=<ticket>&invite=<secret>`, the daemon's endpoint ticket (its id and how to reach it) and the
- * secret the device presents. The secret is shown once and never stored.
+ * secret the device presents. `browser` is the same pairing for a phone with no banda app: a link its browser opens,
+ * the app's own origin with the ticket and the secret after its `#`. The secret is shown once and never stored.
  */
 export type InviteView = {
 	readonly secret: string;
 	readonly ticket: string;
 	readonly expires: number;
 	readonly pairing: string;
+	readonly browser: string;
 };
 
 /** `GET` and `POST /api/devices/pair`, over Iroh: where the calling endpoint stands. */
