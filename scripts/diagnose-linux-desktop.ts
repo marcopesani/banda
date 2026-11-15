@@ -345,7 +345,14 @@ function assertStarted(result: Result) {
 		assert.equal(BigInt(`0x${bounding}`) & ~BigInt(`0x${original.capabilities.bounding}`), 0n);
 		for (const key of ["uid", "euid", "savedUid", "fsuid", "gid", "egid", "savedGid", "fsgid"] as const)
 			assert.equal(reduced[key], original[key], `Renderer ${key} changed.`);
-		assert.ok(renderer.command.split("\0").includes("--type=renderer"));
+		assert.equal(renderer.executable, executable);
+		const command = renderer.command.split("\0").filter(Boolean);
+		const title = command.length === 1 ? command[0] : undefined;
+		const rendererTitle = `${executable} --type=renderer`;
+		assert.ok(
+			command.includes("--type=renderer") || title === rendererTitle || title?.startsWith(`${rendererTitle} `),
+			"Missing renderer argv or Chromium process title.",
+		);
 		assert.match(renderer.status, /^Seccomp:\s+2$/m);
 		assert.match(renderer.status, /^NoNewPrivs:\s+1$/m);
 		assert.notEqual(renderer.userns, started.shell.userns);

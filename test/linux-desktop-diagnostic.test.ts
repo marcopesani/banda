@@ -105,7 +105,8 @@ function fixture(): Result {
 			renderers: [
 				{
 					...process(2002, shell.executable),
-					command: "--type=renderer\0",
+					command:
+						"/opt/banda/banda-desktop --type=renderer --enable-crash-reporter=3aa0dc2b-265a-4810-a12c-cdf11a601bf6,no_channel --user-data-dir=/home/runner/work/_temp/linux-desktop-shell/home/.banda/desktop --app-path=/opt/banda/resources/app.asar --enable-sandbox --allow-file-access-from-files --remote-debugging-port=0 --ozone-platform=x11 --lang=en-US --num-raster-threads=2 --enable-main-frame-before-activation --renderer-client-id=4 --launch-time-ticks=1941176213 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,14467422187867646453,8524167649674270526,2\u0000",
 					userns: "user:[101]",
 					pidns: "pid:[201]",
 					status: status
@@ -376,4 +377,34 @@ it("accepts a present runtime cache with no VMs yet", () => {
 	if (!result.started) throw new Error("Bad test fixture.");
 	result.started.inventoryList = { kind: "listed", completion: { ...completion, stdout: "[]" } };
 	expect(parseLinuxDesktopResult(result).state).toBe("shell-observed");
+});
+
+it("accepts an unrewritten renderer argv", () => {
+	const result = fixture();
+	const renderer = result.started?.renderers[0];
+	if (!renderer) throw new Error("Bad test fixture.");
+	renderer.command = "/opt/banda/banda-desktop\0--type=renderer\0--enable-sandbox\0";
+	expect(parseLinuxDesktopResult(result).state).toBe("shell-observed");
+});
+
+it.each([
+	"/opt/banda/banda-desktop --type=renderer-helper\0",
+	"/opt/banda/banda-desktop --type=zygote --title=--type=renderer\0",
+	"/opt/banda/banda-desktop --other=value --type=renderer\0",
+	"/opt/banda/banda-desktop --type=renderer --no-sandbox\0",
+	"/opt/banda/banda-desktop --type=renderer --disable-setuid-sandbox\0",
+])("rejects a misleading or unsandboxed renderer title %j", (command) => {
+	const result = fixture();
+	const renderer = result.started?.renderers[0];
+	if (!renderer) throw new Error("Bad test fixture.");
+	renderer.command = command;
+	expect(() => parseLinuxDesktopResult(result)).toThrow();
+});
+
+it("rejects a renderer title whose kernel executable differs", () => {
+	const result = fixture();
+	const renderer = result.started?.renderers[0];
+	if (!renderer) throw new Error("Bad test fixture.");
+	renderer.executable = "/tmp/banda-desktop";
+	expect(() => parseLinuxDesktopResult(result)).toThrow();
 });
