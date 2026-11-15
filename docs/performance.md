@@ -34,7 +34,7 @@ defect. Remove it only when its fix and acceptance evidence are recorded in a co
   decide with real numbers: the one-hour cache against the five-minute one, and whether warming earns a place (it was removed:
   it can only buy a faster first reply, never save money)
 - [ ] With it, `npm run turn:audit -- --home <fork> --since <the release's date>` against the launch budgets (verification.md): the account sign-in's cache and the owner's message to the first request have too few samples on current code to pass or fail
-- [ ] A chat on a model priced by prompt length compacts far above the cheaper band (a small tier at five times its price above 100k tokens, a budget at half of a 1M window): place the budget by price as well as by window
+- [ ] A chat on a model priced by prompt length compacts far above the cheaper band: place the budget by price as well as by window
 - [ ] Record when a response's first token arrives: the store times a request's start, its end and its thinking, so time to first token has no number and no budget
 - [ ] Record why a message waits for its first request (the computer's readiness, a compaction, a queue): a wait of seconds leaves no cause in the store
 - [ ] Compaction eval: three agents' chats through three successive compactions keep names, dates, promises and open work (a journey eval); it settles the 50% share in `src/core/compaction.ts`
