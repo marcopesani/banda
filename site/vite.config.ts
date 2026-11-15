@@ -42,6 +42,9 @@ export default defineConfig(({ command }) => ({
 	root: command === "serve" ? join(site, "..") : site,
 	plugins: [react(), tailwindcss(), appMarks()],
 	resolve: { alias: { "@": join(site, "../web/src") } },
+	// served from the repository, Vite would scan every page under it for dependencies, other checkouts' too
+	// (.worktrees/, .local/worktrees/), and a second React from one of them breaks every hook: only the site's page
+	optimizeDeps: { entries: [join(site, "index.html")] },
 	build: { outDir, emptyOutDir: true, target: "es2022" },
 	// the emoji picker's data path, which nothing on the page opens
 	define: { __EMOJIBASE__: JSON.stringify("/emojibase") },
