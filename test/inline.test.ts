@@ -42,6 +42,37 @@ describe("a preview's markdown", () => {
 		]);
 	});
 
+	it("lends a longer run's marks to emphasis and keeps the rest as text, as CommonMark does", () => {
+		expect(inlineParts("_a__")).toEqual([{ text: "a", style: "italic" }, { text: "_" }]);
+		expect(inlineParts("__é_")).toEqual([{ text: "_" }, { text: "é", style: "italic" }]);
+		expect(inlineParts("(___a_")).toEqual([{ text: "(__" }, { text: "a", style: "italic" }]);
+		expect(inlineParts("__a___ and ___b__")).toEqual([
+			{ text: "a", style: "bold" },
+			{ text: "_ and _" },
+			{ text: "b", style: "bold" },
+		]);
+		// one run closes the italic and opens the bold
+		expect(inlineParts("_.___(*__")).toEqual([
+			{ text: ".", style: "italic" },
+			{ text: "(*", style: "bold" },
+		]);
+		// one style per part: CommonMark's bold italic reads as bold between its extra marks
+		expect(inlineParts("___x___")).toEqual([{ text: "_" }, { text: "x", style: "bold" }, { text: "_" }]);
+	});
+
+	it("keeps an underscore inside a word within emphasis, as CommonMark does", () => {
+		expect(inlineParts("_foo_bar_ and __foo__bar__")).toEqual([
+			{ text: "foo_bar", style: "italic" },
+			{ text: " and " },
+			{ text: "foo__bar", style: "bold" },
+		]);
+		expect(inlineParts("try _web_search_ or fetch_content_")).toEqual([
+			{ text: "try " },
+			{ text: "web_search", style: "italic" },
+			{ text: " or fetch_content_" },
+		]);
+	});
+
 	it("still reads underscores and asterisks at a word's edge as emphasis, and code as written", () => {
 		expect(inlineParts("_really_ (__now__), *soon* and `web_search_tool`")).toEqual([
 			{ text: "really", style: "italic" },

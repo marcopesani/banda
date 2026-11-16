@@ -7,9 +7,16 @@ import type { ReactNode } from "react";
 
 export type InlinePart = { readonly text: string; readonly style?: "bold" | "italic" | "code" };
 
-// An underscore marks emphasis only at a word's edge, as CommonMark has it: `web_search and fetch_content` stays text.
+/**
+ * Underscores follow CommonMark's word rule, judged at the outer edges of the whole run of them: a run with a letter or
+ * digit outside opens or closes nothing (`web_search and fetch_content` stays text); a longer run lends one or two of its
+ * marks and keeps the rest as text (`_a__` is italic a, then `_`); a run inside a word may sit within emphasis
+ * (`_foo_bar_` is italic foo_bar). Not CommonMark, as before: one style per part (`___x___` reads `_`, bold x, `_`, not
+ * bold italic), a mark may open before or close after a space (`_foo _`, `__ x__`), and the rule of three for runs that
+ * both open and close is not applied (`_)1)__(` reads italic `)1)`).
+ */
 const TOKEN =
-	/(`[^`]+`)|(\*\*[^*]+\*\*|(?<![\p{L}\p{N}_])__[^_]+__(?![\p{L}\p{N}_]))|(\*[^*\s][^*]*\*|(?<![\p{L}\p{N}_])_[^_\s][^_]*_(?![\p{L}\p{N}_]))|(!?\[([^\]]*)\]\([^)]*\))/gu;
+	/(?<code>`[^`]+`)|\*\*(?<starBold>[^*]+)\*\*|(?<![\p{L}\p{N}]_*)__(?<bold>(?:[^_]|(?<=[\p{L}\p{N}])_+(?=[\p{L}\p{N}]))+)__(?!_*[\p{L}\p{N}])|\*(?<starItalic>[^*\s][^*]*)\*|(?<![\p{L}\p{N}]_*)_(?<italic>[^_\s](?:[^_]|(?<=[\p{L}\p{N}])_+(?=[\p{L}\p{N}]))*)_(?!_*[\p{L}\p{N}])|(?<link>!?\[(?<words>[^\]]*)\]\([^)]*\))/gu;
 
 export function inlineParts(markdown: string): InlinePart[] {
 	const line = markdown
@@ -27,11 +34,14 @@ export function inlineParts(markdown: string): InlinePart[] {
 	let at = 0;
 	for (const match of line.matchAll(TOKEN)) {
 		plain(line.slice(at, match.index));
-		const [whole, code, bold, italic, link, words] = match;
-		if (code !== undefined) parts.push({ text: code.slice(1, -1), style: "code" });
-		else if (bold !== undefined) parts.push({ text: bold.slice(2, -2), style: "bold" });
-		else if (italic !== undefined) parts.push({ text: italic.slice(1, -1), style: "italic" });
-		else if (link !== undefined) plain(words ?? "");
+		const [whole] = match;
+		const found = match.groups ?? {};
+		const bold = found.starBold ?? found.bold;
+		const italic = found.starItalic ?? found.italic;
+		if (found.code !== undefined) parts.push({ text: found.code.slice(1, -1), style: "code" });
+		else if (bold !== undefined) parts.push({ text: bold, style: "bold" });
+		else if (italic !== undefined) parts.push({ text: italic, style: "italic" });
+		else if (found.link !== undefined) plain(found.words ?? "");
 		else plain(whole);
 		at = match.index + whole.length;
 	}
