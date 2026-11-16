@@ -15,7 +15,6 @@ import {
 import { type ConversationId, createRegistry, type Harness, type JsonObject } from "@earendil-works/pi-durable";
 import { afterAll, describe, expect, it } from "vitest";
 import { type Box, type BoxSetup, openBox } from "../src/box/box.ts";
-import { containerBox, dockerAvailable, removeContainerBox } from "../src/box/container.ts";
 import { attachmentsIn, boxEnv, boxTools } from "../src/box/tools.ts";
 import { Accepted, shaOf } from "../src/core/agents.ts";
 import { type Origin, OWNER, type Received } from "../src/core/gateway.ts";
@@ -28,19 +27,19 @@ import { items } from "../src/server/transcript.ts";
 import { view } from "../web/src/lib/chat.ts";
 import { changeWords } from "../web/src/lib/segments/changes.ts";
 import { hostBox } from "./fixtures/host-box.ts";
+import { boxSuite, realBox } from "./fixtures/real-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway } from "./helpers.ts";
 
-const docker = await dockerAvailable();
 const owner: Origin = { gateway: "fake", peer: OWNER };
 
 const homes: string[] = [];
 const boxes: Box[] = [];
+/** The homes whose box was the real one. */
+const real: string[] = [];
 afterAll(async () => {
 	for (const box of boxes) await box.close();
-	for (const home of homes) {
-		if (docker) await removeContainerBox(home);
-		rmSync(home, { recursive: true, force: true });
-	}
+	for (const home of real) await realBox.remove(home);
+	for (const home of homes) rmSync(home, { recursive: true, force: true });
 });
 
 /** A core and a store over `setup`'s box, with a scripted model that records the tools each request offered. */
@@ -49,6 +48,7 @@ async function open(setup: (home: string) => BoxSetup, maxFileBytes?: number) {
 	homes.push(home);
 	const box = openBox(setup(home), () => {});
 	boxes.push(box);
+	if (box.kind === realBox.kind) real.push(home);
 	const gateway = new FakeGateway();
 	const faux = fauxProvider();
 	const models = createModels();
@@ -319,14 +319,14 @@ describe("the file limit", () => {
 	});
 });
 
-describe.skipIf(!docker)("the container box", () => {
+boxSuite(`the ${realBox.kind} box`, () => {
 	it("bash runs in the box without asking", async () => {
-		const s = await open(containerBox);
+		const s = await open(realBox.setup);
 		s.script(s.call("bash", { command: "id -u; pwd; echo note > n.txt" }), fauxAssistantMessage("Done."));
 		const { turn, chat } = await s.receive("where are you?");
 		await finished(s.harness, turn);
 		expect(await openWaits(s.harness)).toEqual([]);
-		expect(await results(s.harness, chat)).toEqual([{ text: `${process.getuid?.()}\n/workspace\n`, error: false }]);
+		expect(await results(s.harness, chat)).toEqual([{ text: `${realBox.uid}\n/workspace\n`, error: false }]);
 		const read = await s.box.env().readTextFile("/workspace/n.txt", context);
 		expect(read.ok && read.value).toBe("note\n");
 		await s.harness.close(context);

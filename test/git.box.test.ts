@@ -2,10 +2,9 @@
  * Git through the box's egress proxy, for real (DESIGN.md "The box", Network): a chat clones and pulls a private
  * repository over HTTP with the token set at the proxy (the box never holds it), and a push waits for the owner and,
  * approved, lands once; and a download of any size streams through, a credential a compressed body echoes scrubbed. Git's smart HTTP fetches with `POST …/git-upload-pack`, a read by protocol that a POST rule
- * alone takes for a write. A stand-in git server (git http-backend, in the box's own image) on a network of public
- * addresses routed nowhere stands for the forge, so no test needs the real network. Needs Docker, and skips without it.
+ * alone takes for a write. A stand-in git server (git http-backend) on public addresses routed nowhere stands for the
+ * forge, so no test needs the real network. On the box `BANDA_TEST_BOX` names (fixtures/real-box.ts).
  */
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,9 +12,8 @@ import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, type Harness, type TaskId } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { type Box, openBox } from "../src/box/box.ts";
-import { boxParts, containerBox, dockerAvailable, removeContainerBox } from "../src/box/container.ts";
 import { boxEnv, boxTools } from "../src/box/tools.ts";
 import { fetchIn } from "../src/box/web-fetch.ts";
 import { ActivityLog } from "../src/core/activity.ts";
@@ -27,9 +25,9 @@ import { openWaits } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import { answer } from "../src/core/wait.ts";
+import { boxSuite, realBox, type Site } from "./fixtures/real-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway, until } from "./helpers.ts";
 
-const docker = await dockerAvailable();
 const web = { gateway: "web", peer: OWNER };
 
 /**
@@ -76,7 +74,7 @@ class Forge(BaseHTTPRequestHandler):
             self.end_headers()
             return
         path, _, query = self.path.partition("?")
-        env = dict(os.environ, GIT_PROJECT_ROOT="/srv", GIT_HTTP_EXPORT_ALL="1", PATH_INFO=path, QUERY_STRING=query,
+        env = dict(os.environ, GIT_PROJECT_ROOT=os.environ["ROOT"], GIT_HTTP_EXPORT_ALL="1", PATH_INFO=path, QUERY_STRING=query,
                    REQUEST_METHOD=self.command, CONTENT_TYPE=self.headers.get("Content-Type", ""),
                    CONTENT_LENGTH=str(len(body)), HTTP_CONTENT_ENCODING=self.headers.get("Content-Encoding", ""),
                    GIT_PROTOCOL=self.headers.get("Git-Protocol", ""), REMOTE_USER="x-access-token", REMOTE_ADDR="11.0.0.1")
@@ -93,23 +91,21 @@ class Forge(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(rest)))
         self.end_headers()
         self.wfile.write(rest)
-ThreadingHTTPServer(("0.0.0.0", 8080), Forge).serve_forever()
+ThreadingHTTPServer((os.environ["BIND"], 8080), Forge).serve_forever()
 `;
 
 /** The forge's start: a bare repository with one commit on main that accepts pushes, then the server. */
 const FORGE_START = [
 	"set -e",
-	"git init -q --bare -b main /srv/repo.git",
-	"git -C /srv/repo.git config http.receivepack true",
-	"git init -q -b main /tmp/seed",
-	"echo first > /tmp/seed/README",
-	"git -C /tmp/seed add README",
-	"git -C /tmp/seed commit -q -m first",
-	"git -C /tmp/seed push -q /srv/repo.git main",
+	'git init -q --bare -b main "$ROOT/repo.git"',
+	'git -C "$ROOT/repo.git" config http.receivepack true',
+	'git init -q -b main "$SEED"',
+	'echo first > "$SEED/README"',
+	'git -C "$SEED" add README',
+	'git -C "$SEED" commit -q -m first',
+	'git -C "$SEED" push -q "$ROOT/repo.git" main',
 	'exec python3 -u -c "$FORGE"',
 ].join("\n");
-
-const run = (args: string[]) => execFileSync("docker", args, { encoding: "utf8", timeout: 120_000 }).trim();
 
 async function sh(env: ExecutionEnv, command: string): Promise<{ out: string; code: number }> {
 	let out = "";
@@ -118,27 +114,37 @@ async function sh(env: ExecutionEnv, command: string): Promise<{ out: string; co
 	return { out: out.trim(), code: result.value.exitCode };
 }
 
-describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, () => {
+boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, () => {
 	const tag = randomUUID().slice(0, 8);
-	const pub = `banda-test-${tag}-pub`;
-	const forge = `banda-test-${tag}-forge`;
-	const FORGE_HOST = `forge-${tag}.example`;
+	const FORGE_HOST = realBox.host("forge");
 	const TOKEN = `ghp_${randomUUID().replaceAll("-", "")}`;
 	const URL = `http://${FORGE_HOST}:8080/repo.git`;
 	let home: string;
 	let box: Box;
+	let forge: Site;
+	/**
+	 * Why git cannot run in this box, or undefined. The computer banda ships boots without it (agents install into
+	 * /tools), so its run stages one there (`BANDA_TEST_BOX_TOOLS`); without one the cases that run git skip, saying so,
+	 * unless the box was named: then they fail.
+	 */
+	let noGit: string | undefined;
 	let harness: Harness;
 	let stopPermissions: (() => Promise<void>) | undefined;
 	let knows!: ReturnType<typeof proxyKnows>;
 	const faux = fauxProvider();
 	const gateway = new FakeGateway();
-	const core = defineCore({ blobs: blobStore(), gateway: () => gateway, model: () => FAUX_MODEL, retryDelay: () => 5 });
+	const core = defineCore({
+		blobs: blobStore(),
+		gateway: () => gateway,
+		model: () => FAUX_MODEL,
+		retryDelay: () => 5,
+	});
 	/** What the model runs for each owner message: bash with that command, and a held request asks by itself. */
 	const commands = new Map<string, string>();
 
 	beforeAll(async () => {
 		home = mkdtempSync(join(tmpdir(), "banda-git-test-"));
-		const setup = containerBox(home);
+		const setup = realBox.setup(home);
 		// as github.com is: a forge whose git fetches read, with the owner's token set at the proxy
 		setup.egress?.source(async () => ({
 			git: [FORGE_HOST],
@@ -164,7 +170,9 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 				n += 1;
 				const command = last?.role === "user" ? commands.get(text) : undefined;
 				if (command !== undefined)
-					return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `b${n}` })], { stopReason: "toolUse" });
+					return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `b${n}` })], {
+						stopReason: "toolUse",
+					});
 				return fauxAssistantMessage("Done.");
 			}) as never,
 		);
@@ -188,50 +196,31 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 			await tx.doc(Permissions);
 		}, context);
 		stopPermissions = await onPermissions(harness, tell);
-		// the box up (the first run builds both images), then the forge, in the box's own image, beside its proxy
+		// the box up (the first run builds or loads both images), then the forge beside its proxy
 		expect((await sh(box.env(), "true")).code).toBe(0);
-		const image = run(["inspect", "--format", "{{.Config.Image}}", boxParts(home).box]);
-		const octet = 16 + Math.floor(Math.random() * 200);
-		run(["network", "create", "--subnet", `11.${octet}.${Math.floor(Math.random() * 250)}.0/24`, pub]);
-		run(["network", "connect", pub, boxParts(home).proxy]);
-		run([
-			"run",
-			"--detach",
-			"--name",
-			forge,
-			// swept with the home if the test dies before its own teardown
-			"--label",
-			`banda.home=${home}`,
-			"--network",
-			pub,
-			"--network-alias",
-			FORGE_HOST,
-			"--user",
-			"0",
-			"--env",
-			`TOKEN=${TOKEN}`,
-			"--env",
-			`FORGE=${FORGE}`,
-			"--entrypoint",
-			"sh",
-			image,
-			"-c",
-			FORGE_START,
-		]);
-		await until(() => {
-			try {
-				return (
-					run([
-						"exec",
-						boxParts(home).proxy,
-						"python3",
-						"-c",
-						`import socket; socket.create_connection(("${FORGE_HOST}", 8080), 2)`,
-					]) === ""
-				);
-			} catch {
-				return false;
+		// a file put in /tools from outside shows in the box within a moment, not always at once
+		const staged = await realBox.tools(home);
+		let tries = staged ? 50 : 1;
+		for (;;) {
+			const git = await sh(box.env(), "git --version 2>&1");
+			if (git.code === 0) break;
+			tries -= 1;
+			if (tries > 0) {
+				await new Promise((resolve) => setTimeout(resolve, 200));
+				continue;
 			}
+			noGit = staged
+				? `the git staged in /tools of the ${realBox.kind} box does not run: ${git.out}`
+				: `the ${realBox.kind} box has no git: its image ships none, and BANDA_TEST_BOX_TOOLS names no folder ` +
+					"that holds one for /tools (test/fixtures/box-git.sh stages it)";
+			if (staged || realBox.named) throw new Error(noGit);
+			break;
+		}
+		forge = await realBox.site(home, {
+			labels: ["forge"],
+			image: "box",
+			env: { TOKEN, FORGE },
+			start: FORGE_START,
 		});
 	}, 20 * 60_000);
 
@@ -239,34 +228,17 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 		await stopPermissions?.();
 		await harness?.close(context);
 		await box?.close();
-		try {
-			run(["rm", "--force", forge]);
-		} catch {
-			// not made
-		}
+		await forge?.close();
 		if (home !== undefined) {
-			try {
-				run(["network", "disconnect", "--force", pub, boxParts(home).proxy]);
-			} catch {
-				// not joined
-			}
-			await removeContainerBox(home);
+			await realBox.remove(home);
 			rmSync(home, { recursive: true, force: true });
-		}
-		try {
-			run(["network", "rm", pub]);
-		} catch {
-			// not made
 		}
 	});
 
 	/** Every request the forge got: method, path and whether it carried the token. */
-	const requests = () =>
-		run(["logs", forge])
-			.split("\n")
-			.filter((line) => /^(GET|POST) /.test(line));
+	const requests = () => forge.output().filter((line) => /^(GET|POST) /.test(line));
 	/** The commit the forge's main points at. */
-	const forgeMain = () => run(["exec", forge, "git", "-C", "/srv/repo.git", "rev-parse", "main"]);
+	const forgeMain = () => forge.exec('git -C "$ROOT/repo.git" rev-parse main');
 
 	const say = async (text: string, command: string, thread = randomUUID()) => {
 		commands.set(text, command);
@@ -319,20 +291,15 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 			);
 	};
 
-	it("a chat clones and pulls a private repository without asking; the token is set at the proxy, never in the box", async () => {
+	it("a chat clones and pulls a private repository without asking; the token is set at the proxy, never in the box", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const env = box.env(undefined, box.egress?.env(91_001));
 		const dir = `/tmp/clone-${tag}`;
 		const clone = await sh(env, `git clone -q ${URL} ${dir} 2>&1; echo " code=$?"`);
 		expect(clone.out).toMatch(/code=0$/);
 		expect((await sh(env, `cat ${dir}/README`)).out).toBe("first");
 		// a new commit at the forge, then a pull
-		run([
-			"exec",
-			forge,
-			"sh",
-			"-c",
-			"cd /tmp/seed && echo second >> README && git commit -qam second && git push -q /srv/repo.git main",
-		]);
+		forge.exec('cd "$SEED" && echo second >> README && git commit -qam second && git push -q "$ROOT/repo.git" main');
 		const pull = await sh(env, `git -C ${dir} pull -q 2>&1; echo " code=$?"`);
 		expect(pull.out).toMatch(/code=0$/);
 		expect((await sh(env, `git -C ${dir} rev-parse HEAD`)).out).toBe(forgeMain());
@@ -372,7 +339,8 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 		expect("status" in inside ? inside.status : 0).not.toBe(200);
 	});
 
-	it("a push waits for the owner and lands nothing; approved, it lands once", async () => {
+	it("a push waits for the owner and lands nothing; approved, it lands once", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const env = box.env(undefined, box.egress?.env(91_002));
 		const dir = `/tmp/push-${tag}`;
 		expect((await sh(env, `git clone -q ${URL} ${dir} 2>&1; echo " code=$?"`)).out).toMatch(/code=0$/);
@@ -394,7 +362,8 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 		expect((await told(push.chat)).at(-1)).toContain("Sent.");
 	});
 
-	it("a push held says to allow its host; once the owner does, git push goes straight through and lands once", async () => {
+	it("a push held says to allow its host; once the owner does, git push goes straight through and lands once", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const env = box.env(undefined, box.egress?.env(91_004));
 		const dir = `/tmp/allow-${tag}`;
 		const host = `http://${FORGE_HOST}:8080`;
@@ -426,7 +395,7 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 		await until(() => done(held.turn));
 		expect(forgeMain()).toBe(first);
 		expect(receives()).toBe(pushesBefore + 1);
-		await until(() => run(["exec", boxParts(home).proxy, "cat", "/state/config.json"]).includes(`"${host}"`));
+		await until(async () => (await realBox.exec(home, "proxy", "cat /state/config.json")).includes(`"${host}"`));
 		// run again, git finds nothing left to push: exit 0, nothing sent
 		const again = await say("push again", pushing);
 		expect((await nextAsk(again.turn)).wait).toBeUndefined();
@@ -462,13 +431,14 @@ describe.skipIf(!docker)("git through the box's proxy", { timeout: 180_000 }, ()
 		expect(await sweepReceipts(core.held(box.egress!), harness, Date.now, "settled")).toBe(0);
 	});
 
-	it("a host taken back stops taking writes at the proxy before the revoke returns", async () => {
+	it("a host taken back stops taking writes at the proxy before the revoke returns", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const [id] = Object.keys((await harness.snapshot(Permissions, context))?.permissions ?? {});
 		expect(id).toBeDefined();
 		expect(await revoke(harness, id!, Date.now())).toBe(true);
 		// as the daemon's revoke route does: the proxy is told before the owner hears it was taken back
 		expect(await box.egress!.configure()).toBe("told");
-		const config = JSON.parse(run(["exec", boxParts(home).proxy, "cat", "/state/config.json"])) as {
+		const config = JSON.parse(await realBox.exec(home, "proxy", "cat /state/config.json")) as {
 			permitted: object;
 			generation: number;
 		};

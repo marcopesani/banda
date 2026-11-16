@@ -2,10 +2,9 @@
  * The box's closed network, for real (DESIGN.md "The box", Network): the box on an internal network with the egress
  * proxy alone; a write held, approved, and sent once, byte for byte; private ranges and address tricks refused; the
  * banda authority the only one the box trusts; a permission over a route that sends the next write unasked; and the
- * box destroyed mid-chat. Needs Docker, and skips without it. A test server stands for the internet: a container on a network
- * of public addresses (11.x, routed nowhere) that the proxy joins, so no test needs the real network.
+ * box destroyed mid-chat. On the box `BANDA_TEST_BOX` names (fixtures/real-box.ts), with a stand-in site for the internet
+ * on public addresses routed nowhere, so no test needs the real network.
  */
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,9 +12,8 @@ import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, type Harness, type TaskId } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { type Box, openBox } from "../src/box/box.ts";
-import { boxParts, containerBox, dockerAvailable, removeContainerBox } from "../src/box/container.ts";
 import { boxEnv, boxTools } from "../src/box/tools.ts";
 import { Tickets } from "../src/core/egress.ts";
 import { OWNER, type Received } from "../src/core/gateway.ts";
@@ -24,16 +22,15 @@ import { openWaits } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import { answer } from "../src/core/wait.ts";
+import { boxSuite, PROCESSES, realBox, type Site } from "./fixtures/real-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway, until } from "./helpers.ts";
 
-const docker = await dockerAvailable();
-const MITMPROXY = "mitmproxy/mitmproxy:12.2.3@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f";
 const web = { gateway: "web", peer: OWNER };
 
 /** A server that answers 200 to anything and prints each request's raw bytes, base64, one per line. */
 const ECHO = `
-import base64, socket, sys
-s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("0.0.0.0", 8080)); s.listen(16)
+import base64, os, socket, sys
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind((os.environ["BIND"], 8080)); s.listen(16)
 while True:
     c, _ = s.accept()
     data = b""
@@ -55,8 +52,6 @@ while True:
     c.close()
 `;
 
-const run = (args: string[]) => execFileSync("docker", args, { encoding: "utf8", timeout: 120_000 }).trim();
-
 async function sh(env: ExecutionEnv, command: string): Promise<{ out: string; code: number }> {
 	let out = "";
 	const result = await env.exec(command, { onOutput: (text) => (out += text), timeout: 60 }, context);
@@ -64,24 +59,27 @@ async function sh(env: ExecutionEnv, command: string): Promise<{ out: string; co
 	return { out: out.trim(), code: result.value.exitCode };
 }
 
-// every step here is docker calls (each command's intake, the replay, the server's log): seconds each on a loaded machine
-describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () => {
-	const tag = randomUUID().slice(0, 8);
-	const pub = `banda-test-${tag}-pub`;
-	const echo = `banda-test-${tag}-echo`;
-	const ECHO_HOST = `echo-${tag}.example`;
+// every step here is runtime calls (each command's intake, the replay, the server's log): seconds each on a loaded machine
+boxSuite(`the box's closed network (${realBox.kind})`, { timeout: 180_000 }, () => {
+	const ECHO_HOST = realBox.host("echo");
 	let home: string;
 	let box: Box;
+	let echo: Site;
 	let harness: Harness;
 	const faux = fauxProvider();
 	const gateway = new FakeGateway();
-	const core = defineCore({ blobs: blobStore(), gateway: () => gateway, model: () => FAUX_MODEL, retryDelay: () => 5 });
+	const core = defineCore({
+		blobs: blobStore(),
+		gateway: () => gateway,
+		model: () => FAUX_MODEL,
+		retryDelay: () => 5,
+	});
 	/** What the model runs for each owner message: bash with that command, and a held request asks by itself. */
 	const commands = new Map<string, string>();
 
 	beforeAll(async () => {
 		home = mkdtempSync(join(tmpdir(), "banda-egress-test-"));
-		const setup = containerBox(home);
+		const setup = realBox.setup(home);
 		setup.egress?.source(async () => ({ credentials: [] }));
 		box = openBox(setup, () => {});
 		const models = createModels();
@@ -94,7 +92,9 @@ describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () =>
 				n += 1;
 				const command = last?.role === "user" ? commands.get(text) : undefined;
 				if (command !== undefined)
-					return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `b${n}` })], { stopReason: "toolUse" });
+					return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `b${n}` })], {
+						stopReason: "toolUse",
+					});
 				return fauxAssistantMessage("Done.");
 			}) as never,
 		);
@@ -103,77 +103,28 @@ describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () =>
 		registry.install(boxTools({ box, ...(box.egress === undefined ? {} : { egress: core.held(box.egress) }) }));
 		harness = await openStore(home, { models, registry, env: boxEnv(box) });
 		harness.resume();
-		// the box up (the first run builds both images), then the stand-in internet beside its proxy
+		// the box up (the first run builds or loads both images), then the stand-in internet beside its proxy
 		expect((await sh(box.env(), "true")).code).toBe(0);
-		const octet = 16 + Math.floor(Math.random() * 200);
-		run(["network", "create", "--subnet", `11.${octet}.${Math.floor(Math.random() * 250)}.0/24`, pub]);
-		run(["network", "connect", pub, boxParts(home).proxy]);
-		run([
-			"run",
-			"--detach",
-			"--name",
-			echo,
-			// swept with the home if the test dies before its own teardown
-			"--label",
-			`banda.home=${home}`,
-			"--network",
-			pub,
-			"--network-alias",
-			ECHO_HOST,
-			"--entrypoint",
-			"python3",
-			MITMPROXY,
-			"-u",
-			"-c",
-			ECHO,
-		]);
-		await until(() => {
-			try {
-				return (
-					run([
-						"exec",
-						boxParts(home).proxy,
-						"python3",
-						"-c",
-						`import socket; socket.create_connection(("${ECHO_HOST}", 8080), 2)`,
-					]) === ""
-				);
-			} catch {
-				return false;
-			}
+		echo = await realBox.site(home, {
+			labels: ["echo"],
+			image: "python",
+			env: { SERVER: ECHO },
+			start: 'exec python3 -u -c "$SERVER"',
 		});
 	}, 20 * 60_000);
 
 	afterAll(async () => {
 		await harness?.close(context);
 		await box?.close();
-		try {
-			run(["rm", "--force", echo]);
-		} catch {
-			// not made
-		}
+		await echo?.close();
 		if (home !== undefined) {
-			try {
-				run(["network", "disconnect", "--force", pub, boxParts(home).proxy]);
-			} catch {
-				// not joined
-			}
-			await removeContainerBox(home);
+			await realBox.remove(home);
 			rmSync(home, { recursive: true, force: true });
-		}
-		try {
-			run(["network", "rm", pub]);
-		} catch {
-			// not made
 		}
 	});
 
 	/** Every request the stand-in server got, raw. */
-	const echoed = () =>
-		run(["logs", echo])
-			.split("\n")
-			.filter(Boolean)
-			.map((line) => Buffer.from(line, "base64").toString("latin1"));
+	const echoed = () => echo.output().map((line) => Buffer.from(line, "base64").toString("latin1"));
 
 	const say = async (text: string, command: string, thread = randomUUID()) => {
 		commands.set(text, command);
@@ -230,10 +181,9 @@ describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () =>
 		const env = box.env(undefined, box.egress?.env(90_005));
 		expect((await sh(env, `getent hosts ${ECHO_HOST} || echo none`)).out).toBe("none");
 		expect((await sh(env, "getent hosts example.com || echo none")).out).toBe("none");
-		const ip = run(["inspect", "--format", `{{(index .NetworkSettings.Networks "${pub}").IPAddress}}`, echo]);
-		expect((await sh(env, `curl -sS -m 5 --noproxy '*' http://${ip}:8080/ 2>&1; echo " code=$?"`)).out).toMatch(
-			/code=(7|28)$/,
-		);
+		expect(
+			(await sh(env, `curl -sS -m 5 --noproxy '*' http://${echo.address}:8080/ 2>&1; echo " code=$?"`)).out,
+		).toMatch(/code=(7|28)$/);
 		const tls = await sh(env, `curl -sv -m 20 https://${ECHO_HOST}:8080/ -o /dev/null 2>&1 || true`);
 		expect(tls.out).toMatch(/issuer: (CN|O)=banda/);
 		expect(tls.out).toContain("SSL certificate verify ok");
@@ -242,7 +192,9 @@ describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () =>
 		// a server a command starts on the box's loopback (a project's own tests) is reached directly, not refused
 		const local = await sh(
 			env,
-			"python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 1; " +
+			// socat, which the box image carries (it has no python3), answers each connection with a file
+			"printf 'HTTP/1.1 200 OK\\r\\ncontent-length: 2\\r\\n\\r\\nok' > /tmp/loop.http; " +
+				"socat -U TCP4-LISTEN:8765,bind=127.0.0.1,reuseaddr,fork OPEN:/tmp/loop.http,rdonly >/dev/null 2>&1 & sleep 1; " +
 				"curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/; kill %1",
 		);
 		expect(local.out).toBe("200");
@@ -273,8 +225,10 @@ describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () =>
 		expect(mismatch.out).toContain("its Host names example.com");
 		const tunnel = await sh(env, `curl -sS -m 20 https://${ECHO_HOST}:8080/ -H 'Host: example.com'`);
 		expect(tunnel.out).toContain("its Host names example.com");
+		// the proxy as the box's own env names it, port included, with a password the daemon never gave
+		const marked = String(box.egress?.env(90_006).http_proxy).replace(/:[a-f0-9]+@/, `:${"0".repeat(32)}@`);
 		const forged = await sh(
-			box.env(undefined, { http_proxy: "http://c90006:00000000000000000000000000000000@proxy:8080" }),
+			box.env(undefined, { http_proxy: marked }),
 			`curl -sS -m 20 -o /dev/null -w '%{http_code}' http://${ECHO_HOST}:8080/`,
 		);
 		expect(forged.out).toBe("407");
@@ -332,10 +286,10 @@ describe.skipIf(!docker)("the box's closed network", { timeout: 180_000 }, () =>
 		const thread = randomUUID();
 		const first = await say("wait a while", "sleep 30; echo slept", thread);
 		await until(async () => {
-			const { out } = await sh(box.env(), "pgrep -f '^sleep 30$' || true");
-			return out !== "";
+			const { out } = await sh(box.env(), `${PROCESSES} | grep -c '^sleep 30 $' || true`);
+			return out === "1";
 		});
-		run(["rm", "--force", boxParts(home).box]);
+		await realBox.destroy(home);
 		await until(() => done(first.turn));
 		const [lost] = await results(first.chat);
 		expect(lost).not.toContain("slept");
