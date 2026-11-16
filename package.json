@@ -37,7 +37,7 @@
 		"test:fast": "vitest run --project unit --project browser",
 		"test:faults": "vitest run --project faults",
 		"test:computer": "BANDA_TEST_BOX=microvm vitest run --project box",
-		"test:docker": "BANDA_TEST_BOX=container vitest run --project box test/box.test.ts test/tools.test.ts test/egress.box.test.ts test/git.box.test.ts test/sweep.box.test.ts",
+		"test:docker": "BANDA_TEST_BOX=container vitest run --project box",
 		"test:pbt": "BANDA_PBT_RUNS=20 vitest run --project unit --project browser",
 		"prompt:budget": "BANDA_PROMPT_BUDGET=update vitest run --project unit test/prompt-budget.test.ts",
 		"check": "biome check .",

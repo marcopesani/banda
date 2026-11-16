@@ -22,7 +22,7 @@ import { openWaits } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import { answer } from "../src/core/wait.ts";
-import { boxSuite, realBox, type Site } from "./fixtures/real-box.ts";
+import { boxSuite, PROCESSES, realBox, type Site } from "./fixtures/real-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway, until } from "./helpers.ts";
 
 const web = { gateway: "web", peer: OWNER };
@@ -286,8 +286,8 @@ boxSuite(`the box's closed network (${realBox.kind})`, { timeout: 180_000 }, () 
 		const thread = randomUUID();
 		const first = await say("wait a while", "sleep 30; echo slept", thread);
 		await until(async () => {
-			const { out } = await sh(box.env(), "pgrep -f '^sleep 30$' || true");
-			return out !== "";
+			const { out } = await sh(box.env(), `${PROCESSES} | grep -c '^sleep 30 $' || true`);
+			return out === "1";
 		});
 		await realBox.destroy(home);
 		await until(() => done(first.turn));

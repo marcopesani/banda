@@ -355,5 +355,12 @@ const computerBox: RealBox = {
 
 export const realBox: RealBox = kind === "container" ? container : computerBox;
 
+/**
+ * Every process's command line in the box, one per line, its words each followed by a space: the computer's box ships
+ * no procps, so a command that counts processes reads /proc. A missing `pgrep` would print its error instead, which a
+ * wait for any output takes for the process.
+ */
+export const PROCESSES = "for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo; done";
+
 /** A suite of the real box: skipped where there is none, unless one was named (then it failed above). */
 export const boxSuite = describe.skipIf(missing !== undefined);

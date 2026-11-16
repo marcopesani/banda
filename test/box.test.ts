@@ -11,7 +11,7 @@ import { registerEnvConformance } from "@earendil-works/pi-durable/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Box, openBox } from "../src/box/box.ts";
 import { context } from "../src/core/store.ts";
-import { boxSuite, realBox } from "./fixtures/real-box.ts";
+import { boxSuite, PROCESSES, realBox } from "./fixtures/real-box.ts";
 import { until } from "./helpers.ts";
 
 /** A home for the whole file: the shared helper's are removed after each test, under a running box. */
@@ -32,9 +32,6 @@ async function sh(env: ExecutionEnv, command: string, ctx = context): Promise<{ 
  * runs every command without a window (`bash`, checks, tools), so it is pi-env's to fix (BACKLOG, Upstream).
  */
 const UPSTREAM = new Set(["windowed exec keeps the exact tail and counts what it skips"]);
-
-/** Every process's command line, one per line, words separated by spaces: the box ships no procps. */
-const PROCESSES = "for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo; done";
 
 /** Each conformance case in a fresh directory under `root`, in the box. */
 function conformance(name: string, box: () => Box, root: () => string) {

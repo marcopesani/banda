@@ -11,7 +11,7 @@ import { defineConfig } from "vitest/config";
  *   test of their time budgets;
  * - box: the files that drive a real box (its machines or containers, the egress proxy, the browser), one at a time: a
  *   box's bring-up and teardown is many runtime calls. Which box, `BANDA_TEST_BOX` says (test/fixtures/real-box.ts):
- *   `npm run test:computer` runs them all on the computer banda ships, `npm run test:docker` a few on the container.
+ *   `npm run test:computer` runs them all on the computer banda ships, `npm run test:docker` on the container.
  */
 const FAULTS = ["test/**/*.faults.test.ts"];
 const BOX = ["test/box.test.ts", "test/**/*.box.test.ts", "test/tools.test.ts"];

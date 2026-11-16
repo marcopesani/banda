@@ -1,5 +1,5 @@
 # Ordinary checks on pushes and PRs; fault sweeps nightly; the box suites on main pushes, on the computer banda ships
-# (a microVM, on this runner's KVM) and a few on Docker. Manual CI runs provide the expensive suites without occupying
+# (a microVM, on this runner's KVM) and again on Docker. Manual CI runs provide the expensive suites without occupying
 # local development machines.
 name: ci
 
