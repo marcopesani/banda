@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, type Harness, type TaskId } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import { type Box, openBox } from "../src/box/box.ts";
 import { boxEnv, boxTools } from "../src/box/tools.ts";
 import { Tickets } from "../src/core/egress.ts";
@@ -22,7 +22,7 @@ import { openWaits } from "../src/core/status.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import { answer } from "../src/core/wait.ts";
-import { realBox, type Site } from "./fixtures/real-box.ts";
+import { boxSuite, realBox, type Site } from "./fixtures/real-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway, until } from "./helpers.ts";
 
 const web = { gateway: "web", peer: OWNER };
@@ -60,247 +60,243 @@ async function sh(env: ExecutionEnv, command: string): Promise<{ out: string; co
 }
 
 // every step here is runtime calls (each command's intake, the replay, the server's log): seconds each on a loaded machine
-describe.skipIf(realBox.missing !== undefined)(
-	`the box's closed network (${realBox.kind})`,
-	{ timeout: 180_000 },
-	() => {
-		const ECHO_HOST = realBox.host("echo");
-		let home: string;
-		let box: Box;
-		let echo: Site;
-		let harness: Harness;
-		const faux = fauxProvider();
-		const gateway = new FakeGateway();
-		const core = defineCore({
-			blobs: blobStore(),
-			gateway: () => gateway,
-			model: () => FAUX_MODEL,
-			retryDelay: () => 5,
+boxSuite(`the box's closed network (${realBox.kind})`, { timeout: 180_000 }, () => {
+	const ECHO_HOST = realBox.host("echo");
+	let home: string;
+	let box: Box;
+	let echo: Site;
+	let harness: Harness;
+	const faux = fauxProvider();
+	const gateway = new FakeGateway();
+	const core = defineCore({
+		blobs: blobStore(),
+		gateway: () => gateway,
+		model: () => FAUX_MODEL,
+		retryDelay: () => 5,
+	});
+	/** What the model runs for each owner message: bash with that command, and a held request asks by itself. */
+	const commands = new Map<string, string>();
+
+	beforeAll(async () => {
+		home = mkdtempSync(join(tmpdir(), "banda-egress-test-"));
+		const setup = realBox.setup(home);
+		setup.egress?.source(async () => ({ credentials: [] }));
+		box = openBox(setup, () => {});
+		const models = createModels();
+		models.setProvider(faux.provider);
+		let n = 0;
+		faux.setResponses(
+			Array.from({ length: 1000 }, () => (ctx: { messages: readonly { role: string; content: unknown }[] }) => {
+				const last = ctx.messages.at(-1);
+				const text = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
+				n += 1;
+				const command = last?.role === "user" ? commands.get(text) : undefined;
+				if (command !== undefined)
+					return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `b${n}` })], {
+						stopReason: "toolUse",
+					});
+				return fauxAssistantMessage("Done.");
+			}) as never,
+		);
+		const registry = createRegistry();
+		registry.install(core.extension);
+		registry.install(boxTools({ box, ...(box.egress === undefined ? {} : { egress: core.held(box.egress) }) }));
+		harness = await openStore(home, { models, registry, env: boxEnv(box) });
+		harness.resume();
+		// the box up (the first run builds or loads both images), then the stand-in internet beside its proxy
+		expect((await sh(box.env(), "true")).code).toBe(0);
+		echo = await realBox.site(home, {
+			labels: ["echo"],
+			image: "python",
+			env: { SERVER: ECHO },
+			start: 'exec python3 -u -c "$SERVER"',
 		});
-		/** What the model runs for each owner message: bash with that command, and a held request asks by itself. */
-		const commands = new Map<string, string>();
+	}, 20 * 60_000);
 
-		beforeAll(async () => {
-			home = mkdtempSync(join(tmpdir(), "banda-egress-test-"));
-			const setup = realBox.setup(home);
-			setup.egress?.source(async () => ({ credentials: [] }));
-			box = openBox(setup, () => {});
-			const models = createModels();
-			models.setProvider(faux.provider);
-			let n = 0;
-			faux.setResponses(
-				Array.from({ length: 1000 }, () => (ctx: { messages: readonly { role: string; content: unknown }[] }) => {
-					const last = ctx.messages.at(-1);
-					const text = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
-					n += 1;
-					const command = last?.role === "user" ? commands.get(text) : undefined;
-					if (command !== undefined)
-						return fauxAssistantMessage([fauxToolCall("bash", { command }, { id: `b${n}` })], {
-							stopReason: "toolUse",
-						});
-					return fauxAssistantMessage("Done.");
-				}) as never,
-			);
-			const registry = createRegistry();
-			registry.install(core.extension);
-			registry.install(boxTools({ box, ...(box.egress === undefined ? {} : { egress: core.held(box.egress) }) }));
-			harness = await openStore(home, { models, registry, env: boxEnv(box) });
-			harness.resume();
-			// the box up (the first run builds or loads both images), then the stand-in internet beside its proxy
-			expect((await sh(box.env(), "true")).code).toBe(0);
-			echo = await realBox.site(home, {
-				labels: ["echo"],
-				image: "python",
-				env: { SERVER: ECHO },
-				start: 'exec python3 -u -c "$SERVER"',
-			});
-		}, 20 * 60_000);
+	afterAll(async () => {
+		await harness?.close(context);
+		await box?.close();
+		await echo?.close();
+		if (home !== undefined) {
+			await realBox.remove(home);
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
 
-		afterAll(async () => {
-			await harness?.close(context);
-			await box?.close();
-			await echo?.close();
-			if (home !== undefined) {
-				await realBox.remove(home);
-				rmSync(home, { recursive: true, force: true });
-			}
+	/** Every request the stand-in server got, raw. */
+	const echoed = () => echo.output().map((line) => Buffer.from(line, "base64").toString("latin1"));
+
+	const say = async (text: string, command: string, thread = randomUUID()) => {
+		commands.set(text, command);
+		const received: Received = await core.receive(harness, {
+			id: randomUUID(),
+			origin: { gateway: "fake", peer: OWNER, thread },
+			text,
 		});
-
-		/** Every request the stand-in server got, raw. */
-		const echoed = () => echo.output().map((line) => Buffer.from(line, "base64").toString("latin1"));
-
-		const say = async (text: string, command: string, thread = randomUUID()) => {
-			commands.set(text, command);
-			const received: Received = await core.receive(harness, {
-				id: randomUUID(),
-				origin: { gateway: "fake", peer: OWNER, thread },
-				text,
-			});
-			if (!("turn" in received)) throw new Error(JSON.stringify(received));
-			return received;
-		};
-		const done = async (turn: number) => {
-			if ((await harness.getTask(turn as TaskId, context))?.state.status !== "terminal") return false;
-			const graph = await harness.taskGraph(context);
-			try {
-				return !Object.values(graph.value.tasks).some((node) => node.kind === RELEASE || node.kind === "banda.turn");
-			} finally {
-				graph.dispose();
-			}
-		};
-		/** What the agent was woken with about the held requests of `chat`. */
-		const told = async (chat: number) => {
-			const page = await (await harness.conversation(chat as ConversationId, context))!.entries(
-				{ order: "ascending" },
-				1000,
-				undefined,
-				context,
-			);
-			return page.items
-				.filter((e) => e.kind === RELEASED)
-				.map((e) => JSON.stringify((e.model?.[0] as { content?: unknown } | undefined)?.content));
-		};
-		const nextAsk = (turn: number) =>
-			until(async () => {
-				const [wait] = await openWaits(harness);
-				if (wait !== undefined) return { wait };
-				return (await done(turn)) ? { wait: undefined } : undefined;
-			});
-		const results = async (chat: number) => {
-			const page = await (await harness.conversation(chat as ConversationId, context))!.entries(
-				{ order: "ascending" },
-				1000,
-				undefined,
-				context,
-			);
-			return page.items
-				.filter((e) => e.kind === "pi.tool-result")
-				.map((e) =>
-					((e.model?.[0] as { content?: { text?: string }[] } | undefined)?.content ?? []).map((p) => p.text).join(""),
-				);
-		};
-
-		it("the box resolves no outside name, has no route out, and trusts the banda authority alone", async () => {
-			const env = box.env(undefined, box.egress?.env(90_005));
-			expect((await sh(env, `getent hosts ${ECHO_HOST} || echo none`)).out).toBe("none");
-			expect((await sh(env, "getent hosts example.com || echo none")).out).toBe("none");
-			expect(
-				(await sh(env, `curl -sS -m 5 --noproxy '*' http://${echo.address}:8080/ 2>&1; echo " code=$?"`)).out,
-			).toMatch(/code=(7|28)$/);
-			const tls = await sh(env, `curl -sv -m 20 https://${ECHO_HOST}:8080/ -o /dev/null 2>&1 || true`);
-			expect(tls.out).toMatch(/issuer: (CN|O)=banda/);
-			expect(tls.out).toContain("SSL certificate verify ok");
-			expect((await sh(env, "grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt")).out).toBe("1");
-			expect((await sh(env, "ls /etc/ssl/certs")).out).toBe("ca-certificates.crt");
-			// a server a command starts on the box's loopback (a project's own tests) is reached directly, not refused
-			const local = await sh(
-				env,
-				"python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 1; " +
-					"curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/; kill %1",
-			);
-			expect(local.out).toBe("200");
+		if (!("turn" in received)) throw new Error(JSON.stringify(received));
+		return received;
+	};
+	const done = async (turn: number) => {
+		if ((await harness.getTask(turn as TaskId, context))?.state.status !== "terminal") return false;
+		const graph = await harness.taskGraph(context);
+		try {
+			return !Object.values(graph.value.tasks).some((node) => node.kind === RELEASE || node.kind === "banda.turn");
+		} finally {
+			graph.dispose();
+		}
+	};
+	/** What the agent was woken with about the held requests of `chat`. */
+	const told = async (chat: number) => {
+		const page = await (await harness.conversation(chat as ConversationId, context))!.entries(
+			{ order: "ascending" },
+			1000,
+			undefined,
+			context,
+		);
+		return page.items
+			.filter((e) => e.kind === RELEASED)
+			.map((e) => JSON.stringify((e.model?.[0] as { content?: unknown } | undefined)?.content));
+	};
+	const nextAsk = (turn: number) =>
+		until(async () => {
+			const [wait] = await openWaits(harness);
+			if (wait !== undefined) return { wait };
+			return (await done(turn)) ? { wait: undefined } : undefined;
 		});
-
-		it("refuses private ranges, address tricks, a Host naming another server, and a login it did not mark", async () => {
-			const env = box.env(undefined, box.egress?.env(90_006));
-			const before = echoed().length;
-			const refused = [
-				"http://127.0.0.1/",
-				"http://0x7f.1/",
-				"http://2130706433/",
-				"http://017700000001/",
-				"http://[::ffff:127.0.0.1]/",
-				"http://[::ffff:7f00:1]/",
-				"http://169.254.169.254/latest/meta-data/",
-				"http://[64:ff9b::a9fe:a9fe]/",
-				"http://10.0.0.1/",
-				"http://localhost/",
-				"http://proxy:8080/",
-				"http://host.docker.internal/",
-			];
-			for (const url of refused) {
-				const got = await sh(env, `curl -sS -m 20 --noproxy '' '${url}'; echo " code=$?"`);
-				expect(got.out, url).toMatch(/^banda: .*(not on the public internet|not a valid address|does not resolve)/);
-			}
-			const mismatch = await sh(env, `curl -sS -m 20 http://${ECHO_HOST}:8080/ -H 'Host: example.com'`);
-			expect(mismatch.out).toContain("its Host names example.com");
-			const tunnel = await sh(env, `curl -sS -m 20 https://${ECHO_HOST}:8080/ -H 'Host: example.com'`);
-			expect(tunnel.out).toContain("its Host names example.com");
-			// the proxy the box reaches, with a password the daemon never gave
-			const marked = new URL(String(box.egress?.env(90_006).http_proxy));
-			marked.password = "0".repeat(32);
-			const forged = await sh(
-				box.env(undefined, { http_proxy: marked.href }),
-				`curl -sS -m 20 -o /dev/null -w '%{http_code}' http://${ECHO_HOST}:8080/`,
+	const results = async (chat: number) => {
+		const page = await (await harness.conversation(chat as ConversationId, context))!.entries(
+			{ order: "ascending" },
+			1000,
+			undefined,
+			context,
+		);
+		return page.items
+			.filter((e) => e.kind === "pi.tool-result")
+			.map((e) =>
+				((e.model?.[0] as { content?: { text?: string }[] } | undefined)?.content ?? []).map((p) => p.text).join(""),
 			);
-			expect(forged.out).toBe("407");
-			expect(echoed().length).toBe(before);
-		});
+	};
 
-		it("a write is held and listed; approved, the proxy sends it once, byte for byte; then its route goes unasked", async () => {
-			const before = echoed().length;
-			const post =
-				`printf 'hello\\nworld' | curl -sS -m 20 --data-binary @- -H 'Content-Type: text/plain' -H 'X-Custom: a b' ` +
-				`'http://${ECHO_HOST}:8080/v1/things/42?x=1'`;
-			const thread = randomUUID();
-			const first = await say("send it", post, thread);
-			const { wait } = await nextAsk(first.turn);
-			expect(wait?.ask).toMatchObject({
-				tool: "propose_send",
-				label: `send POST http://${ECHO_HOST}:8080/v1/things/42?x=1`,
-				args: { method: "POST", body: "hello\nworld", _route: `POST ${ECHO_HOST}:8080/v1/things/*` },
-			});
-			// held, not sent: the server has seen nothing
-			expect(echoed().length).toBe(before);
-			// the card opens in the commit that stores the ticket, before the command's result is stored
-			await until(async () => (await results(first.chat)).length > 0);
-			const [bash] = await results(first.chat);
-			expect(bash).toMatch(/^banda: this request writes, so it waits for the owner: ticket t[0-9a-f]{10}/);
-			expect(bash).toContain(`Held, not sent: POST http://${ECHO_HOST}:8080/v1/things/42?x=1`);
-			await answer(harness, wait!.key, "approve", web, "bearer", { approving: { permission: { scope: "always" } } });
-			await until(() => done(first.turn));
-			const sent = echoed().slice(before);
-			expect(sent).toHaveLength(1);
-			const ticket = String((wait!.ask as { args: { [arg: string]: unknown } }).args._ticket);
-			const held = (await harness.snapshot(Tickets, context))!.tickets[ticket]!;
-			const exact =
-				`${held.method} ${held.path} HTTP/1.1\r\n${held.headers.map(([k, v]) => `${k}: ${v}\r\n`).join("")}\r\n` +
-				Buffer.from(held.body, "base64").toString("latin1");
-			expect(sent[0]).toBe(exact);
-			expect(sent[0]).toMatch(/^POST \/v1\/things\/42\?x=1 HTTP\/1\.1\r\n/);
-			expect(sent[0]).toContain("X-Custom: a b\r\n");
-			expect(sent[0]?.endsWith("\r\n\r\nhello\nworld")).toBe(true);
-			expect((await told(first.chat))[0]).toContain("Sent. The server answered 200 OK (text/plain).");
+	it("the box resolves no outside name, has no route out, and trusts the banda authority alone", async () => {
+		const env = box.env(undefined, box.egress?.env(90_005));
+		expect((await sh(env, `getent hosts ${ECHO_HOST} || echo none`)).out).toBe("none");
+		expect((await sh(env, "getent hosts example.com || echo none")).out).toBe("none");
+		expect(
+			(await sh(env, `curl -sS -m 5 --noproxy '*' http://${echo.address}:8080/ 2>&1; echo " code=$?"`)).out,
+		).toMatch(/code=(7|28)$/);
+		const tls = await sh(env, `curl -sv -m 20 https://${ECHO_HOST}:8080/ -o /dev/null 2>&1 || true`);
+		expect(tls.out).toMatch(/issuer: (CN|O)=banda/);
+		expect(tls.out).toContain("SSL certificate verify ok");
+		expect((await sh(env, "grep -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt")).out).toBe("1");
+		expect((await sh(env, "ls /etc/ssl/certs")).out).toBe("ca-certificates.crt");
+		// a server a command starts on the box's loopback (a project's own tests) is reached directly, not refused
+		const local = await sh(
+			env,
+			"python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 1; " +
+				"curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/; kill %1",
+		);
+		expect(local.out).toBe("200");
+	});
 
-			// what came back changes nothing the chat may do: the same route goes within the permission, unasked, and its
-			// reads still pass
-			const second = await say("again", post.replace("/42?", "/43?"), thread);
-			expect((await nextAsk(second.turn)).wait).toBeUndefined();
-			expect(echoed().slice(before)).toHaveLength(2);
-			const read = await sh(
-				box.env(undefined, box.egress?.env(first.chat)),
-				`curl -sS -m 20 -o /dev/null -w '%{http_code}' http://${ECHO_HOST}:8080/page`,
-			);
-			expect(read.out).toBe("200");
-		});
+	it("refuses private ranges, address tricks, a Host naming another server, and a login it did not mark", async () => {
+		const env = box.env(undefined, box.egress?.env(90_006));
+		const before = echoed().length;
+		const refused = [
+			"http://127.0.0.1/",
+			"http://0x7f.1/",
+			"http://2130706433/",
+			"http://017700000001/",
+			"http://[::ffff:127.0.0.1]/",
+			"http://[::ffff:7f00:1]/",
+			"http://169.254.169.254/latest/meta-data/",
+			"http://[64:ff9b::a9fe:a9fe]/",
+			"http://10.0.0.1/",
+			"http://localhost/",
+			"http://proxy:8080/",
+			"http://host.docker.internal/",
+		];
+		for (const url of refused) {
+			const got = await sh(env, `curl -sS -m 20 --noproxy '' '${url}'; echo " code=$?"`);
+			expect(got.out, url).toMatch(/^banda: .*(not on the public internet|not a valid address|does not resolve)/);
+		}
+		const mismatch = await sh(env, `curl -sS -m 20 http://${ECHO_HOST}:8080/ -H 'Host: example.com'`);
+		expect(mismatch.out).toContain("its Host names example.com");
+		const tunnel = await sh(env, `curl -sS -m 20 https://${ECHO_HOST}:8080/ -H 'Host: example.com'`);
+		expect(tunnel.out).toContain("its Host names example.com");
+		// the proxy the box reaches, with a password the daemon never gave
+		const marked = new URL(String(box.egress?.env(90_006).http_proxy));
+		marked.password = "0".repeat(32);
+		const forged = await sh(
+			box.env(undefined, { http_proxy: marked.href }),
+			`curl -sS -m 20 -o /dev/null -w '%{http_code}' http://${ECHO_HOST}:8080/`,
+		);
+		expect(forged.out).toBe("407");
+		expect(echoed().length).toBe(before);
+	});
 
-		it("the box destroyed mid-chat: the command fails, the next one runs in a box made again", async () => {
-			const thread = randomUUID();
-			const first = await say("wait a while", "sleep 30; echo slept", thread);
-			await until(async () => {
-				const { out } = await sh(box.env(), "pgrep -f '^sleep 30$' || true");
-				return out !== "";
-			});
-			await realBox.destroy(home);
-			await until(() => done(first.turn));
-			const [lost] = await results(first.chat);
-			expect(lost).not.toContain("slept");
-			const second = await say("are you back?", "echo back; ls /etc/ssl/certs", thread);
-			await until(() => done(second.turn));
-			const after = await results(second.chat);
-			expect(after.at(-1)).toContain("back\nca-certificates.crt");
-			// still behind the proxy, never an open network
-			expect((await sh(box.env(), "getent hosts example.com || echo none")).out).toBe("none");
+	it("a write is held and listed; approved, the proxy sends it once, byte for byte; then its route goes unasked", async () => {
+		const before = echoed().length;
+		const post =
+			`printf 'hello\\nworld' | curl -sS -m 20 --data-binary @- -H 'Content-Type: text/plain' -H 'X-Custom: a b' ` +
+			`'http://${ECHO_HOST}:8080/v1/things/42?x=1'`;
+		const thread = randomUUID();
+		const first = await say("send it", post, thread);
+		const { wait } = await nextAsk(first.turn);
+		expect(wait?.ask).toMatchObject({
+			tool: "propose_send",
+			label: `send POST http://${ECHO_HOST}:8080/v1/things/42?x=1`,
+			args: { method: "POST", body: "hello\nworld", _route: `POST ${ECHO_HOST}:8080/v1/things/*` },
 		});
-	},
-);
+		// held, not sent: the server has seen nothing
+		expect(echoed().length).toBe(before);
+		// the card opens in the commit that stores the ticket, before the command's result is stored
+		await until(async () => (await results(first.chat)).length > 0);
+		const [bash] = await results(first.chat);
+		expect(bash).toMatch(/^banda: this request writes, so it waits for the owner: ticket t[0-9a-f]{10}/);
+		expect(bash).toContain(`Held, not sent: POST http://${ECHO_HOST}:8080/v1/things/42?x=1`);
+		await answer(harness, wait!.key, "approve", web, "bearer", { approving: { permission: { scope: "always" } } });
+		await until(() => done(first.turn));
+		const sent = echoed().slice(before);
+		expect(sent).toHaveLength(1);
+		const ticket = String((wait!.ask as { args: { [arg: string]: unknown } }).args._ticket);
+		const held = (await harness.snapshot(Tickets, context))!.tickets[ticket]!;
+		const exact =
+			`${held.method} ${held.path} HTTP/1.1\r\n${held.headers.map(([k, v]) => `${k}: ${v}\r\n`).join("")}\r\n` +
+			Buffer.from(held.body, "base64").toString("latin1");
+		expect(sent[0]).toBe(exact);
+		expect(sent[0]).toMatch(/^POST \/v1\/things\/42\?x=1 HTTP\/1\.1\r\n/);
+		expect(sent[0]).toContain("X-Custom: a b\r\n");
+		expect(sent[0]?.endsWith("\r\n\r\nhello\nworld")).toBe(true);
+		expect((await told(first.chat))[0]).toContain("Sent. The server answered 200 OK (text/plain).");
+
+		// what came back changes nothing the chat may do: the same route goes within the permission, unasked, and its
+		// reads still pass
+		const second = await say("again", post.replace("/42?", "/43?"), thread);
+		expect((await nextAsk(second.turn)).wait).toBeUndefined();
+		expect(echoed().slice(before)).toHaveLength(2);
+		const read = await sh(
+			box.env(undefined, box.egress?.env(first.chat)),
+			`curl -sS -m 20 -o /dev/null -w '%{http_code}' http://${ECHO_HOST}:8080/page`,
+		);
+		expect(read.out).toBe("200");
+	});
+
+	it("the box destroyed mid-chat: the command fails, the next one runs in a box made again", async () => {
+		const thread = randomUUID();
+		const first = await say("wait a while", "sleep 30; echo slept", thread);
+		await until(async () => {
+			const { out } = await sh(box.env(), "pgrep -f '^sleep 30$' || true");
+			return out !== "";
+		});
+		await realBox.destroy(home);
+		await until(() => done(first.turn));
+		const [lost] = await results(first.chat);
+		expect(lost).not.toContain("slept");
+		const second = await say("are you back?", "echo back; ls /etc/ssl/certs", thread);
+		await until(() => done(second.turn));
+		const after = await results(second.chat);
+		expect(after.at(-1)).toContain("back\nca-certificates.crt");
+		// still behind the proxy, never an open network
+		expect((await sh(box.env(), "getent hosts example.com || echo none")).out).toBe("none");
+	});
+});

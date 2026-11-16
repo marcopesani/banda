@@ -26,12 +26,12 @@ import {
 	getCurrentTools,
 	type Message,
 } from "@earendil-works/pi-ai";
-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from "vitest";
+import { afterAll, beforeAll, expect, it, onTestFailed } from "vitest";
 import type { Status } from "../src/core/status.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
 import type { Item, ItemPage, Posted, ViewEvent } from "../src/server/api.ts";
-import { realBox, type Site } from "./fixtures/real-box.ts";
+import { boxSuite, realBox, type Site } from "./fixtures/real-box.ts";
 import { until } from "./helpers.ts";
 
 /** The stand-in site: each request it gets printed base64 (`METHOD path body`); its key printed at the start. */
@@ -106,7 +106,7 @@ http.server.ThreadingHTTPServer((os.environ["BIND"], 8080), H).serve_forever()
 /** A step of the model's plan: the call it makes, from the last result it read; undefined ends the run. */
 type Step = (last: string) => [string, Record<string, unknown>] | undefined;
 
-describe.skipIf(realBox.missing !== undefined)(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
+boxSuite(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
 	const tag = randomUUID().slice(0, 8);
 	const HOST = realBox.host("shop");
 	const SHOP = `http://${HOST}:8080`;

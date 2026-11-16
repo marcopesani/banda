@@ -27,7 +27,7 @@ import { items } from "../src/server/transcript.ts";
 import { view } from "../web/src/lib/chat.ts";
 import { changeWords } from "../web/src/lib/segments/changes.ts";
 import { hostBox } from "./fixtures/host-box.ts";
-import { realBox } from "./fixtures/real-box.ts";
+import { boxSuite, realBox } from "./fixtures/real-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway } from "./helpers.ts";
 
 const owner: Origin = { gateway: "fake", peer: OWNER };
@@ -319,7 +319,7 @@ describe("the file limit", () => {
 	});
 });
 
-describe.skipIf(realBox.missing !== undefined)(`the ${realBox.kind} box`, () => {
+boxSuite(`the ${realBox.kind} box`, () => {
 	it("bash runs in the box without asking", async () => {
 		const s = await open(realBox.setup);
 		s.script(s.call("bash", { command: "id -u; pwd; echo note > n.txt" }), fauxAssistantMessage("Done."));

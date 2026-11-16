@@ -15,6 +15,7 @@ import { constants } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { describe } from "vitest";
 import { type BoxKind, type BoxSetup, defaultBox } from "../../src/box/box.ts";
 import { boxParts, containerBox, dockerAvailable, removeContainerBox } from "../../src/box/container.ts";
 import { homeComputers, microvmBox } from "../../src/box/microvm.ts";
@@ -331,3 +332,6 @@ const computerBox: RealBox = {
 };
 
 export const realBox: RealBox = kind === "container" ? container : computerBox;
+
+/** A suite of the real box: skipped where there is none, unless one was named (then it failed above). */
+export const boxSuite = describe.skipIf(missing !== undefined);

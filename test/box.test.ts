@@ -11,7 +11,7 @@ import { registerEnvConformance } from "@earendil-works/pi-durable/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Box, openBox } from "../src/box/box.ts";
 import { context } from "../src/core/store.ts";
-import { realBox } from "./fixtures/real-box.ts";
+import { boxSuite, realBox } from "./fixtures/real-box.ts";
 import { until } from "./helpers.ts";
 
 /** A home for the whole file: the shared helper's are removed after each test, under a running box. */
@@ -51,7 +51,7 @@ function conformance(name: string, box: () => Box, root: () => string) {
 	);
 }
 
-describe.skipIf(realBox.missing !== undefined)(`the box (${realBox.kind})`, () => {
+boxSuite(`the box (${realBox.kind})`, () => {
 	let home: string;
 	let box: Box;
 	beforeAll(async () => {
