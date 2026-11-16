@@ -122,7 +122,11 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 	let home: string;
 	let box: Box;
 	let forge: Site;
-	/** Why git cannot run in this box, or undefined: the computer banda ships boots without it (agents install into /tools). */
+	/**
+	 * Why git cannot run in this box, or undefined. The computer banda ships boots without it (agents install into
+	 * /tools), so its run stages one there (`BANDA_TEST_BOX_TOOLS`); without one the cases that run git skip, saying so,
+	 * unless the box was named: then they fail.
+	 */
 	let noGit: string | undefined;
 	let harness: Harness;
 	let stopPermissions: (() => Promise<void>) | undefined;
@@ -194,8 +198,24 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 		stopPermissions = await onPermissions(harness, tell);
 		// the box up (the first run builds or loads both images), then the forge beside its proxy
 		expect((await sh(box.env(), "true")).code).toBe(0);
-		if ((await sh(box.env(), "command -v git")).code !== 0)
-			noGit = `the ${realBox.kind} box has no git: its image ships none, and a test installs nothing into /tools`;
+		// a file put in /tools from outside shows in the box within a moment, not always at once
+		const staged = await realBox.tools(home);
+		let tries = staged ? 50 : 1;
+		for (;;) {
+			const git = await sh(box.env(), "git --version 2>&1");
+			if (git.code === 0) break;
+			tries -= 1;
+			if (tries > 0) {
+				await new Promise((resolve) => setTimeout(resolve, 200));
+				continue;
+			}
+			noGit = staged
+				? `the git staged in /tools of the ${realBox.kind} box does not run: ${git.out}`
+				: `the ${realBox.kind} box has no git: its image ships none, and BANDA_TEST_BOX_TOOLS names no folder ` +
+					"that holds one for /tools (test/fixtures/box-git.sh stages it)";
+			if (staged || realBox.named) throw new Error(noGit);
+			break;
+		}
 		forge = await realBox.site(home, {
 			labels: ["forge"],
 			image: "box",

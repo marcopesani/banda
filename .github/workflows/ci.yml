@@ -112,6 +112,9 @@ jobs:
         with:
           path: release/cache/computer/runtime
           key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
+      # The computer's box image carries no git: the git suite puts one in /tools, as an agent installs it there.
+      - name: Stage git for the computer's /tools
+        run: sh test/fixtures/box-git.sh "$(node -p 'require("./computer/manifest.json").box.ref')" "$RUNNER_TEMP/box-tools"
       # As the release verifies the computer: this account joins the kvm group, and the suites run in a fresh session
       # that has it. An ACL on /dev/kvm is not enough on this runner (the release's start diagnostic: the ACL arm's
       # machine aborts before its relay, the group arm's starts).
@@ -139,6 +142,7 @@ jobs:
           sudo -n -u "$(id -un)" -- /usr/bin/env -i \
             "PATH=$(dirname "$(command -v node)"):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
             "HOME=$HOME" LANG=C.UTF-8 CI=true GITHUB_ACTIONS=true "BANDA_TEST_SITE=$BANDA_TEST_SITE" \
+            "BANDA_TEST_BOX_TOOLS=$RUNNER_TEMP/box-tools" \
             npm run test:computer -- --reporter=default --reporter=junit --outputFile.junit="$RUNNER_TEMP/computer-evidence/junit.xml"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

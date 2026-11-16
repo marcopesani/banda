@@ -4,6 +4,9 @@
  * (`serve --box container`). Unset, it is the platform's default box. A box named must be there: the suite fails when it
  * is not, so a missing runtime is never a pass. Unset, a suite skips where there is none, as on a development machine.
  *
+ * The computer's box image carries less than the container's (no git, python3 or procps: agents install into /tools),
+ * so `BANDA_TEST_BOX_TOOLS` names a folder of software to put in a home's /tools (test/fixtures/box-git.sh makes git's).
+ *
  * Each suite also gets a stand-in site for the internet beside the proxy, so no test needs the real network: in Docker a
  * container on a network of public addresses (11.x, routed nowhere) that the proxy joins; on the computer a server on
  * this machine at such an address, which CI gives a dummy interface and names in /etc/hosts (site-names.ts).
@@ -12,7 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { constants } from "node:fs";
-import { access, copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, copyFile, cp, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe } from "vitest";
@@ -52,6 +55,8 @@ export type RealBox = {
 	readonly kind: Kind;
 	/** Why it cannot run here, or undefined when it can. */
 	readonly missing: string | undefined;
+	/** Whether `BANDA_TEST_BOX` named it: then no case may skip for want of something, it fails instead. */
+	readonly named: boolean;
 	setup(home: string): BoxSetup;
 	/** Remove the home's box and what it keeps outside the home. */
 	remove(home: string): Promise<void>;
@@ -67,6 +72,11 @@ export type RealBox = {
 	host(label: SiteLabel): string;
 	/** Bring up a stand-in site beside the proxy of the home's box, which is up, and wait until the proxy reaches it. */
 	site(home: string, spec: SiteSpec): Promise<Site>;
+	/**
+	 * Put what `BANDA_TEST_BOX_TOOLS` names into /tools of the home's box, which is up, as software an agent installed
+	 * there; whether it put any. Nothing for a box whose image carries what the suites run, or where it is unset.
+	 */
+	tools(home: string): Promise<boolean>;
 	/** Give the home the browser's pinned archive, so starting the browser needs no network (the computer downloads it). */
 	offlineBrowser(home: string): Promise<void>;
 };
@@ -257,6 +267,7 @@ async function computerSite(spec: SiteSpec): Promise<Site> {
 const container: RealBox = {
 	kind: "container",
 	missing,
+	named: requested !== undefined,
 	setup: containerBox,
 	remove: removeContainerBox,
 	exec: async (home, part, command) => docker(["exec", boxParts(home)[part], "sh", "-c", command]),
@@ -271,6 +282,8 @@ const container: RealBox = {
 	uid: process.getuid?.() ?? 0,
 	host: containerHost,
 	site: containerSite,
+	// its image carries git and the rest the suites run
+	tools: async () => false,
 	// the container's browser is a target of the box's image, built on this machine
 	offlineBrowser: async () => {},
 };
@@ -278,6 +291,7 @@ const container: RealBox = {
 const computerBox: RealBox = {
 	kind: "microvm",
 	missing,
+	named: requested !== undefined,
 	setup: microvmBox,
 	remove: async (home) => {
 		await (await homeComputers(home)).removeAll();
@@ -313,6 +327,13 @@ const computerBox: RealBox = {
 			await site.close();
 			throw error;
 		}
+	},
+	tools: async (home) => {
+		const staged = process.env.BANDA_TEST_BOX_TOOLS;
+		if (staged === undefined || staged === "") return false;
+		// /tools is this folder of the home, mounted in (DESIGN.md "The box")
+		await cp(staged, join(await realpath(home), "computer", "tools"), { recursive: true, verbatimSymlinks: true });
+		return true;
 	},
 	offlineBrowser: async (home) => {
 		const { browser } = await installedMicrovmAssets();
