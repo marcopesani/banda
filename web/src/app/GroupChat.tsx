@@ -44,7 +44,7 @@ import { useHarnessMenu } from "./HarnessSession.tsx";
 import { harnessActivity } from "./harness-activity.ts";
 import { MessageObjects, MessageText } from "./Objects.tsx";
 import { useSkills } from "./Skills.tsx";
-import { noneWorking, workingMembers } from "./working-members.ts";
+import { lineMembers, noneWorking, workingMembers } from "./working-members.ts";
 
 /** A message's markdown with each agent it mentions as a link, which `Markdown` draws as its chip. */
 function linkedMentions(text: string, ids: readonly string[], known: readonly ChatAgent[]): string {
@@ -136,11 +136,30 @@ export function GroupChat({
 		working.flatMap((member) => (member.id === undefined ? [] : [member.id])),
 		latest,
 	);
-	const onLine = atWork.map((member) => ({ ...whoOf(known, member), id: member }));
-	const lineTargets = onLine.flatMap((member) => {
-		const chat = executions[member.id];
-		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
-	});
+	// the lines at the foot: who works, saying its work; and who waits on the owner, whose ask is open, saying so
+	const lines = lineMembers(
+		atWork,
+		(group?.asks ?? []).map((ask) => ask.agent),
+	);
+	const lineOf = (ids: readonly string[]) => {
+		const who = ids.map((member) => ({ ...whoOf(known, member), id: member }));
+		const targets = who.flatMap((member) => {
+			const chat = executions[member.id];
+			return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
+		});
+		return {
+			who,
+			onOpen:
+				targets.length === 0
+					? undefined
+					: (line: HTMLElement) => {
+							openedFrom.current = line;
+							setActivity(targets);
+						},
+		};
+	};
+	const workLine = lineOf(lines.working);
+	const waitLine = lineOf(lines.waiting);
 	const coding = useHarnessMenu(delegated.sessions, delegated.waiting);
 
 	const others = agents
@@ -315,17 +334,8 @@ export function GroupChat({
 								)}
 							</Run>
 						))}
-						<WorkingLine
-							who={onLine}
-							onOpen={
-								lineTargets.length === 0
-									? undefined
-									: (line) => {
-											openedFrom.current = line;
-											setActivity(lineTargets);
-										}
-							}
-						/>
+						<WorkingLine who={workLine.who} onOpen={workLine.onOpen} />
+						<WorkingLine who={waitLine.who} text="Waiting on you" waiting onOpen={waitLine.onOpen} />
 					</ConversationContent>
 					<OpenAt at={at} ready={group !== undefined} />
 					<div className="relative">

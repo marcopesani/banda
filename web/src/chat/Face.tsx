@@ -15,6 +15,9 @@ export type FaceSize = keyof typeof FACE_SIZE | "text";
 const moodOf = (state: FaceState | undefined): AvatarMotion =>
 	state === "working" ? "thinking" : state === "happy" ? "happy" : "idle";
 
+/** The still dot that marks what waits on the owner: on a face in the band's rows and the feed, and on the coding-session count. */
+export const WAITING_DOT = "size-2 rounded-full bg-ink ring-2 ring-paper";
+
 export function Face({
 	face,
 	name,
@@ -66,9 +69,7 @@ export function Face({
 					mood={moodOf(state)}
 				/>
 			</span>
-			{asks && (
-				<span aria-hidden="true" className="absolute right-0 bottom-0 size-2 rounded-full bg-ink ring-2 ring-paper" />
-			)}
+			{asks && <span aria-hidden="true" className={cn("absolute right-0 bottom-0", WAITING_DOT)} />}
 		</span>
 	);
 }
@@ -135,12 +136,7 @@ export function FaceStack({
 					+{faces.length - shown.length}
 				</span>
 			)}
-			{waiting && (
-				<span
-					aria-hidden="true"
-					className="absolute right-0 bottom-0 z-20 size-2 rounded-full bg-ink ring-2 ring-paper"
-				/>
-			)}
+			{waiting && <span aria-hidden="true" className={cn("absolute right-0 bottom-0 z-20", WAITING_DOT)} />}
 		</span>
 	);
 }

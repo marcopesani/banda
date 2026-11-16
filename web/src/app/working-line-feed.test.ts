@@ -152,3 +152,23 @@ it("puts no face on a reply in a direct chat", () => {
 	expect(faces(html)).toBe(1);
 	expect(html.indexOf('role="img"')).toBeGreaterThan(html.indexOf("data-working-line"));
 });
+
+it("while its own ask waits on the owner, the line stays and says so: still, dotted, and named for who waits", () => {
+	const waiting: Segment = { kind: "working", key: "working", text: "Waiting on you", waiting: true };
+	const html = render([asked, waiting]);
+	expect(line(html)).toBe(true);
+	expect(html).toContain("data-waiting");
+	expect(html).toContain('aria-label="Mara is waiting on you"');
+	expect(html).not.toContain("is working");
+	expect(words(html)).toBe("Waiting on you");
+	// the face rests and carries the waiting dot; nothing shimmers
+	expect(html).toContain('aria-label="Mara, waiting on you" data-state="waiting"');
+	expect(html).not.toContain('data-state="working"');
+	expect(html).not.toContain("sa-shimmer");
+	// answered, it works on: the line says work again, and nothing of waiting
+	const after = render([asked, working]);
+	expect(after).not.toContain("data-waiting");
+	expect(after).toContain('aria-label="Mara is working: Working…"');
+	// and once the turn ended, no line
+	expect(line(render([asked, reply]))).toBe(false);
+});

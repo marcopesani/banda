@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { defaultAvatarFace } from "../../../src/core/avatar-face.ts";
+import { HarnessMenu } from "./Harness.tsx";
 import { Header } from "./Header.tsx";
 
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").trim();
@@ -34,4 +35,27 @@ it("delegated work keeps its own control, and says there that it waits", () => {
 	);
 	expect(html).toContain('aria-label="Waiting on you: 1 coding session"');
 	expect(html).toMatch(/<h1[^>]*>Mara<\/h1><\/div>/);
+});
+
+it("the coding-session count carries a still dot while one waits on the owner, and says so in its name", () => {
+	const menu = (waiting: boolean, count = 2) => {
+		const props: Parameters<typeof HarnessMenu>[0] = {
+			count,
+			waiting,
+			open: false,
+			onOpenChange: () => {},
+			children: [],
+		};
+		return renderToStaticMarkup(createElement(HarnessMenu, props));
+	};
+	const waiting = menu(true);
+	expect(waiting).toContain('aria-label="Waiting on you: 2 coding sessions"');
+	expect(waiting).toContain("data-waiting");
+	expect(waiting).toMatch(/<span aria-hidden="true" class="[^"]*rounded-full bg-ink[^"]*"><\/span>/);
+	expect(waiting).not.toMatch(/animate-/);
+	expect(text(waiting)).toBe("2");
+	const working = menu(false, 1);
+	expect(working).toContain('aria-label="1 coding session"');
+	expect(working).not.toContain("data-waiting");
+	expect(working).not.toContain("bg-ink");
 });

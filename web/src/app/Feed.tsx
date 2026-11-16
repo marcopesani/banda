@@ -460,8 +460,9 @@ export function FeedView({
 	const failed = tryAgainAfter(segments);
 	let run: { side: "owner" | "agent"; items: ReactNode[]; at?: number | undefined; key: string } | undefined;
 	let lastDay: string | undefined;
-	// the working segment: the line at the foot says what the agent does, for as long as it works
-	let working: string | undefined;
+	// the working segment: the line at the foot says what the agent does, for as long as it works, or that it waits on
+	// the owner
+	let working: Extract<Segment, { kind: "working" }> | undefined;
 	const flush = () => {
 		if (run === undefined) return;
 		nodes.push(
@@ -483,7 +484,7 @@ export function FeedView({
 	const firstUnread = lastRead < 0 ? -1 : segments.findIndex((segment, index) => index > lastRead && counts(segment));
 	segments.forEach((segment, index) => {
 		if (segment.kind === "working") {
-			working = segment.text;
+			working = segment;
 			return;
 		}
 		const at = atOf(segment);
@@ -644,7 +645,15 @@ export function FeedView({
 		);
 	}
 	if (working !== undefined)
-		nodes.push(<WorkingLine key="working" who={[who]} text={working} onOpen={onWorkingLine} />);
+		nodes.push(
+			<WorkingLine
+				key="working"
+				who={[who]}
+				text={working.text}
+				waiting={working.waiting === true}
+				onOpen={onWorkingLine}
+			/>,
+		);
 	return <>{nodes}</>;
 }
 

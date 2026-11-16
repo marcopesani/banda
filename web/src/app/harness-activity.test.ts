@@ -79,6 +79,28 @@ it("counts simultaneous sessions and keeps an approval first in the picker", () 
 	expect(active.waiting).toBe(true);
 	expect(active.sessions.map((session) => session.task)).toEqual([2, 1]);
 });
+it("waits on the owner while any session in the chat asks, and only while one does", () => {
+	const ask = (id: string) => ({ id, kind: "execute", command: "npm test" });
+	const first = { ...one, task: 1, state: "waiting" as const, asks: [ask("a")] };
+	const second = { ...one, task: 2, state: "waiting" as const, asks: [ask("b")] };
+	expect(harnessActivity([first, second], [3]).waiting).toBe(true);
+	// one answered: the other still waits
+	expect(harnessActivity([{ ...first, state: "working" as const, asks: [] }, second], [3]).waiting).toBe(true);
+	// both answered: nothing waits, and both still work
+	const answered = harnessActivity(
+		[
+			{ ...first, state: "working" as const, asks: [] },
+			{ ...second, state: "working" as const, asks: [] },
+		],
+		[3],
+	);
+	expect(answered).toMatchObject({ waiting: false });
+	expect(answered.sessions).toHaveLength(2);
+	// a session that ended with an ask still listed waits on no one
+	expect(harnessActivity([{ ...first, state: "stopped" as const, ended: 2 }], [3]).waiting).toBe(false);
+	// nor does another chat's
+	expect(harnessActivity([first], [4]).waiting).toBe(false);
+});
 it("labels an ask's buttons by its kind, never by the harness's own option names", () => {
 	expect(askWords("execute")).toEqual({ what: "Run a command", verb: "Run", no: "Don't run" });
 	expect(askWords("edit")).toEqual({ what: "Change a file", verb: "Allow", no: "Don't change" });

@@ -2,8 +2,9 @@
  * What the app shows of an agent's work around an ask, in the actual app against a temporary daemon with a held faux
  * model and a held effect: an approval allowed on its card, one declined, one allowed whose run then fails, a question
  * answered on its card, one answered by typing, and one whose run was stopped. While the ask is open the agent waits
- * on the owner and no line says it works; once the owner answered, the working line says it works again, with its
- * words until it shows something and as its face alone after, until its turn ends. The band's row says the same with
+ * on the owner and the working line says so ("Waiting on you", its face still), never that it works; once the owner
+ * answered, the line says it works again, with its words, until its turn ends; the header holds the name alone
+ * throughout. The band's row says the same with
  * its face. Each run is held where the page is looked at, so nothing here waits on a clock. The effect only waits;
  * nothing leaves the machine.
  */
@@ -183,7 +184,9 @@ afterAll(async () => {
 
 const line = `document.querySelector('[data-working-line]')`;
 /** The line with its words: the agent works, and nothing says more of what it does. */
-const saying = `(${line}?.innerText.trim() === 'Working…')`;
+const saying = `(${line}?.innerText.trim() === 'Working…' && !${line}.hasAttribute('data-waiting'))`;
+/** The line while the agent waits on the owner: its words say so, its face rests with the dot, its name says who waits. */
+const waitingLine = `(${line}?.dataset.waiting === '' && ${line}.innerText.trim() === 'Waiting on you' && ${line}.querySelector('[role="img"]')?.dataset.state === 'waiting' && ${line}.querySelector('[aria-label]')?.getAttribute('aria-label') === 'Sancho is waiting on you')`;
 /** The line below what the agent showed, its words and its moving face still with it: it works on. */
 const worksOnSaying = `(${saying} && ${line}.querySelector('[role="img"]')?.dataset.state === 'working' && [...document.querySelectorAll('[data-message-bubble]')].every((b) => b.getBoundingClientRect().bottom <= ${line}.getBoundingClientRect().top))`;
 const button = (words: string) =>
@@ -266,11 +269,21 @@ async function worksOn(page: Page, marker: string, width: number, name: string) 
 	expect(page.errors()).toEqual([]);
 }
 
-/** The ask open: the agent waits on the owner, and nothing says it works. */
+/** The ask open: the agent waits on the owner, the line says so, and nothing says it works. */
 async function waitsOnOwner(page: Page, width: number, name: string) {
 	await until(async () => (await state()) === "waiting");
 	await page.until(`!!document.querySelector('[data-open-ask]')`);
-	expect.soft(await page.run(`!${line}`), "no working line while it waits on the owner").toBe(true);
+	expect.soft(await seen(page, waitingLine), "the line says it waits on the owner").toBe(true);
+	// at the foot, below the ask, where the working line stands once the ask is answered
+	expect
+		.soft(
+			await page.run(
+				`document.querySelector('[data-open-ask]').getBoundingClientRect().bottom <= ${line}.getBoundingClientRect().top`,
+			),
+			"the waiting line stands below the ask",
+		)
+		.toBe(true);
+	expect.soft(await page.run(`!/working/i.test(${line}.innerText)`), "nothing says it works while it waits").toBe(true);
 	// the ask's card says it waits, and the row: the header holds the name alone, so answering moves nothing
 	expect.soft(await page.run(nameAlone), "the header holds the name alone while it waits").toBe(true);
 	expect.soft(await page.run(`!/waiting/i.test(${header}.innerText)`), "the header says nothing of the ask").toBe(true);

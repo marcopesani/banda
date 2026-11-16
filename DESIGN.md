@@ -141,7 +141,7 @@ one that gives them one more thing to manage stays out.
   Agent chats, groups, settings and artifacts share a 48px title bar. The agent's face, two faces for a group, or
   the page's icon sits in the same slot before the title. Detail pages link back to their parent in the title bar.
   A chat's title bar holds its name alone, nothing beneath it: what needs the owner's attention is an ask's card in
-  the feed, and the feed's working line shows when an agent works. Tapping the chat's name opens the panel
+  the feed, and the feed's working line shows when an agent works or waits on the owner. Tapping the chat's name opens the panel
   on the phone and toggles it on the desktop. The owner's messages sit on
   the right in ink-filled bubbles, the agent's on the left as bubbles, its face and name above each run of consecutive
   messages (on the phone the face alone, the name once at the top); day separators; an unread divider where the owner
@@ -159,8 +159,10 @@ one that gives them one more thing to manage stays out.
   do now, in words: what the running tool does ("Reading notes.md…", "Running a command…"), "Thinking…" while the
   model thinks, and "Working…" when nothing says more. The words stay for the whole of the work, after what the agent
   showed and after the owner answered an ask, and change as the work does; they never say a tool that ended or a
-  step that did not happen. An agent that waits on the owner is off the line, as its ask says so; one at work beside
-  an open ask it does not wait on stays. The line goes once no one is left on it. A tap opens their activity. The feed has no other
+  step that did not happen. An agent whose own ask waits on the owner, with nothing at work beside it, stays on the
+  line saying "Waiting on you", its face still and dotted and its words still, in the same place its work is said
+  once the owner answers; one at work beside an open ask it does not wait on says its work. In a group each member is
+  said as it is: those at work on the working line, those whose ask is open on a waiting line beneath it. The line goes once no one is left on it. A tap opens their activity. The feed has no other
   working sign, never a tool row, never typing dots, and a reply carries
   no face it did not have before. Any message can be copied. Every destructive action (forgetting a fact, removing a member,
   taking back a permission, archiving an agent) asks first, in its own verb, with a way to keep things as they are. A reply that
@@ -333,7 +335,7 @@ and from groups' mentions. Its definition, chat, memory and artifacts remain; Se
 it shows its current connections for review; old permissions and paused routines and watches do not silently return.
 
 The agent climbs a ladder before it asks the owner: what it already knows, a connection, a search, the browser, and
-the owner last. **Pause routines** on an agent holds its routines and watches, and its face dims to say so; Pause
+the owner last. **Pause routines** on an agent holds its routines and watches, and its face in the band's row dims to say so; Pause
 all routines, in Settings, holds every agent's. The owner's own messages always run. The daemon stops a chat's run when
 asked (`POST /chats/<chat>/stop`), and in a group one member's work or everyone's (`POST /groups/<room>/stop`); the
 app offers no Stop for a chat or a group; the browser's take-over and a harness session keep theirs (see The browser,
@@ -553,8 +555,8 @@ naming one that is not there answers with those that are.
   back; a step that arrives while it is open never arrives expanded, and opening one never jumps the view. Each ask
   is a card under the session's; several may be
   open at once, and each lives as long as the harness's process. The header shows delegated work from its recorded state
-  as a count of its sessions that opens their activity (several have a picker), and the count's name says when one
-  waits on the owner; nothing is said beneath the chat's name, of a session's work or of its asks, so the name never
+  as a count of its sessions that opens their activity (several have a picker); while any of them waits on the owner
+  the count carries the face's still dot and its name says so; nothing is said beneath the chat's name, of a session's work or of its asks, so the name never
   moves as an ask opens and is answered. Stop answers them all, and before the ask was sent,
   stops it from being sent. The owner steers in their own words: a note is sent to the harness as a
   prompt it takes after its current step. Stop cancels the turn, and a harness that has not ended it within seconds is

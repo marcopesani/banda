@@ -166,7 +166,13 @@ type CoreSegment =
 			readonly burst?: number;
 			readonly at: number;
 	  }
-	| { readonly kind: "working"; readonly key: "working"; readonly text: string };
+	| {
+			readonly kind: "working";
+			readonly key: "working";
+			readonly text: string;
+			/** The run waits on the owner: an ask of its own is open, and nothing beside it is at work. */
+			readonly waiting?: true;
+	  };
 
 /**
  * The live state of a chat: whether it runs, its tool calls running, whether it is thinking now, and the owner's
@@ -365,10 +371,10 @@ const undeliveredResult = (result: Extract<Item, { role: "tool" }> | undefined) 
 
 /**
  * The line for work in progress, in the words shown: the running call's own ("Reading notes.md…"), else "Thinking…",
- * else "Working…". None while the run waits on the owner: a call of its own opened an ask still open, and no call the
- * model made beside it is at work. An ask no call of this run opened holds none of its work back (a held request's, or
- * a routine's run's, shown here), and a call at work beside the one that asks is work: the ask's card says what waits,
- * and the line that the agent goes on.
+ * else "Working…". "Waiting on you" while the run waits on the owner: a call of its own opened an ask still open, and
+ * no call the model made beside it is at work. An ask no call of this run opened holds none of its work back (a held
+ * request's, or a routine's run's, shown here), and a call at work beside the one that asks is work: the ask's card
+ * says what waits, and the line that the agent goes on.
  *
  * `requests` says which of the model's requests made each call. Only a call of the same request as the one that asks
  * is beside it: a run asks the model again only once every call of a request ended, so a running call of any other
@@ -378,7 +384,7 @@ export function workingLine(
 	live: Live,
 	waits: readonly Pick<ShownWait, "call" | "displayChat">[],
 	requests: ReadonlyMap<string, number> = new Map(),
-): string | undefined {
+): { readonly text: string; readonly waiting?: true } | undefined {
 	if (!live.busy) return undefined;
 	const asking = waits.flatMap((wait) =>
 		wait.call === undefined || wait.displayChat !== undefined ? [] : [wait.call],
@@ -391,10 +397,10 @@ export function workingLine(
 					const request = requests.get(tool.call);
 					return !asking.includes(tool.call) && request !== undefined && asked.has(request);
 				});
-	if (asking.length > 0 && atWork.length === 0) return undefined;
+	if (asking.length > 0 && atWork.length === 0) return { text: "Waiting on you", waiting: true };
 	const doing = [...atWork].reverse().find((tool) => tool.doing !== undefined)?.doing;
-	if (doing !== undefined) return `${doing.replace(/^\p{Ll}/u, (first) => first.toUpperCase())}…`;
-	return live.thinking ? "Thinking…" : "Working…";
+	if (doing !== undefined) return { text: `${doing.replace(/^\p{Ll}/u, (first) => first.toUpperCase())}…` };
+	return { text: live.thinking ? "Thinking…" : "Working…" };
 }
 
 export function view(
@@ -642,7 +648,7 @@ export function view(
 		if (wait.call === undefined || !calls.has(wait.call))
 			segments.push(askSegment(`open:${wait.key}`, { ask: wait.ask, wait, label: wait.label }));
 	const line = workingLine(live, waits, requests);
-	if (line !== undefined) segments.push({ kind: "working", key: "working", text: line });
+	if (line !== undefined) segments.push({ kind: "working", key: "working", ...line });
 	const unanswered = unansweredAfter(items, segments, live, waits.length > 0);
 	if (unanswered !== undefined)
 		segments.push({ kind: "notice", key: `${unanswered}:unanswered`, text: "No answer to this" });

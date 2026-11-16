@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { noneWorking, workingMembers } from "./working-members.ts";
+import { lineMembers, noneWorking, workingMembers } from "./working-members.ts";
 
 const log = (latest: number, asking: string[] = []) => ({ latest, asking });
 
@@ -39,4 +39,15 @@ it("holds a member whose work ended until the log caught up with the row, then l
 	expect(workingMembers(since, log(3), [], 4)).toEqual(["mara"]);
 	expect(workingMembers(since, log(4), [], 4)).toEqual([]);
 	expect(since.size).toBe(0);
+});
+
+it("says each member as it is: those at work work, those whose ask is open wait, never the others", () => {
+	expect(lineMembers([], [])).toEqual({ working: [], waiting: [] });
+	expect(lineMembers([], ["mara"])).toEqual({ working: [], waiting: ["mara"] });
+	// two asks of one member: one face
+	expect(lineMembers([], ["mara", "sancho", "mara"])).toEqual({ working: [], waiting: ["mara", "sancho"] });
+	// one at work, another asking: each on its own line, the one at work never said to wait
+	expect(lineMembers(["sancho"], ["mara"])).toEqual({ working: ["sancho"], waiting: ["mara"] });
+	// the ask answered and the member back at work: work again, and no one waits
+	expect(lineMembers(["mara", "sancho"], [])).toEqual({ working: ["mara", "sancho"], waiting: [] });
 });

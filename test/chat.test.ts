@@ -286,25 +286,32 @@ describe("the chat, derived", () => {
 		]);
 	});
 
-	it("the working line: what the running call does, else thinking, else working; none while waiting or idle", () => {
+	it("the working line: what the running call does, else thinking, else working; waiting on the owner while its ask is open; none idle", () => {
 		const line = (live: Live, waits: ShownWait[] = []) => view([], waits, live).find((s) => s.kind === "working");
 		expect(line({ busy: true, running: [{ call: "a", doing: "reading notes.md" }], thinking: true })).toMatchObject({
 			text: "Reading notes.md…",
 		});
 		expect(line({ busy: true, running: [{ call: "m" }], thinking: true })).toMatchObject({ text: "Thinking…" });
 		expect(line({ busy: true, running: [], thinking: false })).toMatchObject({ text: "Working…" });
+		expect(line({ busy: true, running: [], thinking: false })).not.toHaveProperty("waiting");
 		expect(line(IDLE)).toBeUndefined();
 		const ask = { type: "question" as const, question: "?" };
-		// the run's one call asks: it waits on the owner
+		// the run's one call asks: it waits on the owner, and the line says so
 		expect(
 			line({ busy: true, running: [{ call: "q" }], thinking: false }, [
 				{ key: "k", chat: 1, call: "q", ask, deadline: 1 },
 			]),
-		).toBeUndefined();
+		).toMatchObject({ text: "Waiting on you", waiting: true });
 		// so does an ask whose call the page has not heard of yet
 		expect(
 			line({ busy: true, running: [], thinking: false }, [{ key: "k", chat: 1, call: "q", ask, deadline: 1 }]),
-		).toBeUndefined();
+		).toMatchObject({ text: "Waiting on you", waiting: true });
+		// answered, and the run works on: the line says work again, and nothing of waiting
+		const answered = line({ busy: true, running: [], thinking: true });
+		expect(answered).toMatchObject({ text: "Thinking…" });
+		expect(answered).not.toHaveProperty("waiting");
+		// answered, and the run ended: no line at all
+		expect(line(IDLE, [])).toBeUndefined();
 	});
 
 	it("the working line beside an open ask: work the ask does not hold back is said, and the ask stays to answer", () => {
@@ -333,11 +340,15 @@ describe("the chat, derived", () => {
 		};
 		const own: ShownWait = { key: "k1", chat: 1, call: "send", ask: approval, deadline: 1 };
 		expect(working(round, beside, [own])).toMatchObject({ text: "Running a command…" });
+		expect(working(round, beside, [own])).not.toHaveProperty("waiting");
 		expect(asks(round, beside, [own])).toBe(1);
 		// the call at work ended: only the ask is left, and the run waits on the owner
-		expect(working(round, { ...beside, running: [{ call: "send" }] }, [own])).toBeUndefined();
+		expect(working(round, { ...beside, running: [{ call: "send" }] }, [own])).toMatchObject({
+			text: "Waiting on you",
+			waiting: true,
+		});
 		expect(asks(round, { ...beside, running: [{ call: "send" }] }, [own])).toBe(1);
-		// a call of an earlier request still listed as running is one whose end the page has not heard yet: no work
+		// a call of an earlier request still listed as running is one whose end the page has not heard yet: it waits
 		const earlier: Item[] = [
 			user(1, "send it"),
 			{ id: 2, role: "assistant", text: "", calls: [{ id: "find", name: "tool_search", args: {} }] },
@@ -348,17 +359,19 @@ describe("the chat, derived", () => {
 			running: [{ call: "find", doing: "finding a tool" }, { call: "send" }],
 			thinking: false,
 		};
-		expect(working(earlier, stale, [own])).toBeUndefined();
-		// nor is anything, while the request that asked is not read yet
-		expect(working([], beside, [own])).toBeUndefined();
+		expect(working(earlier, stale, [own])).toMatchObject({ text: "Waiting on you", waiting: true });
+		// and so it does while the request that asked is not read yet
+		expect(working([], beside, [own])).toMatchObject({ text: "Waiting on you", waiting: true });
 		// an ask no call of this run opened (a held request's) holds none of its work back
 		const held: ShownWait = { key: "k2", chat: 1, ask: approval, deadline: 1 };
 		expect(working([], { busy: true, running: [], thinking: true }, [held])).toMatchObject({ text: "Thinking…" });
+		expect(working([], { busy: true, running: [], thinking: true }, [held])).not.toHaveProperty("waiting");
 		expect(asks([], { busy: true, running: [], thinking: true }, [held])).toBe(1);
 		// nor does a routine's run's, shown here: its call is another conversation's
 		const routine: ShownWait = { key: "k3", chat: 9, displayChat: 1, call: "send", ask: approval, deadline: 1 };
 		const command: Live = { busy: true, running: [{ call: "sh", doing: "running a command" }], thinking: false };
 		expect(working([], command, [routine])).toMatchObject({ text: "Running a command…" });
+		expect(working([], command, [routine])).not.toHaveProperty("waiting");
 		// and with nothing running here, an open ask alone says nothing of work
 		expect(working([], IDLE, [held])).toBeUndefined();
 		expect(working([], IDLE, [routine])).toBeUndefined();

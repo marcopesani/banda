@@ -560,7 +560,7 @@ export function HarnessSection() {
 			</Section>
 			<Section
 				id="harness-header"
-				note="Coding sessions at work: their count at the right of the header, which opens them. Below the name the header says nothing, of the work or of an ask."
+				note="Coding sessions at work: their count at the right of the header, which opens them, with a still dot while any of them waits on the owner. Below the name the header says nothing, of the work or of an ask."
 			>
 				<HarnessHeaderSample count={1} />
 				<HarnessHeaderSample count={1} waiting />

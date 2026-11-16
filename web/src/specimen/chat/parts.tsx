@@ -629,7 +629,7 @@ export function Parts() {
 			</Section>
 			<Section
 				id="working"
-				note="At the foot of the feed for as long as agents work: their faces, and what they do now in words: what the running tool does, Thinking…, or Working… when nothing says more. The words stay for the whole of the work, after what the agent showed too. A tap opens the activity. The header says nothing of the work."
+				note="At the foot of the feed for as long as agents work: their faces, and what they do now in words: what the running tool does, Thinking…, or Working… when nothing says more. The words stay for the whole of the work, after what the agent showed too. While an ask of its own waits on the owner, the line says Waiting on you, its faces still and dotted. A tap opens the activity. The header says nothing of the work."
 			>
 				<Group label="A chat with one agent">
 					<div className="flex max-w-xl flex-col gap-3">
@@ -655,6 +655,17 @@ export function Parts() {
 							<Bubble>The 9:15 is direct. Checking the way back.</Bubble>
 						</Run>
 						<WorkingLine who={[OCTO]} text="Using its browser…" onOpen={() => {}} />
+					</div>
+				</Group>
+				<Group label="Waiting on the owner's answer to an ask: the line stays, still">
+					<div className="flex max-w-xl flex-col gap-3">
+						<WorkingLine who={[OCTO]} text="Waiting on you" waiting onOpen={() => {}} />
+					</div>
+				</Group>
+				<Group label="A group: one member at work, another waiting on the owner, each said as it is">
+					<div className="flex max-w-xl flex-col gap-3">
+						<WorkingLine who={[MARA]} text="Reading timetable.md…" onOpen={() => {}} />
+						<WorkingLine who={[SANCHO]} text="Waiting on you" waiting onOpen={() => {}} />
 					</div>
 				</Group>
 				<Group label="A group: one member at work">

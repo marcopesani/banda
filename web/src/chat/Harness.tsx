@@ -35,6 +35,7 @@ import { askSummary } from "../app/harness-activity.ts";
 import { projectOf } from "../lib/project.ts";
 import { Tile } from "./Cards.tsx";
 import { Confirm } from "./Confirm.tsx";
+import { WAITING_DOT } from "./Face.tsx";
 import { KeepEnd } from "./KeepEnd.tsx";
 import { Step, StepWords } from "./Steps.tsx";
 
@@ -664,9 +665,12 @@ export function HarnessMenu({
 					size="sm"
 					className="shrink-0"
 					aria-label={`${waiting ? "Waiting on you: " : ""}${count} ${label}`}
+					{...(waiting ? { "data-waiting": "" } : {})}
 				>
 					<TerminalIcon aria-hidden="true" />
 					<span>{count}</span>
+					{/* the face's dot, still: one of them waits on the owner; the name says so in words */}
+					{waiting ? <span aria-hidden="true" className={cn("absolute top-1 right-1", WAITING_DOT)} /> : null}
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent

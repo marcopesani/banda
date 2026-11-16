@@ -32,3 +32,15 @@ export function workingMembers(
 	if (!behind) for (const member of since.keys()) if (!working.includes(member)) since.delete(member);
 	return [...since.keys()].filter((member) => !log.asking.includes(member));
 }
+
+/**
+ * Who the group's lines show: the members at work on one, saying their work; the members whose ask is open on another,
+ * saying they wait on the owner. Each member is said as it is: one asking never makes the others wait, and one at work
+ * is never said to wait. Members at work come first, so a lone waiting line stands where the working line would.
+ */
+export function lineMembers(
+	atWork: readonly string[],
+	asking: readonly string[],
+): { readonly working: readonly string[]; readonly waiting: readonly string[] } {
+	return { working: atWork, waiting: [...new Set(asking)].filter((member) => !atWork.includes(member)) };
+}
