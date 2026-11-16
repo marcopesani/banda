@@ -193,7 +193,7 @@ boxSuite(`the box's closed network (${realBox.kind})`, { timeout: 180_000 }, () 
 		const local = await sh(
 			env,
 			// socat, which the box image carries (it has no python3), answers each connection with a file
-			"printf 'HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok' > /tmp/loop.http; " +
+			"printf 'HTTP/1.1 200 OK\\r\\ncontent-length: 2\\r\\n\\r\\nok' > /tmp/loop.http; " +
 				"socat -U TCP4-LISTEN:8765,bind=127.0.0.1,reuseaddr,fork OPEN:/tmp/loop.http,rdonly >/dev/null 2>&1 & sleep 1; " +
 				"curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/; kill %1",
 		);
