@@ -62,8 +62,12 @@ export function personalityWords(text: string): string | { refused: string } {
 	return words;
 }
 
-/** An agent file with its body replaced by `words`, its frontmatter as it was. */
+/**
+ * An agent file with its body replaced by `words`, its frontmatter as it was; the file itself, byte for byte, when its
+ * body is those words already (the daemon then saves nothing, and the app expects exactly that file back).
+ */
 export function withPersonality(text: string, words: string): string {
+	if (personalityOf(text) === words.trim()) return text;
 	const head = FRONTMATTER.exec(text)?.[0] ?? "";
 	return `${head.trimEnd()}\n${words.trim()}\n`;
 }

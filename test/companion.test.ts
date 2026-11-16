@@ -150,6 +150,21 @@ describe("the companion's picks", () => {
 		expect(personalityWords("  Warm,\r\nand brief.  ")).toBe("Warm,\nand brief.");
 	});
 
+	it("a file whose body already holds the words is left byte for byte, however its spacing falls", () => {
+		// the daemon skips a save whose words are the body's already, and the app checks the saved file against its own
+		// withPersonality: both must agree it is the file as it was, or the owner sees a conflict nobody made
+		const spacing = fc.constantFrom("", "\n", "\n\n", " \n", "\n\n\n");
+		fc.assert(
+			fc.property(spacing, spacing, spacing, (afterClose, beforeBody, end) => {
+				const file = `---\ndescription: d\n---${afterClose === "" ? "\n" : ` ${afterClose}`}${beforeBody}You are the lead.\n\nBe dry.${end}`;
+				const words = personalityWords(`${personalityOf(file)} `);
+				expect(words).toBe(personalityOf(file));
+				expect(withPersonality(file, typeof words === "string" ? words : "")).toBe(file);
+			}),
+			{ numRuns: pbtRuns(50) },
+		);
+	});
+
 	it("a reaction is exactly one emoji", () => {
 		for (const emoji of ["🫏", "🛡️", "🌾", "👩🏽‍🚀", "🇵🇹", "1️⃣", " 🦉 "]) expect(oneEmoji(emoji)).toBe(emoji.trim());
 		for (const text of ["", "a", "🌾🌾", "🌾a", "ab", "1"]) expect(oneEmoji(text)).toBeUndefined();
