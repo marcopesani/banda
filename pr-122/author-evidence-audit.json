@@ -1,0 +1,46 @@
+{
+  "logSha256": "0a994a989461fa5c502332823feae5aab9fbe1d33c159166a0a60ee59884e9f9",
+  "headMarker": true,
+  "completeMarker": true,
+  "cleanAfterMarker": true,
+  "zeroExitMarkers": [
+    "=== exit 0: npm run check",
+    "=== exit 0: npm run web:contrast",
+    "=== exit 0: npm run typecheck",
+    "=== exit 0: npm run test:fast -- --maxWorkers=2",
+    "=== exit 0: npm run build"
+  ],
+  "images": [
+    {
+      "name": "line-1-working-1440.png",
+      "sha256": "17cfb126ec0dd4d0b9e5b9a744f003e7a426e12e71767e2bb6b53f8ac1ad8bb1",
+      "sameAsOriginal": true
+    },
+    {
+      "name": "line-1-working-390.png",
+      "sha256": "2cd6911fac6c99fa54d0a62ee167333f201b753b10c1aa7dbcf93f6bb1ec639d",
+      "sameAsOriginal": true
+    },
+    {
+      "name": "line-2-command-1440.png",
+      "sha256": "0419716c7cdd0c37e06bb21a3a810b48c5eab72814ae905e19128c3351a1135d",
+      "sameAsOriginal": true
+    },
+    {
+      "name": "line-2-command-390.png",
+      "sha256": "bc2d1a2de04c3880d8f1b71eca656bf13957948a8401bdd868c9383420aa3c0f",
+      "sameAsOriginal": true
+    },
+    {
+      "name": "line-3-after-command-1440.png",
+      "sha256": "0ae67601471088562b7f2c2e2b6a4e7fc5d25044a722a7c05b526a78edcd5a11",
+      "sameAsOriginal": true
+    },
+    {
+      "name": "line-3-after-command-390.png",
+      "sha256": "b6e36365c0b055952805d5417a29ffb62d535f336dfdfea53bdf6f431f8cd2ae",
+      "sameAsOriginal": true
+    }
+  ],
+  "limit": "All six images visually inspected and byte-identical to supplied originals; no embedded SHA binds those captures to author commit. Supporting author evidence only, not counted as our own gate or walkthrough."
+}

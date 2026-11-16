@@ -1,0 +1,60 @@
+{
+  "commands": [
+    {
+      "command": [
+        "git",
+        "config",
+        "--show-origin",
+        "--show-scope",
+        "--get-all",
+        "core.hooksPath"
+      ],
+      "exit": 1,
+      "output": ""
+    },
+    {
+      "command": [
+        "git",
+        "rev-parse",
+        "--git-path",
+        "hooks"
+      ],
+      "exit": 0,
+      "output": "/Users/bandarra/code/banda/.git/hooks\n"
+    },
+    {
+      "command": [
+        "git",
+        "config",
+        "--show-origin",
+        "--show-scope",
+        "--get",
+        "commit.gpgsign"
+      ],
+      "exit": 0,
+      "output": "global\tfile:/Users/bandarra/.gitconfig\ttrue\n"
+    },
+    {
+      "command": [
+        "git",
+        "verify-commit",
+        "--raw",
+        "8b3a8647b4d94965e869edbe2579b6a03d988ebd"
+      ],
+      "exit": 1,
+      "output": "[GNUPG:] NEWSIG\n[GNUPG:] ERRSIG 04D0650C444903B2 1 8 00 1794830813 9 2775B630189E91435026180304D0650C444903B2\n[GNUPG:] NO_PUBKEY 04D0650C444903B2\n[GNUPG:] FAILURE gpg-exit 33554433\n"
+    },
+    {
+      "command": [
+        "git",
+        "verify-commit",
+        "--raw",
+        "96348d296c39c5328c77ec0e9a15144fee8ba37a"
+      ],
+      "exit": 1,
+      "output": "[GNUPG:] NEWSIG\n[GNUPG:] ERRSIG 04D0650C444903B2 1 8 00 1794845085 9 2775B630189E91435026180304D0650C444903B2\n[GNUPG:] NO_PUBKEY 04D0650C444903B2\n[GNUPG:] FAILURE gpg-exit 33554433\n"
+    }
+  ],
+  "activeExecutableHooks": [],
+  "historicalLimit": "Coordinator reported that author used core.hooksPath=/dev/null. Git commit objects retain no command-line configuration or historical hook contents; this audit establishes the current effective hook directory only. Current directory has only sample hooks. Required check/typecheck/ordinary/build controls were independently rerun; our signed commit used no overrides. Initial local verification lacked the public key; final local verification of both source commits exits zero with GOODSIG and VALIDSIG. Local trust is undefined; GitHub separately verifies both signatures as valid."
+}

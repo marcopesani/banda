@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 /Users/bandarra/code/banda/.worktrees/review-122-merge
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  17:29:37
+   Duration  13.46s (transform 548ms, setup 28ms, import 864ms, tests 12.51s, environment 0ms)
+
+
+EXIT 0

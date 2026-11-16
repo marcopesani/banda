@@ -1,0 +1,12 @@
+{
+  "side": "merge",
+  "head": "5939077139eff46efa1465f502655094ce3d0144",
+  "tree": "db87924ea9e5afbec9290a897330ce2aca01c5f0",
+  "dirty": "",
+  "command": "node node_modules/vitest/vitest.mjs run --config .local/review122/manual.config.ts",
+  "startedAt": "2026-11-16T16:29:37.189Z",
+  "exit": 0,
+  "headAfter": "5939077139eff46efa1465f502655094ce3d0144",
+  "dirtyAfter": "",
+  "finishedAt": "2026-11-16T16:29:50.858Z"
+}

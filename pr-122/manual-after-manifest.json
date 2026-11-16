@@ -1,0 +1,12 @@
+{
+  "side": "after",
+  "head": "96348d296c39c5328c77ec0e9a15144fee8ba37a",
+  "tree": "eb1640089b7ff3676130bfc99dc469ad8b782b74",
+  "dirty": "",
+  "command": "node node_modules/vitest/vitest.mjs run --config .local/review122/manual.config.ts",
+  "startedAt": "2026-11-16T16:11:20.212Z",
+  "exit": 0,
+  "headAfter": "96348d296c39c5328c77ec0e9a15144fee8ba37a",
+  "dirtyAfter": "",
+  "finishedAt": "2026-11-16T16:11:33.600Z"
+}

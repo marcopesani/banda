@@ -1,0 +1,54 @@
+{
+  "pr": 122,
+  "reviewedOriginalHead": "8b3a8647b4d94965e869edbe2579b6a03d988ebd",
+  "fixedHead": "96348d296c39c5328c77ec0e9a15144fee8ba37a",
+  "testedTree": "eb1640089b7ff3676130bfc99dc469ad8b782b74",
+  "localNode": "v26.3.1",
+  "pinnedNode": "26.13.0",
+  "ordinaryResult": {
+    "filesPassed": 353,
+    "testsPassed": 2797,
+    "expectedFailures": 1,
+    "skipped": 2,
+    "exit": 0
+  },
+  "ciRun": "https://github.com/purrgrammer/banda/actions/runs/43904943548",
+  "notes": [
+    "Own full gate ran on the exact content tree subsequently committed as fixedHead. Native before/after manifests record clean exact heads at start and finish.",
+    "Fixtures use invented data, faux provider, host-box mode in temporary homes, OS-assigned ports, fresh Chrome profiles and one native-input walkthrough at a time.",
+    "Review config disables global cleanup of other sessions; ordinary test-slot setup remains. No local Docker/microVM/fault suites.",
+    "GIFs sample real captured states at one second each; they are not a real-time screen recording."
+  ],
+  "reviewedOriginalBase": "7c77c29dfe0aff833ccbd6adc5152594154dc1e9",
+  "baselineMain": "be0465891c06e49588200bc55079c23d47724a92",
+  "ciCheckoutMerge": "5939077139eff46efa1465f502655094ce3d0144",
+  "ciMergeParents": [
+    "be0465891c06e49588200bc55079c23d47724a92",
+    "96348d296c39c5328c77ec0e9a15144fee8ba37a"
+  ],
+  "ciResult": {
+    "filesPassed": 292,
+    "filesSkipped": 62,
+    "testsPassed": 2525,
+    "expectedFailures": 1,
+    "testsSkipped": 277,
+    "check": "success",
+    "faults": "skipped",
+    "docker": "skipped",
+    "computer": "skipped"
+  },
+  "nativeWalkthrough": {
+    "before": {
+      "testsPassed": 2,
+      "exit": 0
+    },
+    "after": {
+      "testsPassed": 2,
+      "exit": 0
+    },
+    "merge": {
+      "testsPassed": 2,
+      "exit": 0
+    }
+  }
+}

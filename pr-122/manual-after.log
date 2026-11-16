@@ -1,0 +1,11 @@
+
+ RUN  v4.1.12 /Users/bandarra/code/banda/.worktrees/review-122-independent
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  17:11:20
+   Duration  13.21s (transform 565ms, setup 28ms, import 768ms, tests 12.37s, environment 0ms)
+
+
+EXIT 0
