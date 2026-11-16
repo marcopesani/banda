@@ -178,7 +178,7 @@ for (const width of [1440, 390])
 					await until(() => Promise.resolve(before.get("sancho")?.held === 1));
 					await page.until(`document.body.innerText.includes('${marker}') && ${lineButton}`);
 					// the face and the words on one line, named for who works; the header says nothing of it
-					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working");
+					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working: Working…");
 					expect(await page.run(`${line}.innerText.trim()`)).toBe("Working…");
 					expect(
 						await page.run(
@@ -200,7 +200,17 @@ for (const width of [1440, 390])
 					before.get("sancho")?.open();
 					await page.until(`document.body.innerText.includes('Reply from sancho: ${marker}')`);
 					await page.until(`${line}?.innerText.trim() === 'Running a command…'`);
-					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working");
+					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe(
+						"Sancho is working: Running a command…",
+					);
+					expect(await page.input("Accessibility.getFullAXTree", {})).toMatchObject({
+						nodes: expect.arrayContaining([
+							expect.objectContaining({
+								role: expect.objectContaining({ value: "button" }),
+								name: expect.objectContaining({ value: "Sancho is working: Running a command…" }),
+							}),
+						]),
+					});
 					expect(await page.run(`${line}.querySelector('[role="img"]').dataset.state`)).toBe("working");
 					expect(await page.run(headerQuiet("Sancho"))).toBe(true);
 					await shot(page, "line-2-command", width);
@@ -208,7 +218,7 @@ for (const width of [1440, 390])
 					await until(() => Promise.resolve(after.get("sancho")?.held === 1));
 					await page.until(`${line}?.innerText.trim() === 'Working…'`);
 					await shot(page, "line-3-after-command", width);
-					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working");
+					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working: Working…");
 					expect(await page.run(`${line}.querySelector('[role="img"]').dataset.state`)).toBe("working");
 					expect(await page.run(`${lineButton}.getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44);
 					expect(
@@ -254,7 +264,7 @@ it.skipIf(!hasChrome())(
 				});
 				await until(() => Promise.resolve(before.get("sancho")?.held === 1 && before.get("mara")?.held === 1));
 				await page.until(
-					`${lineButton}?.getAttribute('aria-label') === 'Sancho and Mara are working' || ${lineButton}?.getAttribute('aria-label') === 'Mara and Sancho are working'`,
+					`${lineButton}?.getAttribute('aria-label') === 'Sancho and Mara are working: Working…' || ${lineButton}?.getAttribute('aria-label') === 'Mara and Sancho are working: Working…'`,
 				);
 				expect(await page.run(`document.querySelectorAll('[data-working-line]').length`)).toBe(1);
 				expect(await page.run(`${line}.querySelectorAll('[data-slot="avatar"]').length`)).toBe(2);

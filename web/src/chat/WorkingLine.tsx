@@ -33,7 +33,7 @@ export function WorkingLine({
 }) {
 	const line = useRef<HTMLDivElement>(null);
 	if (who.length === 0) return null;
-	const label = workingLabel(who.map((each) => each.name));
+	const label = `${workingLabel(who.map((each) => each.name))}: ${text}`;
 	const shown = who.slice(0, FACES);
 	const more = who.length - shown.length;
 	const content = (

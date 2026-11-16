@@ -30,7 +30,7 @@ const words = (html: string) => {
 it("while the agent works, its face and the words of its work stand at the foot, named for who works", () => {
 	const html = render([asked, working]);
 	expect(line(html)).toBe(true);
-	expect(html).toContain('aria-label="Mara is working"');
+	expect(html).toContain('aria-label="Mara is working: Working…"');
 	expect(words(html)).toBe("Working…");
 	expect(html.indexOf("Find me a train")).toBeLessThan(html.indexOf("data-working-line"));
 });
@@ -41,10 +41,16 @@ it("says what the running tool does, and that it thinks, as the segment says it"
 	expect(words(render([asked, working]))).toBe("Working…");
 });
 
+it("names the current work for assistive technology after the agent has said something", () => {
+	for (const state of [working, reading, thinking]) {
+		expect(render([asked, reply, state])).toContain(`aria-label="Mara is working: ${state.text}"`);
+	}
+});
+
 it("keeps its words after the agent's first content, for as long as the turn runs, below what it showed", () => {
 	expect(words(render([asked, reply, working]))).toBe("Working…");
 	expect(words(render([asked, reply, reading]))).toBe("Reading notes.md…");
-	expect(render([asked, reply, working])).toContain('aria-label="Mara is working"');
+	expect(render([asked, reply, working])).toContain('aria-label="Mara is working: Working…"');
 	// a line in the feed is content too, and quiets nothing
 	const effect: Segment = {
 		kind: "effect",
