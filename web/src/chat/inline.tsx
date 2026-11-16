@@ -7,7 +7,9 @@ import type { ReactNode } from "react";
 
 export type InlinePart = { readonly text: string; readonly style?: "bold" | "italic" | "code" };
 
-const TOKEN = /(`[^`]+`)|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*\s][^*]*\*|_[^_\s][^_]*_)|(!?\[([^\]]*)\]\([^)]*\))/g;
+// An underscore marks emphasis only at a word's edge, as CommonMark has it: `web_search and fetch_content` stays text.
+const TOKEN =
+	/(`[^`]+`)|(\*\*[^*]+\*\*|(?<![\p{L}\p{N}_])__[^_]+__(?![\p{L}\p{N}_]))|(\*[^*\s][^*]*\*|(?<![\p{L}\p{N}_])_[^_\s][^_]*_(?![\p{L}\p{N}_]))|(!?\[([^\]]*)\]\([^)]*\))/gu;
 
 export function inlineParts(markdown: string): InlinePart[] {
 	const line = markdown
