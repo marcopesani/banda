@@ -51,7 +51,7 @@ const SHELL_CAPS: Record<string, number> = {
 	chats: 1_000,
 	computer: 120,
 	control: 5_550,
-	companion: 510,
+	companion: 600,
 	agents: 2_450,
 	memory: 60,
 	watches: 40,

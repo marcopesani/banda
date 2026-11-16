@@ -518,7 +518,7 @@ export type AnswerWait = {
 
 /**
  * The first agent's picks (`GET /api/companion`): its name (Sancho until changed) and face, the defaults until picked;
- * its personality, the words of the lead's file's section (none when it has none); the tier new chats start on; and
+ * its personality, the body of the lead's file (none when it is empty); the tier new chats start on; and
  * since when everything is paused, while it is. `PUT /api/companion` changes any of `name`, `face`, `personality` and
  * `tier`. The models the tiers run on are `TiersView`'s (`GET /api/tiers`).
  */
@@ -527,7 +527,7 @@ export type CompanionView = {
 	readonly tier?: import("../core/tiers.ts").Tier;
 	readonly name?: string;
 	readonly face: AvatarFace;
-	/** How it speaks, in the owner's words. */
+	/** How it speaks, in the owner's words: the lead's file's whole body, as any agent's. */
 	readonly personality?: string;
 	/** Since when everything is paused, while it is. */
 	readonly paused?: number;

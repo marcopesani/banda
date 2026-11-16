@@ -20,7 +20,7 @@ import {
 	type Tx,
 } from "@earendil-works/pi-durable";
 import { type AvatarFace, readAvatarFace, writeAvatarFace } from "./avatar-face.ts";
-import { DEFAULT_FACE, DEFAULT_NAME, DEFAULT_PERSONALITY, type StoredAvatarFace, withPersonality } from "./choices.ts";
+import { DEFAULT_FACE, DEFAULT_NAME, DEFAULT_PERSONALITY, type StoredAvatarFace } from "./choices.ts";
 import { Companion, nameLine } from "./companion.ts";
 import { context } from "./store.ts";
 import { DEFAULT_TIER, isTier, modelFor, TIERS, type Tier } from "./tiers.ts";
@@ -78,16 +78,18 @@ export const shaOf = (text: string) => createHash("sha256").update(text).digest(
 /** An accepted file: its text, the hash the owner accepted, and when. */
 export type AcceptedFile = { sha: string; text: string; at: number };
 
-/** The lead's file as the daemon first writes it: its personality the default, which the owner may change. */
-export const LEAD_TEXT = withPersonality(
-	`---
+/**
+ * The lead's file as the daemon first writes it: its role, then the default personality, one body the owner may
+ * rewrite whole, as any agent's.
+ */
+export const LEAD_TEXT = `---
 face: ${writeAvatarFace(DEFAULT_FACE)}
 description: The lead. Talks with the owner, and does the work or hands it to the agent best placed for it.
 ---
 You are the owner's lead agent. You work in your own computer, the box, and the owner reaches you from the web and from their phone.
-`,
-	DEFAULT_PERSONALITY,
-);
+
+${DEFAULT_PERSONALITY}
+`;
 
 /**
  * The workspace's "before" files as the owner accepted them, by their path in the workspace. The lead is accepted from

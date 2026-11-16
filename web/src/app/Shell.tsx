@@ -9,7 +9,7 @@ import { PlugIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { DEFAULT_FACE, personalityOf } from "../../../src/core/choices.ts";
+import { DEFAULT_FACE } from "../../../src/core/choices.ts";
 import type { CompanionView, FactView } from "../../../src/server/api.ts";
 import { centreBand, pinRow, useBand } from "../areas/band.ts";
 import { archiveGroup, setGroupLimits } from "../areas/groups.ts";
@@ -521,7 +521,8 @@ function Main() {
 				);
 			const agentView = shell.agents.find((each) => each.accepted?.agent?.id === where.id);
 			const agentFile = agentView?.accepted;
-			const personality = where.id === "sancho" ? personalityOf(agentFile?.text ?? "") : agentFile?.agent?.instructions;
+			// the body of its accepted file, the lead's included: what the model reads is what the owner edits
+			const personality = agentFile?.agent?.instructions;
 			const agentPanel = (
 				<Panel name={who.name} phone={phone || !beside} onClose={() => (phone ? setSheet(false) : setPanel(false))}>
 					{editor ?? (

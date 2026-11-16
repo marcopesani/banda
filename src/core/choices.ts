@@ -37,24 +37,21 @@ export function firstEmoji(text: string): string | undefined {
 }
 
 /**
- * The personality: how the companion speaks, in the owner's own words (no presets), written into the lead's agent file
- * as its own section. The default is where a new companion starts; the owner rewrites it on Identity, and the companion
- * may propose new words.
+ * The personality: how the companion speaks, in the owner's own words (no presets), the body of the lead's agent file,
+ * as every agent's body is its personality (DESIGN.md "Agents"). The default is where a new companion starts, after
+ * its role; the owner rewrites the whole body on About, and the companion may propose new words.
  */
 export const DEFAULT_PERSONALITY =
 	"Speak warmly and plainly, like a trusted friend: kind and encouraging, never gushing.";
-/** The longest personality: a paragraph or two. */
-export const MAX_PERSONALITY = 2000;
 
 /** The longest name the owner can give an account. */
 export const ACCOUNT_LABEL_MAX = 60;
 
-const HEADING = "## Personality";
-const SECTION = /\n*^## Personality[ \t]*\r?\n[\s\S]*?(?=^## |(?![\s\S]))/m;
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /**
- * `text` as a personality, or why it cannot be one: a few words, at most `MAX_PERSONALITY` characters once trimmed,
- * and no line a heading (which would end its section of the agent file).
+ * `text` as a personality, or why it cannot be one: a few words, as the body of an agent file (the file's own size
+ * limit bounds it). A heading is fine: the body is the owner's to shape.
  */
 export function personalityWords(text: string): string | { refused: string } {
 	// checked before trimming: trim() removes some invisible characters (U+FEFF) rather than let them be refused
@@ -62,19 +59,17 @@ export function personalityWords(text: string): string | { refused: string } {
 	if (hidden !== undefined) return { refused: `a personality ${hidden.replace(/^it /, "")}` };
 	const words = nfc(text.replace(/\r\n?/g, "\n").trim());
 	if (words === "") return { refused: "a personality needs a few words" };
-	if ([...words].length > MAX_PERSONALITY) return { refused: `a personality is at most ${MAX_PERSONALITY} characters` };
-	if (/^\s*#/m.test(words)) return { refused: "a personality has no headings" };
 	return words;
 }
 
-/** An agent file with its personality section's words replaced by `words` (added at the end when it had none). */
+/** An agent file with its body replaced by `words`, its frontmatter as it was. */
 export function withPersonality(text: string, words: string): string {
-	const rest = text.replace(SECTION, "\n\n").trimEnd();
-	return `${rest}\n\n${HEADING}\n${words.trim()}\n`;
+	const head = FRONTMATTER.exec(text)?.[0] ?? "";
+	return `${head.trimEnd()}\n${words.trim()}\n`;
 }
 
-/** The words of an agent file's personality section; undefined when it has none. */
+/** The words of an agent file's body, its personality; undefined when it has none. */
 export function personalityOf(text: string): string | undefined {
-	const section = SECTION.exec(text)?.[0];
-	return section === undefined ? undefined : section.trim().slice(HEADING.length).trim();
+	const body = text.slice(FRONTMATTER.exec(text)?.[0].length ?? 0).trim();
+	return body === "" ? undefined : body;
 }

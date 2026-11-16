@@ -1,6 +1,7 @@
 /**
  * The first agent's picks as the app shows them: its name, face, personality and how hard new chats think. The picks
- * are stored (`Companion`); the face and personality are read from the lead's accepted file.
+ * are stored (`Companion`); the face and personality (the whole body, as any agent's) are read from the lead's
+ * accepted file.
  */
 import type { Context } from "@earendil-works/chord";
 import type { Harness } from "@earendil-works/pi-durable";
@@ -63,7 +64,7 @@ export type CompanionPicks = {
 	readonly base?: string;
 	readonly name?: string;
 	readonly face?: AvatarFace;
-	/** How it speaks, in the owner's words. */
+	/** How it speaks, in the owner's words: the lead's file's whole body. */
 	readonly personality?: string;
 	/** The tier new chats start on. */
 	readonly tier?: Tier;
