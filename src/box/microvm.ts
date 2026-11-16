@@ -890,22 +890,53 @@ export async function sweepMicrovmBoxes(): Promise<number> {
 			)
 				continue;
 			assets ??= await installedMicrovmAssets();
-			const current = runtime(assets, home);
-			const listed = parse(Listing, await current.run(["list", "--format", "json"]));
-			if (listed.some((item) => !VM_NAME.test(item.name))) continue;
-			for (const item of listed) {
-				const vm = await current.inspect(item.name);
-				if (vm === undefined) continue;
-				owned(vm, home);
-			}
-			for (const item of listed) {
-				await current.remove(item.name);
-			}
-			await rm(cache, { recursive: true, force: true });
+			await removeComputers(runtime(assets, home));
 			swept += 1;
 		} catch {
 			// A missing bundle or unreadable/foreign cache authorizes no process or byte deletion.
 		}
 	}
 	return swept;
+}
+
+/** Every computer of the runtime's home, then its cache; none at all when one it lists is not the home's own. */
+async function removeComputers(current: Runtime): Promise<void> {
+	const listed = parse(Listing, await current.run(["list", "--format", "json"]));
+	if (listed.some((item) => !VM_NAME.test(item.name)))
+		throw new Error("Refusing a computer runtime that lists another program's machines.");
+	for (const item of listed) {
+		const vm = await current.inspect(item.name);
+		if (vm !== undefined) owned(vm, current.home);
+	}
+	for (const item of listed) await current.remove(item.name);
+	await rm(current.cache, { recursive: true, force: true });
+}
+
+/**
+ * The computers of `home`, which exists, for tests and diagnostics: those the runtime lists for it, a command run in
+ * one as a user, one removed, or all of them with the cache (as `removeContainerBox` is to the container). It starts
+ * none, and reaches no other home's: each is checked as the home's own first.
+ */
+export async function homeComputers(home: string) {
+	const current = await openRuntime(await canonicalHome(home));
+	const own = async (name: string) => {
+		const vm = await current.inspect(name);
+		if (vm === undefined) throw new Error(`No computer ${name}.`);
+		owned(vm, current.home);
+		return vm;
+	};
+	return {
+		list: async () =>
+			parse(Listing, await current.run(["list", "--format", "json"])).filter((item) => VM_NAME.test(item.name)),
+		status: async (name: string) => (await own(name)).status,
+		exec: async (name: string, argv: readonly [string, ...string[]], user = "1000:1000", input?: string) => {
+			await own(name);
+			return current.exec({ name, user, argv }, input, 120_000);
+		},
+		remove: async (name: string) => {
+			await own(name);
+			await current.remove(name);
+		},
+		removeAll: () => removeComputers(current),
+	};
 }

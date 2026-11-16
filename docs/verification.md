@@ -8,7 +8,7 @@ check or owner review still pending means the gate is open.
 
 Local development runs the fast ordinary suites only: `npm test`, or `npm run test:fast -- <test-file>` during
 edits. Runs share the machine through test/slots.ts, so many agents can run them at once (AGENTS.md says what a test
-owns). Fault sweeps and Docker suites run in CI, never as local pre-commit gates.
+owns). Fault sweeps and the box suites run in CI, never as local pre-commit gates.
 
 Use the version in `mise.toml` and a clean lockfile install. Before a slice commit, run:
 
@@ -22,8 +22,9 @@ npm run web:contrast
 ```
 
 These checks and the slice's ordinary regression tests must pass before committing. CI runs fault sweeps nightly
-at 02:17 UTC and Docker suites on pushes to main. Dispatch the `ci` workflow on a candidate ref when a change needs
-additional fault or Docker evidence before acceptance. Fault files run one at a time per shard, with at most two
+at 02:17 UTC and the box suites on pushes to main: all of them on the computer banda ships, on a runner with KVM, and
+a few on Docker for `serve --box container`. Dispatch the `ci` workflow on a candidate ref when a change needs
+additional fault or box evidence before acceptance. Fault files run one at a time per shard, with at most two
 child jobs. Full/deep fault and Docker qualification belongs in CI, not on development machines. Increase
 `BANDA_PBT_FAULT_RUNS` in CI when a reproduced rare path requires greater depth and retain the seed; never reduce
 property counts or timeouts merely to obtain a pass. A local fast pass alone is not durability or Docker acceptance.

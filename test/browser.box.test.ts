@@ -1,8 +1,8 @@
 /**
  * The browser, for real (DESIGN.md "The box", The browser), through a daemon: Chromium in the box behind the egress
- * proxy, driven by the agent's tools, watched and taken over through the app's API. A stand-in site (a server on a
- * network of public addresses routed nowhere, which the proxy joins) serves a sign-in page and a settings page that
- * shows a new key, so no test needs the real network. Needs Docker, and skips without it.
+ * proxy, driven by the agent's tools, watched and taken over through the app's API. A stand-in site (a server on public
+ * addresses routed nowhere, beside the proxy) serves a sign-in page and a settings page that shows a new key, so no
+ * test needs the real network. On the box `BANDA_TEST_BOX` names (fixtures/real-box.ts).
  *
  * - the screencast reaches the app through the box's stream; the owner's input is refused until they take the browser;
  * - while the owner holds it, the agent's call waits for them (taking it cuts a call at work short); given back, the
@@ -14,7 +14,6 @@
  * - on a site the owner never signed in to, a page's write goes at once, through the proxy once, unasked;
  * - a key the page shows reaches auth/ and nothing else.
  */
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,19 +27,16 @@ import {
 	type Message,
 } from "@earendil-works/pi-ai";
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from "vitest";
-import { boxParts, containerBox, dockerAvailable, removeContainerBox } from "../src/box/container.ts";
 import type { Status } from "../src/core/status.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
 import type { Item, ItemPage, Posted, ViewEvent } from "../src/server/api.ts";
+import { realBox, type Site } from "./fixtures/real-box.ts";
 import { until } from "./helpers.ts";
-
-const docker = await dockerAvailable();
-const MITMPROXY = "mitmproxy/mitmproxy:12.2.3@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f";
 
 /** The stand-in site: each request it gets printed base64 (`METHOD path body`); its key printed at the start. */
 const SITE = `
-import base64, http.server, secrets
+import base64, http.server, os, secrets
 KEY = "sk_live_" + secrets.token_hex(6) + "Ab" + secrets.token_hex(8) + "Zz9"
 print(base64.b64encode(("KEY " + KEY).encode()).decode(), flush=True)
 class H(http.server.BaseHTTPRequestHandler):
@@ -104,22 +100,18 @@ class H(http.server.BaseHTTPRequestHandler):
             self.send(200, f'<title>Your key</title><h1>Your new key</h1><p>Copy it now: <code>{KEY}</code></p>')
         else:
             self.send(404, "no")
-http.server.ThreadingHTTPServer(("0.0.0.0", 8080), H).serve_forever()
+http.server.ThreadingHTTPServer((os.environ["BIND"], 8080), H).serve_forever()
 `;
-
-const run = (args: string[]) => execFileSync("docker", args, { encoding: "utf8", timeout: 120_000 }).trim();
 
 /** A step of the model's plan: the call it makes, from the last result it read; undefined ends the run. */
 type Step = (last: string) => [string, Record<string, unknown>] | undefined;
 
-describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
+describe.skipIf(realBox.missing !== undefined)(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
 	const tag = randomUUID().slice(0, 8);
-	const pub = `banda-test-${tag}-pub`;
-	const site = `banda-test-${tag}-site`;
-	const HOST = `shop-${tag}.example`;
+	const HOST = realBox.host("shop");
 	const SHOP = `http://${HOST}:8080`;
 	// the same site under another name, which the owner never signed in to
-	const ANON = `http://blog-${tag}.example:8080`;
+	const ANON = `http://${realBox.host("blog")}:8080`;
 	const SECRET = `Pw-${randomUUID().slice(0, 12)}`;
 	const OTHER = `Pw-${randomUUID().slice(0, 12)}`;
 	const USER = `alice-${tag}`;
@@ -128,6 +120,7 @@ describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
 	/** The model's plan for each owner message, by a word it holds. */
 	const plans = new Map<string, Step[]>();
 	let home: string;
+	let site: Site;
 	let daemon: Daemon;
 	let api: <T>(path: string, init?: RequestInit) => Promise<T>;
 	let token: string;
@@ -135,6 +128,7 @@ describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
 
 	beforeAll(async () => {
 		home = mkdtempSync(join(tmpdir(), "banda-browser-test-"));
+		await realBox.offlineBrowser(home);
 		writeFileSync(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
 		const web = join(home, "web");
 		mkdirSync(web);
@@ -173,7 +167,7 @@ describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
 			port: 0,
 			models,
 			log: (line) => logs.push(line),
-			box: containerBox(home),
+			box: realBox.setup(home),
 			web,
 		});
 		token = (await readDaemonFile(home))!.token!;
@@ -186,79 +180,27 @@ describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
 			if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
 			return (await response.json()) as T;
 		};
-		// the box comes up (the first run builds its image), then the stand-in site beside its proxy
-		const { proxy } = boxParts(home);
-		await until(() => {
-			try {
-				return run(["inspect", "--format", "{{.State.Running}}", boxParts(home).box]) === "true";
-			} catch {
-				return false;
-			}
-		}, 500);
-		const octet = 16 + Math.floor(Math.random() * 200);
-		run(["network", "create", "--subnet", `11.${octet}.${Math.floor(Math.random() * 250)}.0/24`, pub]);
-		run(["network", "connect", pub, proxy]);
-		run([
-			"run",
-			"--detach",
-			"--name",
-			site,
-			// swept with the home if the test dies before its own teardown
-			"--label",
-			`banda.home=${home}`,
-			"--network",
-			pub,
-			"--network-alias",
-			HOST,
-			"--network-alias",
-			`blog-${tag}.example`,
-			"--entrypoint",
-			"python3",
-			MITMPROXY,
-			"-u",
-			"-c",
-			SITE,
-		]);
-		await until(() => {
-			try {
-				return (
-					run(["exec", proxy, "python3", "-c", `import socket; socket.create_connection(("${HOST}", 8080), 2)`]) === ""
-				);
-			} catch {
-				return false;
-			}
-		}, 200);
+		// the box comes up (the first run builds or loads its image), then the stand-in site beside its proxy
+		await until(() => realBox.running(home, "box"), 500);
+		site = await realBox.site(home, {
+			labels: ["shop", "blog"],
+			image: "python",
+			env: { SERVER: SITE },
+			start: 'exec python3 -u -c "$SERVER"',
+		});
 	}, 20 * 60_000);
 
 	afterAll(async () => {
 		await daemon?.close();
-		try {
-			run(["rm", "--force", site]);
-		} catch {
-			// not made
-		}
+		await site?.close();
 		if (home !== undefined) {
-			try {
-				run(["network", "disconnect", "--force", pub, boxParts(home).proxy]);
-			} catch {
-				// not joined
-			}
-			await removeContainerBox(home);
+			await realBox.remove(home);
 			rmSync(home, { recursive: true, force: true });
-		}
-		try {
-			run(["network", "rm", pub]);
-		} catch {
-			// not made
 		}
 	});
 
 	/** What the site got, in order: `METHOD path body`. */
-	const served = () =>
-		run(["logs", site])
-			.split("\n")
-			.filter(Boolean)
-			.map((line) => Buffer.from(line, "base64").toString("utf8"));
+	const served = () => site.output().map((line) => Buffer.from(line, "base64").toString("utf8"));
 	const siteKey = () => served()[0]!.replace(/^KEY /, "");
 	const requests = () => served().slice(1);
 
@@ -533,16 +475,16 @@ describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
 			.join("\n");
 		const entries = JSON.stringify(await items(chat));
 		const said = logs.join("\n");
-		const { box } = boxParts(home);
-		// what the agent's commands can read: everything but the browser's own volume, which its uid cannot open
-		const files = run([
-			"exec",
-			box,
-			"sh",
-			"-c",
+		// what the agent's commands can read: everything but the browser's own files, which the container's box mounts
+		// where its uid cannot open them, and the computer's not at all (the browser is a machine of its own)
+		const files = await realBox.exec(
+			home,
+			"box",
 			`grep -rl -F -e '${SECRET}' -e '${OTHER}' -e '${siteKey()}' /workspace /work /tmp 2>/dev/null || true`,
-		]);
-		expect(run(["exec", box, "sh", "-c", "ls /browser 2>&1 || true"])).toContain("Permission denied");
+		);
+		expect(await realBox.exec(home, "box", "ls /browser 2>&1 || true")).toMatch(
+			realBox.kind === "container" ? /Permission denied/ : /No such file or directory/,
+		);
 		for (const secret of secrets) {
 			expect(stored.includes(secret), "the store").toBe(false);
 			expect(entries.includes(secret), "an entry").toBe(false);
@@ -574,13 +516,7 @@ describe.skipIf(!docker)("the browser", { timeout: 300_000 }, () => {
 		try {
 			await until(() => view.events.find((e) => e.type === "frame"));
 			await control(true);
-			await input({ type: "navigate", url: `${SHOP}/press` }).catch((e) => {
-				console.error(
-					"DBG proxylog",
-					execFileSync("sh", ["-c", `docker logs ${boxParts(home).proxy} 2>&1 | tail -80`], { encoding: "utf8" }),
-				);
-				throw e;
-			});
+			await input({ type: "navigate", url: `${SHOP}/press` });
 			// the page's reads, one after another on the browser's kept-alive connection, all reach the site
 			await until(() => requests().some((r) => r.startsWith("GET /read?6 ")));
 			// the app: the pointer over the page, then the press and the release where it is, in the page's own pixels

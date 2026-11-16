@@ -1,5 +1,6 @@
-# Ordinary checks on pushes and PRs; fault sweeps nightly; Docker on main pushes.
-# Manual CI runs provide both expensive suites without occupying local development machines.
+# Ordinary checks on pushes and PRs; fault sweeps nightly; the box suites on main pushes, on the computer banda ships
+# (a microVM, on this runner's KVM) and a few on Docker. Manual CI runs provide the expensive suites without occupying
+# local development machines.
 name: ci
 
 on:
@@ -78,3 +79,57 @@ jobs:
         env:
           BANDA_IMAGE_CACHE: gha
       - run: npm run test:docker
+
+  # The box suites on the computer banda ships: its development bundle built as a release stages it (the native runtime
+  # from its cache), KVM opened to this account alone, and the suites' stand-in site at a public address routed nowhere,
+  # on a dummy interface, with its names in /etc/hosts (test/fixtures/site-names.ts). A suite whose box is missing fails.
+  computer:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      BANDA_TEST_SITE: 11.77.0.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+      - name: Restore the native runtime build
+        id: native-runtime-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: release/cache/computer/runtime
+          key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
+      - run: npm ci
+      - name: Prepare the development computer
+        run: node scripts/microvm-bundle.ts --prepare
+      - name: Keep the native runtime build
+        if: steps.native-runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: release/cache/computer/runtime
+          key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
+      - name: Open KVM to this account
+        run: |
+          test -c /dev/kvm
+          sudo setfacl -m "u:$(id -u):rw" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Put the stand-in site on a public address routed nowhere
+        run: |
+          sudo ip link add banda-site type dummy
+          sudo ip address add "$BANDA_TEST_SITE/32" dev banda-site
+          sudo ip link set banda-site up
+          node test/fixtures/site-names.ts "$BANDA_TEST_SITE" | sudo tee -a /etc/hosts
+          getent hosts echo.banda-site.example
+          resolvectl query echo.banda-site.example || true
+      - run: mkdir -p "$RUNNER_TEMP/computer-evidence"
+      - run: npm run test:computer -- --reporter=default --reporter=junit --outputFile.junit="$RUNNER_TEMP/computer-evidence/junit.xml"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: computer-evidence
+          path: ${{ runner.temp }}/computer-evidence
+          if-no-files-found: ignore

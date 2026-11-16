@@ -1,6 +1,6 @@
 /**
- * The box (DESIGN.md "The box"): pi-durable's env conformance suite on the container box, and what it keeps out.
- * The container cases need Docker and skip without it; the first run builds the image, which takes minutes.
+ * The box (DESIGN.md "The box"): pi-durable's env conformance suite on the box `BANDA_TEST_BOX` names
+ * (fixtures/real-box.ts), and what it keeps out. The first run builds or loads the images, which takes minutes.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,11 +10,9 @@ import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { registerEnvConformance } from "@earendil-works/pi-durable/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Box, openBox } from "../src/box/box.ts";
-import { containerBox, dockerAvailable, removeContainerBox } from "../src/box/container.ts";
 import { context } from "../src/core/store.ts";
+import { realBox } from "./fixtures/real-box.ts";
 import { until } from "./helpers.ts";
-
-const docker = await dockerAvailable();
 
 /** A home for the whole file: the shared helper's are removed after each test, under a running box. */
 function fileHome(): string {
@@ -53,32 +51,32 @@ function conformance(name: string, box: () => Box, root: () => string) {
 	);
 }
 
-describe.skipIf(!docker)("the container box", () => {
+describe.skipIf(realBox.missing !== undefined)(`the box (${realBox.kind})`, () => {
 	let home: string;
 	let box: Box;
 	beforeAll(async () => {
 		home = fileHome();
-		box = openBox(containerBox(home), () => {});
-		// the first run builds the image
+		box = openBox(realBox.setup(home), () => {});
+		// the first run builds or loads the images
 		expect((await sh(box.env(), "true")).code).toBe(0);
 	}, 20 * 60_000);
 	afterAll(async () => {
 		await box?.close();
 		if (home !== undefined) {
-			await removeContainerBox(home);
+			await realBox.remove(home);
 			rmSync(home, { recursive: true, force: true });
 		}
 	});
 
 	conformance(
-		"container box: the env conformance suite",
+		`${realBox.kind} box: the env conformance suite`,
 		() => box,
 		() => "/work/conformance",
 	);
 
-	it("keeps the host out: the owner's uid, a read-only root, no capabilities", async () => {
+	it("keeps the host out: an ordinary uid, a read-only root, no capabilities", async () => {
 		const env = box.env();
-		expect((await sh(env, "id -u")).out).toBe(String(process.getuid?.()));
+		expect((await sh(env, "id -u")).out).toBe(String(realBox.uid));
 		expect((await sh(env, "pwd")).out).toBe("/workspace");
 		expect((await sh(env, "touch /usr/x")).code).not.toBe(0);
 		expect((await sh(env, "grep CapEff /proc/self/status")).out).toMatch(/0{16}$/);
@@ -106,7 +104,7 @@ describe.skipIf(!docker)("the container box", () => {
 		// detached, it starts after its command returned
 		await until(async () => (await sh(env, "pgrep -f '^sleep 307$' | wc -l")).out === "1");
 		// another daemon on the same home: its first bring-up restarts the box
-		const next = openBox(containerBox(home), () => {});
+		const next = openBox(realBox.setup(home), () => {});
 		try {
 			const again = next.env();
 			expect((await sh(again, "pgrep -f '^sleep 307$' | wc -l")).out).toBe("0");
@@ -122,16 +120,10 @@ describe.skipIf(!docker)("the container box", () => {
 	it("a box that went away is made again at the next use, its files kept", async () => {
 		const env = box.env();
 		expect((await sh(env, "echo kept > /workspace/note")).code).toBe(0);
-		await removeContainerOnly(home);
-		// the connection is lost with the container; the next request starts pi-env again, which makes the box first
+		await realBox.destroy(home);
+		// the connection is lost with the box; the next request starts pi-env again, which makes the box first
 		const first = await sh(env, "cat /workspace/note");
 		const second = first.code === 0 ? first : await sh(env, "cat /workspace/note");
 		expect(second.out).toBe("kept");
 	});
 });
-
-async function removeContainerOnly(home: string): Promise<void> {
-	const { execFileSync } = await import("node:child_process");
-	const { containerName } = await import("../src/box/container.ts");
-	execFileSync("docker", ["rm", "--force", containerName(home)]);
-}
