@@ -397,20 +397,6 @@ const sideOf = (segment: Segment): "owner" | "agent" | "line" => {
 	return "line";
 };
 
-const TURN_STARTS: ReadonlySet<Segment["kind"]> = new Set(["owner", "owner-message", "wake", "agentMessage"]);
-
-/**
- * What begins an agent's work anew in its chat, so the working line says so in words until the agent shows something:
- * the owner's words, a routine's wake, another agent's message, a watch's wake (never what a watch only tells), and
- * the owner's answer to an ask, on its card as in the chat, a refusal too: the agent hears it and goes on. An ask that
- * expired or was stopped is nobody's answer.
- */
-const beginsWork = (segment: Segment): boolean =>
-	TURN_STARTS.has(segment.kind) ||
-	(segment.kind === "watch" && segment.tell !== true) ||
-	((segment.kind === "question" || segment.kind === "approval") &&
-		(segment.ended?.outcome === "answered" || segment.ended?.outcome === "dismissed"));
-
 /** The transcript entry a segment stands for, from its key ("41", "41:ask", "answer:41"). */
 const entryOf = (key: string): number | undefined => {
 	const found = /\d+/.exec(key)?.[0];
@@ -474,11 +460,8 @@ export function FeedView({
 	const failed = tryAgainAfter(segments);
 	let run: { side: "owner" | "agent"; items: ReactNode[]; at?: number | undefined; key: string } | undefined;
 	let lastDay: string | undefined;
-	// whether the agent showed anything since its work began: the working line says "Working…" only until it does, and
-	// stands as its face alone from then on, for as long as it works
-	let shown = false;
-	let showWorking = false;
-	let quiet = false;
+	// the working segment: the line at the foot says what the agent does, for as long as it works
+	let working: string | undefined;
 	const flush = () => {
 		if (run === undefined) return;
 		nodes.push(
@@ -500,8 +483,7 @@ export function FeedView({
 	const firstUnread = lastRead < 0 ? -1 : segments.findIndex((segment, index) => index > lastRead && counts(segment));
 	segments.forEach((segment, index) => {
 		if (segment.kind === "working") {
-			showWorking = true;
-			quiet = shown;
+			working = segment.text;
 			return;
 		}
 		const at = atOf(segment);
@@ -543,8 +525,6 @@ export function FeedView({
 			) : (
 				partOf(chat, who, segment, onOpenArtifact, agent, onRoutine, inspect, messageAuthor)
 			);
-		if (beginsWork(segment)) shown = false;
-		else if (part !== null) shown = true;
 		if (again && segment.kind === "companion") {
 			flush();
 			if (part !== null) {
@@ -663,7 +643,8 @@ export function FeedView({
 			</Run>,
 		);
 	}
-	if (showWorking) nodes.push(<WorkingLine key="working" who={[who]} quiet={quiet} onOpen={onWorkingLine} />);
+	if (working !== undefined)
+		nodes.push(<WorkingLine key="working" who={[who]} text={working} onOpen={onWorkingLine} />);
 	return <>{nodes}</>;
 }
 

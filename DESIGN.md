@@ -155,13 +155,12 @@ one that gives them one more thing to manage stays out.
   asks draw as lines in the feed, in place: a routine's run, a change to accept, a connection to finish signing in to,
   an error. Work in progress is said once, by the **working line** at the foot of the feed, above the owner's
   messages still waiting: for as long as agents work, their faces (28px, side by side in a group, three and then a
-  count; still under reduced motion), its label naming who ("Mara and Sancho are working"). "Working…" stands beside
-  them until what they do shows in the feed: once every agent on the line has shown something of its own since its
-  work began, the line is quiet, the faces alone, and where the owner asked for less motion the words stay, still,
-  since a still face says nothing. Work begins anew, and the words come back, at the owner's words, at their answer
-  to an ask (on its card as in the chat, a refusal too), at a routine's or a watch's wake and at another agent's
-  message. An agent that waits on the owner is off the line, as its ask says so; one at work beside an open ask it
-  does not wait on stays. The line goes once no one is left on it. A tap opens their activity. The feed has no other
+  count; still under reduced motion), its label naming who ("Mara and Sancho are working"), and beside them what they
+  do now, in words: what the running tool does ("Reading notes.md…", "Running a command…"), "Thinking…" while the
+  model thinks, and "Working…" when nothing says more. The words stay for the whole of the work, after what the agent
+  showed and after the owner answered an ask, and change as the work does; they never say a tool that ended or a
+  step that did not happen. An agent that waits on the owner is off the line, as its ask says so; one at work beside
+  an open ask it does not wait on stays. The line goes once no one is left on it. A tap opens their activity. The feed has no other
   working sign, never a tool row, never typing dots, and a reply carries
   no face it did not have before. Any message can be copied. Every destructive action (forgetting a fact, removing a member,
   taking back a permission, archiving an agent) asks first, in its own verb, with a way to keep things as they are. A reply that

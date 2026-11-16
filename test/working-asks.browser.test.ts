@@ -182,10 +182,10 @@ afterAll(async () => {
 });
 
 const line = `document.querySelector('[data-working-line]')`;
-/** The line with its words: the agent has shown nothing since its work began. */
+/** The line with its words: the agent works, and nothing says more of what it does. */
 const saying = `(${line}?.innerText.trim() === 'Working…')`;
-/** The line as the face alone: the agent showed something and works on. */
-const quiet = `(${line}?.dataset.quiet === '' && ${line}.innerText.trim() === '' && ${line}.querySelector('[role="img"]')?.dataset.state === 'working')`;
+/** The line below what the agent showed, its words and its moving face still with it: it works on. */
+const worksOnSaying = `(${saying} && ${line}.querySelector('[role="img"]')?.dataset.state === 'working' && [...document.querySelectorAll('[data-message-bubble]')].every((b) => b.getBoundingClientRect().bottom <= ${line}.getBoundingClientRect().top))`;
 const button = (words: string) =>
 	`[...document.querySelectorAll('button')].filter((b) => b.innerText.trim() === ${JSON.stringify(words)}).at(-1)`;
 const field = `document.querySelector('textarea[name="message"]')`;
@@ -220,12 +220,12 @@ const onChat = (width: number, use: (page: Page) => Promise<void>) =>
 		await use(page);
 	});
 
-/** From the ask's end to the turn's: the line with its words, then quiet beneath what the agent said, then gone. */
+/** From the ask's end to the turn's: the line with its words, still with them beneath what the agent said, then gone. */
 async function worksOn(page: Page, marker: string, width: number, name: string) {
 	const desktop = width >= 768;
 	await reached("after");
 	expect(await state()).toBe("running");
-	// the owner answered, and the agent has shown nothing since: the line says it works
+	// the owner answered, and the agent works on: the line says so
 	expect.soft(await seen(page, saying), "the line says it works once the ask ended").toBe(true);
 	expect.soft(await page.run(`/working/i.test(${header}.innerText)`), "the header says nothing of work").toBe(false);
 	if (desktop) expect.soft(await seen(page, rowFace("working")), "the row's face works").toBe(true);
@@ -234,19 +234,21 @@ async function worksOn(page: Page, marker: string, width: number, name: string) 
 	await reached("ending");
 	await page.until(`document.body.innerText.includes('After the ask: ${marker}')`);
 	expect(await state()).toBe("running");
-	// it said something and works on: the face alone, beneath what it said
-	expect.soft(await seen(page, quiet), "the line stays, quiet, once the agent said something").toBe(true);
+	// it said something and works on: the line keeps its words, beneath what it said
+	expect
+		.soft(await seen(page, worksOnSaying), "the line stays, with its words, once the agent said something")
+		.toBe(true);
 	await shot(page, `${name}-3-said`, width);
 	// read again from the daemon, the page shows the same: a reload, and another chat and back
 	await page.reload();
 	await page.until(`document.body.innerText.includes('After the ask: ${marker}')`);
-	expect.soft(await seen(page, quiet), "the same after a reload").toBe(true);
+	expect.soft(await seen(page, worksOnSaying), "the same after a reload").toBe(true);
 	await page.run(`location.hash='#/a/mara'`);
 	await page.until(`document.querySelector('header h1')?.getAttribute('aria-label') === 'Mara'`);
 	expect.soft(await page.run(`!${line}`), "another agent's chat says nothing of it").toBe(true);
 	await page.run(`location.hash='#/a/sancho'`);
 	await page.until(`document.body.innerText.includes('After the ask: ${marker}')`);
-	expect.soft(await seen(page, quiet), "the same after another chat").toBe(true);
+	expect.soft(await seen(page, worksOnSaying), "the same after another chat").toBe(true);
 	release("ending");
 	await until(async () => (await state()) === "idle");
 	expect.soft(await seen(page, `!${line}`), "the line goes when the turn ends").toBe(true);

@@ -1,11 +1,11 @@
 /**
  * The working line in the actual app against a temporary daemon with a held faux model: a direct chat at desktop and
  * phone width, a group of two, and reduced motion. Each agent's run is held twice: before it says anything, and after
- * it said something, so the line can be seen to go quiet at the first content while the turn still runs, and to go
- * when the turn ends.
+ * it said something, so the line can be seen to keep its words at the first content while the turn still runs, to say
+ * what a command does while one runs beside the reply and "Working…" again once it ended, and to go when the turn ends.
  */
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentTools } from "@earendil-works/pi-ai";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -87,8 +87,12 @@ beforeAll(async () => {
 				await held.promise;
 			}
 			const group = getCurrentTools(request.messages).some((tool) => tool.name === "message_group");
+			// a direct chat's reply with a command beside it: the line says what the command does while it runs
 			return fauxAssistantMessage(
-				[fauxToolCall(group ? "message_group" : "message_user", { text: `Reply from ${agent}: ${marker}` })],
+				[
+					fauxToolCall(group ? "message_group" : "message_user", { text: `Reply from ${agent}: ${marker}` }),
+					...(marker.includes("TOOL") ? [fauxToolCall("bash", { command: "sleep 3" })] : []),
+				],
 				{ stopReason: "toolUse" },
 			);
 		}),
@@ -149,6 +153,13 @@ async function open(page: Page, hash: string) {
 	await page.run(`location.hash=${JSON.stringify(hash)}`);
 	await page.until(`document.querySelector('textarea[name="message"]')`);
 }
+/** A screenshot of the stage, when a folder for them is named: the proof a change to these states posts. */
+async function shot(page: Page, name: string, width: number) {
+	const shots = process.env.BANDA_STATE_SHOTS;
+	if (shots === undefined) return;
+	await mkdir(shots, { recursive: true });
+	await page.shoot(join(shots, `${name}-${width}.png`));
+}
 async function close(page: Page) {
 	await page.run(`document.querySelector('[data-slot="sheet-close"]').click()`);
 	await page.until(`!${dialog}`);
@@ -156,18 +167,18 @@ async function close(page: Page) {
 
 for (const width of [1440, 390])
 	it.skipIf(!hasChrome())(
-		`a chat: face and Working… while it shows nothing, the face alone from its first content while the turn runs, gone when it ends, at ${width}px`,
+		`a chat: face and Working… while it shows nothing, what its command does beside its first content, Working… once the command ended, gone when the turn ends, at ${width}px`,
 		async () => {
 			holdAll();
 			try {
 				await withLinePage(width, async (page) => {
 					await open(page, "#/a/sancho");
-					const marker = `LINE_${width}_LIVE`;
+					const marker = `LINE_${width}_TOOL_LIVE`;
 					await post(marker);
 					await until(() => Promise.resolve(before.get("sancho")?.held === 1));
 					await page.until(`document.body.innerText.includes('${marker}') && ${lineButton}`);
 					// the face and the words on one line, named for who works; the header says nothing of it
-					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working");
+					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working: Working…");
 					expect(await page.run(`${line}.innerText.trim()`)).toBe("Working…");
 					expect(
 						await page.run(
@@ -177,18 +188,37 @@ for (const width of [1440, 390])
 					expect(await page.run(`${line}.querySelector('[role="img"]').dataset.state`)).toBe("working");
 					expect(await page.run(`${lineButton}.getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44);
 					expect(await page.run(headerQuiet("Sancho"))).toBe(true);
+					await shot(page, "line-1-working", width);
 					// a tap opens the activity; closing it hands focus back to the line
 					await page.run(`${lineButton}.focus()`);
 					await page.run(`${lineButton}.click()`);
 					await page.until(`${dialog}?.querySelector('[data-activity-timeline]')`);
 					await close(page);
 					await page.until(`document.activeElement === ${lineButton}`);
-					// The first reply quiets the line while the agent goes on: its face alone, beneath what it said.
+					// The first reply comes with a command beside it: the line stays beneath what the agent said, and says
+					// what the command does while it runs
 					before.get("sancho")?.open();
-					await until(() => Promise.resolve(after.get("sancho")?.held === 1));
 					await page.until(`document.body.innerText.includes('Reply from sancho: ${marker}')`);
-					await page.until(`${line}?.dataset.quiet === '' && ${line}.innerText.trim() === ''`);
-					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working");
+					await page.until(`${line}?.innerText.trim() === 'Running a command…'`);
+					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe(
+						"Sancho is working: Running a command…",
+					);
+					expect(await page.input("Accessibility.getFullAXTree", {})).toMatchObject({
+						nodes: expect.arrayContaining([
+							expect.objectContaining({
+								role: expect.objectContaining({ value: "button" }),
+								name: expect.objectContaining({ value: "Sancho is working: Running a command…" }),
+							}),
+						]),
+					});
+					expect(await page.run(`${line}.querySelector('[role="img"]').dataset.state`)).toBe("working");
+					expect(await page.run(headerQuiet("Sancho"))).toBe(true);
+					await shot(page, "line-2-command", width);
+					// the command ended and the model is asked again: the line says Working…, never the command that ended
+					await until(() => Promise.resolve(after.get("sancho")?.held === 1));
+					await page.until(`${line}?.innerText.trim() === 'Working…'`);
+					await shot(page, "line-3-after-command", width);
+					expect(await page.run(`${lineButton}.getAttribute('aria-label')`)).toBe("Sancho is working: Working…");
 					expect(await page.run(`${line}.querySelector('[role="img"]').dataset.state`)).toBe("working");
 					expect(await page.run(`${lineButton}.getBoundingClientRect().height`)).toBeGreaterThanOrEqual(44);
 					expect(
@@ -221,7 +251,7 @@ for (const width of [1440, 390])
 	);
 
 it.skipIf(!hasChrome())(
-	"a group: one line with every member at work, quiet once each has said something, gone when their work ends",
+	"a group: one line with every member at work, its words kept once each has said something, gone when their work ends",
 	async () => {
 		holdAll();
 		try {
@@ -234,7 +264,7 @@ it.skipIf(!hasChrome())(
 				});
 				await until(() => Promise.resolve(before.get("sancho")?.held === 1 && before.get("mara")?.held === 1));
 				await page.until(
-					`${lineButton}?.getAttribute('aria-label') === 'Sancho and Mara are working' || ${lineButton}?.getAttribute('aria-label') === 'Mara and Sancho are working'`,
+					`${lineButton}?.getAttribute('aria-label') === 'Sancho and Mara are working: Working…' || ${lineButton}?.getAttribute('aria-label') === 'Mara and Sancho are working: Working…'`,
 				);
 				expect(await page.run(`document.querySelectorAll('[data-working-line]').length`)).toBe(1);
 				expect(await page.run(`${line}.querySelectorAll('[data-slot="avatar"]').length`)).toBe(2);
@@ -246,20 +276,25 @@ it.skipIf(!hasChrome())(
 				await page.until(`document.querySelectorAll('[aria-label="Agent activity"] [role="tab"]').length === 2`);
 				await close(page);
 				await page.until(`document.activeElement === ${lineButton}`);
-				// Mara says something and goes on working: she stays on the line, whose words stand for Sancho, who has
-				// shown nothing yet
+				// Mara says something and goes on working: she stays on the line, with its words
 				before.get("mara")?.open();
 				await until(() => Promise.resolve(after.get("mara")?.held === 1));
 				await page.until(`document.body.innerText.includes('Reply from mara: LINE_GROUP_LIVE')`);
 				expect((await api<GroupView>(`/groups/${room}`)).working).toContain("mara");
 				expect(await page.run(`${line}.querySelectorAll('[data-slot="avatar"]').length`)).toBe(2);
-				expect(await page.run(`${line}.dataset.quiet === undefined && ${line}.innerText.trim()`)).toBe("Working…");
-				// then Sancho: both have said something and both still work, so the line is their faces alone
+				expect(await page.run(`${line}.innerText.trim()`)).toBe("Working…");
+				// then Sancho: both have said something and both still work, so the line keeps both faces and its words
 				before.get("sancho")?.open();
 				await until(() => Promise.resolve(after.get("sancho")?.held === 1));
 				await page.until(`document.body.innerText.includes('Reply from sancho: LINE_GROUP_LIVE')`);
-				await page.until(`${line}?.dataset.quiet === '' && ${line}.innerText.trim() === ''`);
-				expect(await page.run(`${line}.querySelectorAll('[data-slot="avatar"]').length`)).toBe(2);
+				await page.until(
+					`${line}?.innerText.trim() === 'Working…' && ${line}.querySelectorAll('[data-slot="avatar"]').length === 2`,
+				);
+				expect(
+					await page.run(
+						`[...document.querySelectorAll('[data-message-bubble]')].every((b) => b.getBoundingClientRect().bottom <= ${line}.getBoundingClientRect().top)`,
+					),
+				).toBe(true);
 				expect((await api<GroupView>(`/groups/${room}`)).working.length).toBe(2);
 				expect(await page.run(headerQuiet("Line group"))).toBe(true);
 				// their work ends, and the line with it
@@ -307,16 +342,16 @@ it.skipIf(!hasChrome())(
 					await new Promise((resolve) => setTimeout(resolve, 120));
 				}
 				expect(seen.size, "with reduced motion the face is still").toBe(1);
-				// a still face alone would say nothing: with less motion the quiet line keeps its words
+				// the words stand beside the still face, after the agent said something too, with less motion or not
 				before.get("sancho")?.open();
 				await until(() => Promise.resolve(after.get("sancho")?.held === 1));
 				await page.until(`document.body.innerText.includes('Reply from sancho: LINE_MOTION_LIVE')`);
-				await page.until(`${line}?.dataset.quiet === ''`);
-				expect(await page.run(`${line}.innerText.trim()`)).toBe("Working…");
+				await page.until(`${line}?.innerText.trim() === 'Working…'`);
 				await page.input("Emulation.setEmulatedMedia", {
 					features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
 				});
-				await page.until(`${line}.innerText.trim() === ''`);
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				expect(await page.run(`${line}.innerText.trim()`)).toBe("Working…");
 				expect(page.errors()).toEqual([]);
 			});
 		} finally {

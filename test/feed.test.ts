@@ -349,6 +349,6 @@ describe("a routine's events", () => {
 	});
 
 	it("a run still going shows nothing of its wake until it says something", () => {
-		expect(shownOf([wake(1)], { busy: true, running: [], thinking: true })).toEqual([["working", "thinking…"]]);
+		expect(shownOf([wake(1)], { busy: true, running: [], thinking: true })).toEqual([["working", "Thinking…"]]);
 	});
 });
