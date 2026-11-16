@@ -287,7 +287,8 @@ const computerBox: RealBox = {
 		if (found === undefined) throw new Error(`The home has no ${part} computer up.`);
 		return (await found.computers.exec(found.name, ["/bin/sh", "-c", command])).trim();
 	},
-	running: async (home, part) => (await computer(home, part))?.status === "Running",
+	// not yet listed, as before its first bring-up made the runtime's cache, is not up
+	running: async (home, part) => (await computer(home, part).catch(() => undefined))?.status === "Running",
 	destroy: async (home) => {
 		const found = await computer(home, "box");
 		if (found === undefined) throw new Error("The home has no box computer to destroy.");
