@@ -5,7 +5,6 @@ import {
 	askSummary,
 	askWords,
 	callSession,
-	chatActivity,
 	harnessActivity,
 	shownAsks,
 	toolService,
@@ -66,19 +65,16 @@ it("names a coding agent's tool by its service, from what is installed or from a
 	expect(toolService(undefined, "harness__claude_code")).toBeUndefined();
 });
 it("tracks recorded working, permission, completed and interrupted states in the relevant chat only", () => {
-	expect(harnessActivity([one], [3]).label).toBe("Claude Code is working…");
+	expect(harnessActivity([one], [3])).toMatchObject({ waiting: false, sessions: [one] });
 	const asking = { ...one, state: "waiting" as const, asks: [{ id: "ask", kind: "execute", command: "npm test" }] };
-	expect(harnessActivity([asking], [3])).toMatchObject({ waiting: true, label: "Waiting on you · Claude Code" });
-	expect(harnessActivity([{ ...one, steps: [{ kind: "run", command: "npm test" }] }], [3]).label).toBe(
-		"Claude Code is running a command…",
-	);
+	expect(harnessActivity([asking], [3])).toMatchObject({ waiting: true, sessions: [asking] });
 	for (const state of ["done", "stopped", "interrupted", "failed"] as const)
-		expect(harnessActivity([{ ...one, state, ended: 2 }], [3]).label).toBeUndefined();
+		expect(harnessActivity([{ ...one, state, ended: 2 }], [3]).sessions).toEqual([]);
 	expect(harnessActivity([one], [4]).sessions).toEqual([]);
 });
 it("counts simultaneous sessions and keeps an approval first in the picker", () => {
 	const asking = { ...one, task: 2, asks: [{ id: "ask", kind: "execute", command: "npm test" }] };
-	expect(harnessActivity([one, { ...one, task: 3 }], [3]).label).toBe("2 coding sessions running");
+	expect(harnessActivity([one, { ...one, task: 3 }], [3]).sessions).toHaveLength(2);
 	const active = harnessActivity([one, asking], [3]);
 	expect(active.waiting).toBe(true);
 	expect(active.sessions.map((session) => session.task)).toEqual([2, 1]);
@@ -134,30 +130,4 @@ it("notifies with the harness and the kind, never the command, the path or the p
 	expect(askNotice([asking])).not.toContain("~/code");
 	// the project's name can itself be a secret on a lock screen
 	expect(askNotice([asking])).not.toContain("banda");
-});
-it("preserves the agent's own activity while retaining delegated attention and clears on completion", () => {
-	const active = harnessActivity([one], [3]);
-	expect(chatActivity("idle", undefined, active)).toMatchObject({ state: "working", delegatedPrimary: true });
-	expect(chatActivity("working", "Thinking…", active)).toMatchObject({
-		state: "working",
-		doing: "Thinking…",
-		secondary: true,
-	});
-	const waiting = harnessActivity([{ ...one, asks: [{ id: "ask", kind: "execute", command: "npm test" }] }], [3]);
-	expect(chatActivity("working", "Thinking…", waiting)).toMatchObject({
-		state: "working",
-		doing: "Thinking…",
-		attention: true,
-		secondary: true,
-	});
-	expect(chatActivity("waiting", undefined, active)).toMatchObject({
-		state: "waiting",
-		doing: undefined,
-		delegatedPrimary: false,
-	});
-	expect(chatActivity("idle", undefined, harnessActivity([{ ...one, state: "done", ended: 2 }], [3]))).toMatchObject({
-		state: "idle",
-		doing: undefined,
-		secondary: false,
-	});
 });

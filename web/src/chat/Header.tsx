@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import type { AvatarFace } from "../../../src/core/avatar-face.ts";
-import { Face, FaceStack, type FaceState } from "./Face.tsx";
+import { Face, FaceStack } from "./Face.tsx";
 import type { Who } from "./types.ts";
 
 export type PaneParent = { readonly title: string; readonly href: string };
@@ -84,35 +84,30 @@ export function PaneHeader({
 	);
 }
 
-/** The chat's name opens its panel. Waiting and delegated activity have their own controls. */
+/**
+ * The chat's name opens its panel, and nothing is said beneath it: what an agent does or waits on is said in the feed
+ * (the working line, an ask's card) and the band's row, so the name never moves as a turn goes on. Delegated work has
+ * its own control.
+ */
 export function Header({
 	name,
 	face,
 	faces = [],
-	doing,
-	state,
-	paused = false,
 	phone = false,
 	panelOpen = false,
 	onBack,
 	onPanel,
-	onActivity,
 	delegated,
 }: {
 	name: string;
 	face?: AvatarFace | undefined;
 	faces?: readonly Who[] | undefined;
-	doing?: string | undefined;
-	state?: FaceState | undefined;
-	paused?: boolean;
 	delegated?: ReactNode;
 	phone?: boolean;
 	panelOpen?: boolean;
 	onBack?: () => void;
 	onPanel?: () => void;
-	onActivity?: (() => void) | undefined;
 }) {
-	const line = paused ? "Routines paused" : state === "waiting" ? (doing ?? "Waiting on you") : undefined;
 	const first = face ?? faces[0]?.face;
 	const icon =
 		faces.length > 1 ? (
@@ -134,20 +129,6 @@ export function Header({
 						<ChevronLeftIcon className="size-5" />
 					</Button>
 				) : null
-			}
-			detail={
-				line === undefined ? null : onActivity === undefined || paused ? (
-					<p className="truncate text-meta text-ink-2">{line}</p>
-				) : (
-					<button
-						type="button"
-						onClick={onActivity}
-						aria-label={`Activity: ${line}`}
-						className="block max-w-full truncate rounded-field text-left text-meta text-ink-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-ring"
-					>
-						{line}
-					</button>
-				)
 			}
 			trailing={
 				<div className="flex shrink-0 items-center gap-1 empty:hidden">

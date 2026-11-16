@@ -190,6 +190,10 @@ const button = (words: string) =>
 	`[...document.querySelectorAll('button')].filter((b) => b.innerText.trim() === ${JSON.stringify(words)}).at(-1)`;
 const field = `document.querySelector('textarea[name="message"]')`;
 const header = `document.querySelector('header')`;
+/** The header's title holds the name alone: nothing beneath it says what the agent does or waits on. */
+const nameAlone = `(${header}.querySelector('h1')?.parentElement?.children.length === 1 && ${header}.querySelector('h1').parentElement.innerText.trim() === 'Sancho')`;
+/** Where the name sits, to say it never moved. */
+const nameAt = `JSON.stringify((({ top, height }) => ({ top, height }))(${header}.querySelector('h1').getBoundingClientRect()))`;
 /** Sancho's row in the band (a tile, as the lead is pinned): its words, and what its face says. */
 const row = `[...document.querySelectorAll('button[aria-label^="Sancho"]')].find((b) => !b.closest('[data-working-line]') && b.querySelector('[role="img"][data-state]'))`;
 const rowWaits = `(${row}?.getAttribute('aria-label')?.includes('waiting on you') === true)`;
@@ -228,6 +232,10 @@ async function worksOn(page: Page, marker: string, width: number, name: string) 
 	// the owner answered, and the agent works on: the line says so
 	expect.soft(await seen(page, saying), "the line says it works once the ask ended").toBe(true);
 	expect.soft(await page.run(`/working/i.test(${header}.innerText)`), "the header says nothing of work").toBe(false);
+	expect.soft(await page.run(nameAlone), "the answered ask leaves the name alone").toBe(true);
+	expect
+		.soft(await page.run(nameAt), "the name has not moved since the ask")
+		.toBe(await page.run("window.nameWhileAsked"));
 	if (desktop) expect.soft(await seen(page, rowFace("working")), "the row's face works").toBe(true);
 	await shot(page, `${name}-2-working`, width);
 	release("after");
@@ -263,9 +271,10 @@ async function waitsOnOwner(page: Page, width: number, name: string) {
 	await until(async () => (await state()) === "waiting");
 	await page.until(`!!document.querySelector('[data-open-ask]')`);
 	expect.soft(await page.run(`!${line}`), "no working line while it waits on the owner").toBe(true);
-	expect
-		.soft(await seen(page, `${header}.innerText.includes('Waiting on you')`), "the header says it waits")
-		.toBe(true);
+	// the ask's card says it waits, and the row: the header holds the name alone, so answering moves nothing
+	expect.soft(await page.run(nameAlone), "the header holds the name alone while it waits").toBe(true);
+	expect.soft(await page.run(`!/waiting/i.test(${header}.innerText)`), "the header says nothing of the ask").toBe(true);
+	await page.run(`window.nameWhileAsked = ${nameAt}`);
 	if (width >= 768) expect.soft(await seen(page, rowWaits), "the row says it waits").toBe(true);
 	await shot(page, `${name}-1-waiting`, width);
 }
@@ -382,12 +391,7 @@ it.skipIf(!hasChrome())(
 				await page.until(`!document.querySelector('[data-open-ask]')`);
 				expect.soft(await seen(page, `!${line}`), "no working line once it was stopped").toBe(true);
 				expect.soft(await seen(page, rowFace("idle")), "the row's face rests").toBe(true);
-				expect
-					.soft(
-						await seen(page, `!${header}.innerText.includes('Waiting on you')`),
-						"the header no longer says it waits",
-					)
-					.toBe(true);
+				expect.soft(await page.run(nameAlone), "the header holds the name alone once it was stopped").toBe(true);
 				expect(page.errors()).toEqual([]);
 			});
 		} finally {
