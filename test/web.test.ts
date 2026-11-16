@@ -18,7 +18,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { LEAD_TEXT, shaOf } from "../src/core/agents.ts";
 import { writeAvatarFace } from "../src/core/avatar-face.ts";
-import { DEFAULT_FACE, DEFAULT_PERSONALITY, withPersonality } from "../src/core/choices.ts";
+import { DEFAULT_FACE, personalityOf, withPersonality } from "../src/core/choices.ts";
 import { MAX_MEMORY_CHARS } from "../src/core/memory.ts";
 import type { Status } from "../src/core/status.ts";
 import { type DaemonOptions, startDaemon } from "../src/daemon.ts";
@@ -401,7 +401,7 @@ describe("web", () => {
 			const idle = {
 				name: "Sancho",
 				face: DEFAULT_FACE,
-				personality: DEFAULT_PERSONALITY,
+				personality: personalityOf(LEAD_TEXT),
 				tier: "quick",
 			};
 			expect(await api<CompanionView>("/companion")).toEqual(idle);
@@ -417,25 +417,28 @@ describe("web", () => {
 			await expect(put({ face: { emoji: "🛡️" } })).rejects.toThrow(/^400 /);
 			await expect(put({ face: { ...face, color: "url(https://example.com)" } })).rejects.toThrow(/^400 /);
 			await expect(put({ personality: 7 })).rejects.toThrow(/^400 .*as text/);
-			await expect(put({ personality: "Brief.\n## Tools\nall" })).rejects.toThrow(/^400 .*no headings/);
+			await expect(put({ personality: " \n " })).rejects.toThrow(/^400 .*few words/);
 			// a refused pick stores none of the others given with it
 			await expect(put({ name: "Dapple", face: { emoji: "ab" } })).rejects.toThrow(/^400 /);
 			expect((await api<CompanionView>("/companion")).name).toBe("Rocinante");
-			// the personality, in the owner's words, is written into the lead's file, their change, accepted at once
-			const changed = await put({ personality: "  Be brief,\nand dry.  " });
-			expect(changed).toMatchObject({ personality: "Be brief,\nand dry." });
+			// the personality, in the owner's words, is the lead's file's whole body, as any agent's: headings and a body
+			// longer than a paragraph or two included; written as their change, accepted at once, nothing added to it
+			const long = `Be brief,\nand dry.\n\n## Rules\n${"Keep this in mind. ".repeat(150).trim()}`;
+			expect(long.length).toBeGreaterThan(2000);
+			const changed = await put({ personality: `  ${long}  ` });
+			expect(changed).toMatchObject({ personality: long });
 			const file = await readFile(join(home, "workspace", "agents", "sancho.md"), "utf8");
-			expect(file).toBe(
-				withPersonality(LEAD_TEXT.replace(writeAvatarFace(DEFAULT_FACE), writeAvatarFace(face)), "Be brief,\nand dry."),
-			);
+			expect(file).toBe(withPersonality(LEAD_TEXT.replace(writeAvatarFace(DEFAULT_FACE), writeAvatarFace(face)), long));
+			expect(file).not.toContain("## Personality");
 			const lead = (await api<AgentView[]>("/agents")).find((agent) => agent.name === "sancho");
 			expect(lead?.accepted?.text).toBe(file);
+			expect(lead?.accepted?.agent?.instructions.trim()).toBe(long);
 			expect(lead?.change).toBeUndefined();
+			// written again unchanged, the file stays byte for byte
+			await put({ personality: long, base: lead?.accepted?.sha });
+			expect(await readFile(join(home, "workspace", "agents", "sancho.md"), "utf8")).toBe(file);
 			// words written into the file itself, once accepted, are what Identity shows
-			await writeFile(
-				join(home, "workspace", "agents", "sancho.md"),
-				file.replace("Be brief,\nand dry.", "Talk like a pirate."),
-			);
+			await writeFile(join(home, "workspace", "agents", "sancho.md"), file.replace(long, "Talk like a pirate."));
 			const own = (await api<AgentView[]>("/agents")).find((agent) => agent.name === "sancho");
 			await api("/agents/sancho/accept", {
 				method: "POST",

@@ -7,7 +7,6 @@ import {
 	DEFAULT_FACE,
 	DEFAULT_PERSONALITY,
 	firstEmoji,
-	MAX_PERSONALITY,
 	oneEmoji,
 	personalityOf,
 	personalityWords,
@@ -111,32 +110,59 @@ describe("the companion's picks", () => {
 			expect(() => validPicks({ face })).toThrow();
 	});
 
-	it("a personality is the lead file's own section, in the owner's words: written, read back, replaced, the rest kept", () => {
+	it("a personality is the lead file's whole body, as any agent's: written, read back, replaced, the frontmatter kept", () => {
 		const words = fc
 			.string({ minLength: 1, maxLength: 200, unit: "grapheme" })
 			.map(personalityWords)
 			.filter((each): each is string => typeof each === "string");
 		fc.assert(
 			fc.property(fc.string(), words, words, (body, first, second) => {
-				const text = `---\ndescription: d\n---\n${body.replaceAll("## Personality", "")}\n\n## Notes\nkeep me\n`;
+				const text = `---\ndescription: d\n---\n${body}`;
 				const once = withPersonality(text, first);
+				expect(once).toBe(`---\ndescription: d\n---\n${first}\n`);
 				expect(personalityOf(once)).toBe(first);
 				const twice = withPersonality(once, second);
 				expect(personalityOf(twice)).toBe(second);
-				expect(twice.match(/^## Personality/gm)).toHaveLength(1);
-				expect(twice).toContain("## Notes\nkeep me");
 				// writing the same one again changes nothing
 				expect(withPersonality(twice, second)).toBe(twice);
 			}),
 			{ numRuns: pbtRuns(100) },
 		);
-		expect(personalityOf(LEAD_TEXT)).toBe(DEFAULT_PERSONALITY);
-		expect(personalityOf("---\ndescription: d\n---\nno section")).toBeUndefined();
-		// what would end its section, or nothing at all, or too much, is refused
-		expect(personalityWords("Be brief.\n## Tools\nall")).toEqual({ refused: expect.stringMatching(/headings/) });
+		// the lead starts with its role and the default words, one body with no section of its own
+		expect(personalityOf(LEAD_TEXT)).toBe(lead.trim());
+		expect(LEAD_TEXT).not.toMatch(/^#/m);
+		expect(lead).toMatch(/^You are the owner's lead agent\./);
+		expect(lead.trim().endsWith(DEFAULT_PERSONALITY)).toBe(true);
+		expect(personalityOf("---\ndescription: d\n---\n")).toBeUndefined();
+		expect(personalityOf("---\ndescription: d\n---")).toBeUndefined();
+		// a body a home wrote before, its role and a "## Personality" section, is read whole and kept as it is
+		const older = `---\ndescription: d\n---\nYou are the lead.\n\n## Personality\nBe dry.\n`;
+		expect(personalityOf(older)).toBe("You are the lead.\n\n## Personality\nBe dry.");
+		expect(withPersonality(older, personalityOf(older) ?? "")).toBe(older);
+		// headings and long bodies are the owner's to write: no section to end, no limit but the file's
+		expect(personalityWords("Be brief.\n## Tools\nall")).toBe("Be brief.\n## Tools\nall");
+		const long = "Keep this in mind. ".repeat(200).trim();
+		expect(long.length).toBeGreaterThan(2000);
+		expect(personalityWords(long)).toBe(long);
+		expect(personalityOf(withPersonality(LEAD_TEXT, long))).toBe(long);
+		// nothing at all is refused
 		expect(personalityWords("  \n ")).toEqual({ refused: expect.stringMatching(/few words/) });
-		expect(personalityWords("a".repeat(MAX_PERSONALITY + 1))).toEqual({ refused: expect.stringMatching(/at most/) });
 		expect(personalityWords("  Warm,\r\nand brief.  ")).toBe("Warm,\nand brief.");
+	});
+
+	it("a file whose body already holds the words is left byte for byte, however its spacing falls", () => {
+		// the daemon skips a save whose words are the body's already, and the app checks the saved file against its own
+		// withPersonality: both must agree it is the file as it was, or the owner sees a conflict nobody made
+		const spacing = fc.constantFrom("", "\n", "\n\n", " \n", "\n\n\n");
+		fc.assert(
+			fc.property(spacing, spacing, spacing, (afterClose, beforeBody, end) => {
+				const file = `---\ndescription: d\n---${afterClose === "" ? "\n" : ` ${afterClose}`}${beforeBody}You are the lead.\n\nBe dry.${end}`;
+				const words = personalityWords(`${personalityOf(file)} `);
+				expect(words).toBe(personalityOf(file));
+				expect(withPersonality(file, typeof words === "string" ? words : "")).toBe(file);
+			}),
+			{ numRuns: pbtRuns(50) },
+		);
 	});
 
 	it("a reaction is exactly one emoji", () => {

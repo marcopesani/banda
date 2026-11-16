@@ -1,7 +1,7 @@
 {
 	"lead": {
 		"system": {
-			"total": 2121,
+			"total": 2106,
 			"sections": {
 				"speaking": 969,
 				"roster": 95,
@@ -10,7 +10,7 @@
 				"memory": 37,
 				"now": 265,
 				"tool_discovery": 292,
-				"instructions": 313
+				"instructions": 298
 			}
 		},
 		"tools": {

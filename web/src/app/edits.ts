@@ -1,6 +1,7 @@
 /**
- * The owner's edits to an agent from its panel, in effect at once: its face, its name and its personality. The first
- * agent's live in the companion's picks; any other's in its file, rewritten as the owner's own.
+ * The owner's edits to an agent from its panel, in effect at once: its face, its name and its personality (the body
+ * of its file, whole). The first agent's go through the companion's picks (its name is stored, not in its file); any
+ * other's rewrite its file as the owner's own.
  */
 import { type AgentView, type CompanionView, changeCompanion, saveAgent } from "../lib/api.ts";
 import { type Edit, edited, withState } from "./edit-file.ts";
