@@ -313,7 +313,7 @@ function Timeline({
 	}, [chat, transcript.loaded, through]);
 
 	const working = segments.find((segment) => segment.kind === "working");
-	const doing = working?.kind === "working" ? working.text.replace(/^\p{Ll}/u, (c) => c.toUpperCase()) : undefined;
+	const doing = working?.kind === "working" ? working.text : undefined;
 	useEffect(() => {
 		onDoing(doing);
 	}, [doing, onDoing]);

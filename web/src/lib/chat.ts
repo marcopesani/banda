@@ -364,10 +364,11 @@ const undeliveredResult = (result: Extract<Item, { role: "tool" }> | undefined) 
 	result?.error === true && /^(Not sent|Not delivered|The message was cancelled)/.test(result.text);
 
 /**
- * The line for work in progress: the running call's own, else thinking, else working. None while the run waits on the
- * owner: a call of its own opened an ask still open, and no call the model made beside it is at work. An ask no call
- * of this run opened holds none of its work back (a held request's, or a routine's run's, shown here), and a call at
- * work beside the one that asks is work: the ask's card says what waits, and the line that the agent goes on.
+ * The line for work in progress, in the words shown: the running call's own ("Reading notes.md…"), else "Thinking…",
+ * else "Working…". None while the run waits on the owner: a call of its own opened an ask still open, and no call the
+ * model made beside it is at work. An ask no call of this run opened holds none of its work back (a held request's, or
+ * a routine's run's, shown here), and a call at work beside the one that asks is work: the ask's card says what waits,
+ * and the line that the agent goes on.
  *
  * `requests` says which of the model's requests made each call. Only a call of the same request as the one that asks
  * is beside it: a run asks the model again only once every call of a request ended, so a running call of any other
@@ -392,8 +393,8 @@ export function workingLine(
 				});
 	if (asking.length > 0 && atWork.length === 0) return undefined;
 	const doing = [...atWork].reverse().find((tool) => tool.doing !== undefined)?.doing;
-	if (doing !== undefined) return `${doing}…`;
-	return live.thinking ? "thinking…" : "working…";
+	if (doing !== undefined) return `${doing.replace(/^\p{Ll}/u, (first) => first.toUpperCase())}…`;
+	return live.thinking ? "Thinking…" : "Working…";
 }
 
 export function view(

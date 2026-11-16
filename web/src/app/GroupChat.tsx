@@ -134,28 +134,14 @@ export function GroupChat({
 		undefined,
 		delegated,
 	);
-	// the working line: who works, and whether each has shown anything since. A reaction alone draws nothing, so it is
-	// not something shown
+	// the working line: who works, for as long as it works; a member whose ask is open waits on the owner instead
 	const atWork = workingMembers(
 		since.current,
-		group && {
-			latest: group.latest,
-			shown: [
-				...group.messages.flatMap((message) =>
-					"agent" in message.author && !reactionOnly(message)
-						? [{ entry: message.entry, agent: message.author.agent }]
-						: [],
-				),
-				...group.notices.flatMap((notice) =>
-					notice.agent === undefined ? [] : [{ entry: notice.entry, agent: notice.agent }],
-				),
-			],
-			asking: group.asks.map((ask) => ask.agent),
-		},
+		group && { latest: group.latest, asking: group.asks.map((ask) => ask.agent) },
 		working.flatMap((member) => (member.id === undefined ? [] : [member.id])),
 		latest,
 	);
-	const onLine = atWork.map(({ member }) => ({ ...whoOf(known, member), id: member }));
+	const onLine = atWork.map((member) => ({ ...whoOf(known, member), id: member }));
 	const lineTargets = onLine.flatMap((member) => {
 		const chat = executions[member.id];
 		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
@@ -349,7 +335,6 @@ export function GroupChat({
 						))}
 						<WorkingLine
 							who={onLine}
-							quiet={atWork.every((each) => each.shown)}
 							onOpen={
 								lineTargets.length === 0
 									? undefined

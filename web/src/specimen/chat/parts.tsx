@@ -629,7 +629,7 @@ export function Parts() {
 			</Section>
 			<Section
 				id="working"
-				note="At the foot of the feed for as long as agents work: their faces and Working… until they show something, their faces alone from then on (with less motion the words stay, still). A tap opens the activity. The header says nothing of the work."
+				note="At the foot of the feed for as long as agents work: their faces, and what they do now in words: what the running tool does, Thinking…, or Working… when nothing says more. The words stay for the whole of the work, after what the agent showed too. A tap opens the activity. The header says nothing of the work."
 			>
 				<Group label="A chat with one agent">
 					<div className="flex max-w-xl flex-col gap-3">
@@ -639,7 +639,14 @@ export function Parts() {
 						<WorkingLine who={[OCTO]} onOpen={() => {}} />
 					</div>
 				</Group>
-				<Group label="Quiet: it said something and works on">
+				<Group label="What the running tool does">
+					<div className="flex max-w-xl flex-col gap-3">
+						<WorkingLine who={[OCTO]} text="Reading timetable.md…" onOpen={() => {}} />
+						<WorkingLine who={[OCTO]} text="Running a command…" onOpen={() => {}} />
+						<WorkingLine who={[OCTO]} text="Thinking…" onOpen={() => {}} />
+					</div>
+				</Group>
+				<Group label="It said something and works on: the words stay">
 					<div className="flex max-w-xl flex-col gap-3">
 						<Run time="10:41">
 							<Bubble mine>Which train should I take to Madrid on Saturday?</Bubble>
@@ -647,7 +654,7 @@ export function Parts() {
 						<Run who={OCTO} compact time="10:42">
 							<Bubble>The 9:15 is direct. Checking the way back.</Bubble>
 						</Run>
-						<WorkingLine who={[OCTO]} quiet onOpen={() => {}} />
+						<WorkingLine who={[OCTO]} text="Using its browser…" onOpen={() => {}} />
 					</div>
 				</Group>
 				<Group label="A group: one member at work">
@@ -662,9 +669,6 @@ export function Parts() {
 				<Group label="Five members: three faces and a count">
 					<WorkingLine who={[MARA, SANCHO, OCTO, ATLAS, OTTO]} onOpen={() => {}} />
 				</Group>
-				<Group label="A group, quiet: every member at work has said something">
-					<WorkingLine who={[MARA, SANCHO]} quiet onOpen={() => {}} />
-				</Group>
 				<Group label="At phone width">
 					<div className="flex w-full max-w-[390px] flex-col gap-3 rounded-card border border-line-soft bg-paper p-4">
 						<Run time="10:05">
@@ -673,6 +677,15 @@ export function Parts() {
 							</Bubble>
 						</Run>
 						<WorkingLine who={[MARA, SANCHO]} onOpen={() => {}} />
+					</div>
+				</Group>
+				<Group label="At phone width: a long file name ends in an ellipsis">
+					<div className="flex w-full max-w-[390px] flex-col gap-3 rounded-card border border-line-soft bg-paper p-4">
+						<WorkingLine
+							who={[OCTO]}
+							text="Writing quarterly-figures-with-a-very-long-name-2026.xlsx…"
+							onOpen={() => {}}
+						/>
 					</div>
 				</Group>
 				<Group label="The chat title while work appears in the feed">

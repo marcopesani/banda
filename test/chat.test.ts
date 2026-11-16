@@ -289,10 +289,10 @@ describe("the chat, derived", () => {
 	it("the working line: what the running call does, else thinking, else working; none while waiting or idle", () => {
 		const line = (live: Live, waits: ShownWait[] = []) => view([], waits, live).find((s) => s.kind === "working");
 		expect(line({ busy: true, running: [{ call: "a", doing: "reading notes.md" }], thinking: true })).toMatchObject({
-			text: "reading notes.md…",
+			text: "Reading notes.md…",
 		});
-		expect(line({ busy: true, running: [{ call: "m" }], thinking: true })).toMatchObject({ text: "thinking…" });
-		expect(line({ busy: true, running: [], thinking: false })).toMatchObject({ text: "working…" });
+		expect(line({ busy: true, running: [{ call: "m" }], thinking: true })).toMatchObject({ text: "Thinking…" });
+		expect(line({ busy: true, running: [], thinking: false })).toMatchObject({ text: "Working…" });
 		expect(line(IDLE)).toBeUndefined();
 		const ask = { type: "question" as const, question: "?" };
 		// the run's one call asks: it waits on the owner
@@ -332,7 +332,7 @@ describe("the chat, derived", () => {
 			thinking: false,
 		};
 		const own: ShownWait = { key: "k1", chat: 1, call: "send", ask: approval, deadline: 1 };
-		expect(working(round, beside, [own])).toMatchObject({ text: "running a command…" });
+		expect(working(round, beside, [own])).toMatchObject({ text: "Running a command…" });
 		expect(asks(round, beside, [own])).toBe(1);
 		// the call at work ended: only the ask is left, and the run waits on the owner
 		expect(working(round, { ...beside, running: [{ call: "send" }] }, [own])).toBeUndefined();
@@ -353,12 +353,12 @@ describe("the chat, derived", () => {
 		expect(working([], beside, [own])).toBeUndefined();
 		// an ask no call of this run opened (a held request's) holds none of its work back
 		const held: ShownWait = { key: "k2", chat: 1, ask: approval, deadline: 1 };
-		expect(working([], { busy: true, running: [], thinking: true }, [held])).toMatchObject({ text: "thinking…" });
+		expect(working([], { busy: true, running: [], thinking: true }, [held])).toMatchObject({ text: "Thinking…" });
 		expect(asks([], { busy: true, running: [], thinking: true }, [held])).toBe(1);
 		// nor does a routine's run's, shown here: its call is another conversation's
 		const routine: ShownWait = { key: "k3", chat: 9, displayChat: 1, call: "send", ask: approval, deadline: 1 };
 		const command: Live = { busy: true, running: [{ call: "sh", doing: "running a command" }], thinking: false };
-		expect(working([], command, [routine])).toMatchObject({ text: "running a command…" });
+		expect(working([], command, [routine])).toMatchObject({ text: "Running a command…" });
 		// and with nothing running here, an open ask alone says nothing of work
 		expect(working([], IDLE, [held])).toBeUndefined();
 		expect(working([], IDLE, [routine])).toBeUndefined();

@@ -13,54 +13,62 @@ const { FeedView } = await import("./Feed.tsx");
 const who = { name: "Mara", face: defaultAvatarFace() };
 const asked: Segment = { kind: "owner", key: "40", text: "Find me a train", files: [] };
 const reply: Segment = { kind: "companion", key: "41", text: "The 09:00 is direct", files: [], undelivered: false };
-const working: Segment = { kind: "working", key: "working", text: "working…" };
+const working: Segment = { kind: "working", key: "working", text: "Working…" };
+const reading: Segment = { kind: "working", key: "working", text: "Reading notes.md…" };
+const thinking: Segment = { kind: "working", key: "working", text: "Thinking…" };
 const render = (segments: readonly Segment[], outgoing: Parameters<typeof FeedView>[0]["outgoing"] = []) =>
 	renderToStaticMarkup(
 		createElement(FeedView, { chat: 1, who, compact: true, segments, outgoing, onWorkingLine: () => {} }),
 	);
 const line = (html: string) => html.includes("data-working-line");
-/** The line as the faces alone: its words are kept for less motion only, and its label still names who works. */
-const quiet = (html: string) =>
-	line(html) && html.includes('data-quiet=""') && html.includes("motion-safe:hidden") && html.includes("is working");
-/** The line with its words. */
-const saying = (html: string) => line(html) && !html.includes("data-quiet") && !html.includes("motion-safe:hidden");
+/** The words of the line: what stands beside the face. */
+const words = (html: string) => {
+	const from = html.indexOf("data-working-line");
+	return from < 0 ? undefined : /<span[^>]*>([^<]*)<\/span><\/button>/.exec(html.slice(from))?.[1];
+};
 
-it("while the agent works and has shown nothing, its face and Working… stand at the foot, named for who works", () => {
+it("while the agent works, its face and the words of its work stand at the foot, named for who works", () => {
 	const html = render([asked, working]);
 	expect(line(html)).toBe(true);
 	expect(html).toContain('aria-label="Mara is working"');
-	expect(html).toContain("Working…");
+	expect(words(html)).toBe("Working…");
 	expect(html.indexOf("Find me a train")).toBeLessThan(html.indexOf("data-working-line"));
 });
 
-it("stays while the turn runs, quiet from the agent's first content: the face alone, still naming who works", () => {
-	expect(saying(render([asked, working]))).toBe(true);
-	expect(quiet(render([asked, reply, working]))).toBe(true);
+it("says what the running tool does, and that it thinks, as the segment says it", () => {
+	expect(words(render([asked, reading]))).toBe("Reading notes.md…");
+	expect(words(render([asked, thinking]))).toBe("Thinking…");
+	expect(words(render([asked, working]))).toBe("Working…");
+});
+
+it("keeps its words after the agent's first content, for as long as the turn runs, below what it showed", () => {
+	expect(words(render([asked, reply, working]))).toBe("Working…");
+	expect(words(render([asked, reply, reading]))).toBe("Reading notes.md…");
 	expect(render([asked, reply, working])).toContain('aria-label="Mara is working"');
-	// anything it shows counts, not only words: a line in the feed too
+	// a line in the feed is content too, and quiets nothing
 	const effect: Segment = {
 		kind: "effect",
 		key: "41:effect",
 		label: "Read your calendar",
 		permission: { scope: "always" },
 	};
-	expect(quiet(render([asked, effect, working]))).toBe(true);
+	expect(words(render([asked, effect, working]))).toBe("Working…");
 	// below what it showed: the line is the last thing in the feed
 	const html = render([asked, reply, working]);
 	expect(html.indexOf("The 09:00 is direct")).toBeLessThan(html.indexOf("data-working-line"));
+	// the words are never hidden for motion: a moving face does not stand in for them
+	expect(html).not.toContain("motion-safe:hidden");
+	expect(html).not.toContain("data-quiet");
 });
 
-it("says Working… again when work begins anew: the owner's words, a routine's wake, a watch's wake", () => {
+it("says the work again when it begins anew: the owner's words, a routine's wake, a watch's wake", () => {
 	const again: Segment = { kind: "owner", key: "42", text: "And back on Sunday?", files: [] };
-	expect(saying(render([asked, reply, again, working]))).toBe(true);
+	expect(words(render([asked, reply, again, working]))).toBe("Working…");
 	const wake: Segment = { kind: "wake", key: "43", text: "Trains ran", routine: "trains" };
-	expect(saying(render([asked, reply, wake, working]))).toBe(true);
-	expect(quiet(render([wake, reply, working]))).toBe(true);
+	expect(words(render([asked, reply, wake, reading]))).toBe("Reading notes.md…");
 	const object = { key: "github:acme/banda#142", kind: "pull request", name: "acme/banda #142" } as never;
 	const woke: Segment = { kind: "watch", key: "44", text: "lint failed", watch: "pr", object, changes: [], at: 1 };
-	expect(saying(render([asked, reply, woke, working]))).toBe(true);
-	// what a watch only tells starts no run: nothing begins anew
-	expect(quiet(render([asked, reply, { ...woke, tell: true }, working]))).toBe(true);
+	expect(words(render([asked, reply, woke, working]))).toBe("Working…");
 });
 
 const approval = (ended?: Extract<Segment, { kind: "approval" }>["ended"], open = false): Segment => ({
@@ -80,21 +88,20 @@ const question = (ended?: Extract<Segment, { kind: "question" }>["ended"]): Segm
 	...(ended === undefined ? { open: { wait: "k2", deadline: 4_102_444_800_000 } } : { ended }),
 });
 
-it("an ask the owner answered begins the agent's work anew, on its card as in the chat, a refusal too", () => {
-	// before the ask it had said something: the line was quiet
+it("after an ask the owner answered, the line says what the agent does next, a refusal too", () => {
 	const allowed = approval({ outcome: "answered", answer: "approve", said: "Approved" });
-	expect(saying(render([asked, reply, allowed, working]))).toBe(true);
+	expect(words(render([asked, reply, allowed, reading]))).toBe("Reading notes.md…");
 	const declined = approval({ outcome: "answered", answer: "deny", said: "Declined" });
-	expect(saying(render([asked, reply, declined, working]))).toBe(true);
+	expect(words(render([asked, reply, declined, working]))).toBe("Working…");
 	const picked = question({ outcome: "answered", answer: "Evening", said: "Evening" });
-	expect(saying(render([asked, reply, picked, working]))).toBe(true);
+	expect(words(render([asked, reply, picked, thinking]))).toBe("Thinking…");
 	const skipped = question({ outcome: "dismissed", said: "Dismissed" });
-	expect(saying(render([asked, reply, skipped, working]))).toBe(true);
+	expect(words(render([asked, reply, skipped, working]))).toBe("Working…");
 	// answered by typing: the question, then the owner's words beneath it, as the feed draws it
 	const typed = question({ outcome: "answered", answer: "Evening", said: "Answered below", inChat: true });
-	const words: Segment = { kind: "owner", key: "answer:45", text: "Evening", files: [] };
-	expect(saying(render([asked, reply, typed, words, working]))).toBe(true);
-	// and it goes quiet again at what the agent shows after the answer
+	const typedWords: Segment = { kind: "owner", key: "answer:45", text: "Evening", files: [] };
+	expect(words(render([asked, reply, typed, typedWords, working]))).toBe("Working…");
+	// and keeps saying it after what the agent shows after the answer
 	const after: Segment = {
 		kind: "companion",
 		key: "46",
@@ -102,21 +109,14 @@ it("an ask the owner answered begins the agent's work anew, on its card as in th
 		files: [],
 		undelivered: false,
 	};
-	expect(quiet(render([asked, reply, allowed, after, working]))).toBe(true);
+	expect(words(render([asked, reply, allowed, after, reading]))).toBe("Reading notes.md…");
 });
 
-it("an ask nobody answered is the agent's own content: expired or stopped, the line stays quiet", () => {
-	const expired = approval({ outcome: "expired", said: "No answer in time; it did not run" });
-	expect(quiet(render([asked, expired, working]))).toBe(true);
-	const stopped = question({ outcome: "cancelled", said: "Stopped before an answer" });
-	expect(quiet(render([asked, stopped, working]))).toBe(true);
-});
-
-it("work beside an open ask shows both: the card to answer, and the line beneath it", () => {
-	const html = render([asked, approval(undefined, true), working]);
+it("work beside an open ask shows both: the card to answer, and the line with its words beneath it", () => {
+	const html = render([asked, approval(undefined, true), reading]);
 	expect(html).toContain("data-open-ask");
-	expect(quiet(html)).toBe(true);
-	// with nothing at work, the open ask stands alone
+	expect(words(html)).toBe("Reading notes.md…");
+	// with nothing at work, the open ask stands alone: the agent waits on the owner
 	expect(line(render([asked, approval(undefined, true)]))).toBe(false);
 });
 
@@ -129,10 +129,12 @@ it("stays below the owner's message both while sending and once queued", () => {
 	}
 });
 
-it("says nothing of the work when nobody is working", () => {
+it("says nothing of the work when nobody is working: the turn ended, was stopped, or failed", () => {
 	const html = render([asked, reply]);
 	expect(line(html)).toBe(false);
 	expect(html).not.toContain("is working");
+	const failed: Segment = { kind: "notice", key: "41:error", text: "The model provider is busy" };
+	expect(line(render([asked, failed]))).toBe(false);
 });
 
 // a direct chat's reply never had a face: the line's face is the line's alone, and goes with it

@@ -1,13 +1,12 @@
 /**
- * The working line: at the foot of the feed, the faces of the agents at work, side by side, for as long as they work.
- * "Working…" stands beside them until what they do shows in the feed; from then on the line is quiet, the faces
- * alone, since what they showed says the rest. Where the owner asked for less motion a still face says nothing, so
- * the words stay, still too. A tap opens their activity.
+ * The working line: at the foot of the feed, the faces of the agents at work, side by side, for as long as they work,
+ * and beside them what they do now, in words: what the running tool does ("Reading notes.md…"), "Thinking…", or
+ * "Working…" when nothing says more. The words stay for the whole of the work, after what the agent showed and after
+ * the owner answered an ask, and change as the work does. A tap opens their activity.
  */
 import { useRef } from "react";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
-import { cn } from "@/lib/cn";
 import { Face } from "./Face.tsx";
 import type { Who } from "./Row.tsx";
 
@@ -22,13 +21,13 @@ export function workingLabel(names: readonly string[]): string {
 
 export function WorkingLine({
 	who,
-	quiet = false,
+	text = "Working…",
 	onOpen,
 }: {
 	/** The agents at work, in the order they started. */
 	who: readonly Who[];
-	/** Every one of them has shown something since its work began: the faces alone. */
-	quiet?: boolean;
+	/** What they do now, as the feed's working segment says it; "Working…" when nothing says more. */
+	text?: string;
 	/** A tap opens their activity; the line is handed over, for focus to come back to. */
 	onOpen?: ((line: HTMLElement) => void) | undefined;
 }) {
@@ -47,23 +46,17 @@ export function WorkingLine({
 				))}
 				{more > 0 ? <AvatarGroupCount className="size-7 text-meta">+{more}</AvatarGroupCount> : null}
 			</AvatarGroup>
-			{/* quiet, the moving faces say it; with less motion they are still, and the words say it instead */}
-			<Shimmer as="span" duration={2.4} className={cn("text-meta", quiet && "motion-safe:hidden")}>
-				Working…
+			{/* one line however long a file's name: the words end in an ellipsis before they wrap */}
+			<Shimmer as="span" duration={2.4} className="min-w-0 truncate text-meta">
+				{text}
 			</Shimmer>
 		</>
 	);
 	return (
 		// the line itself takes focus back when the sheet it opened closes
-		<div
-			ref={line}
-			tabIndex={-1}
-			data-working-line=""
-			data-quiet={quiet ? "" : undefined}
-			className="flex rounded-full outline-none"
-		>
+		<div ref={line} tabIndex={-1} data-working-line="" className="flex min-w-0 rounded-full outline-none">
 			{onOpen === undefined ? (
-				<div role="status" aria-label={label} className="flex items-center gap-2">
+				<div role="status" aria-label={label} className="flex min-w-0 items-center gap-2">
 					{content}
 				</div>
 			) : (
@@ -71,7 +64,7 @@ export function WorkingLine({
 					type="button"
 					aria-label={label}
 					aria-haspopup="dialog"
-					className="-m-2 flex min-h-11 items-center gap-2 rounded-full p-2 outline-none hover:bg-paper-2 focus-visible:ring-2 focus-visible:ring-ink"
+					className="-m-2 flex min-h-11 min-w-0 max-w-full items-center gap-2 rounded-full p-2 text-left outline-none hover:bg-paper-2 focus-visible:ring-2 focus-visible:ring-ink"
 					onClick={() => {
 						if (line.current !== null) onOpen(line.current);
 					}}
