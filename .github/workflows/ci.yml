@@ -112,11 +112,19 @@ jobs:
         with:
           path: release/cache/computer/runtime
           key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
-      - name: Open KVM to this account
+      # As the release verifies the computer: this account joins the kvm group, and the suites run in a fresh session
+      # that has it. An ACL on /dev/kvm is not enough on this runner (the release's start diagnostic: the ACL arm's
+      # machine aborts before its relay, the group arm's starts).
+      - name: Give this account the kvm group
         run: |
           test -c /dev/kvm
-          sudo setfacl -m "u:$(id -u):rw" /dev/kvm
-          test -r /dev/kvm && test -w /dev/kvm
+          getent group kvm
+          sudo -n /usr/sbin/usermod -aG kvm "$(id -un)"
+          sudo -n -u "$(id -un)" -- /usr/bin/env -i PATH=/usr/bin:/bin "$(command -v node)" -e '
+            const { accessSync, constants } = require("node:fs");
+            accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+            console.log("a fresh session opens /dev/kvm; groups:", require("node:child_process").execFileSync("/usr/bin/id", ["-nG"], { encoding: "utf8" }).trim());
+          '
       - name: Put the stand-in site on a public address routed nowhere
         run: |
           sudo ip link add banda-site type dummy
@@ -126,7 +134,12 @@ jobs:
           getent hosts echo.banda-site.example
           resolvectl query echo.banda-site.example || true
       - run: mkdir -p "$RUNNER_TEMP/computer-evidence"
-      - run: npm run test:computer -- --reporter=default --reporter=junit --outputFile.junit="$RUNNER_TEMP/computer-evidence/junit.xml"
+      - name: The box suites on the computer, in a session with the kvm group
+        run: |
+          sudo -n -u "$(id -un)" -- /usr/bin/env -i \
+            "PATH=$(dirname "$(command -v node)"):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+            "HOME=$HOME" LANG=C.UTF-8 CI=true GITHUB_ACTIONS=true "BANDA_TEST_SITE=$BANDA_TEST_SITE" \
+            npm run test:computer -- --reporter=default --reporter=junit --outputFile.junit="$RUNNER_TEMP/computer-evidence/junit.xml"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

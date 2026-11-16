@@ -181,7 +181,19 @@ boxSuite(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
 			return (await response.json()) as T;
 		};
 		// the box comes up (the first run builds or loads its image), then the stand-in site beside its proxy
-		await until(() => realBox.running(home, "box"), 500);
+		// bounded: a box that cannot come up says why in the daemon's log, which this failure then carries
+		const deadline = Date.now() + 10 * 60_000;
+		await until(async () => {
+			if (await realBox.running(home, "box")) return true;
+			if (Date.now() > deadline)
+				throw new Error(
+					`the box did not come up:\n${logs
+						.filter((line) => line.startsWith("box:"))
+						.slice(-20)
+						.join("\n")}`,
+				);
+			return false;
+		}, 500);
 		site = await realBox.site(home, {
 			labels: ["shop", "blog"],
 			image: "python",
