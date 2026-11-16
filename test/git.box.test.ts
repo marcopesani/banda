@@ -122,6 +122,8 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 	let home: string;
 	let box: Box;
 	let forge: Site;
+	/** Why git cannot run in this box, or undefined: the computer banda ships boots without it (agents install into /tools). */
+	let noGit: string | undefined;
 	let harness: Harness;
 	let stopPermissions: (() => Promise<void>) | undefined;
 	let knows!: ReturnType<typeof proxyKnows>;
@@ -192,6 +194,8 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 		stopPermissions = await onPermissions(harness, tell);
 		// the box up (the first run builds or loads both images), then the forge beside its proxy
 		expect((await sh(box.env(), "true")).code).toBe(0);
+		if ((await sh(box.env(), "command -v git")).code !== 0)
+			noGit = `the ${realBox.kind} box has no git: its image ships none, and a test installs nothing into /tools`;
 		forge = await realBox.site(home, {
 			labels: ["forge"],
 			image: "box",
@@ -267,7 +271,8 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 			);
 	};
 
-	it("a chat clones and pulls a private repository without asking; the token is set at the proxy, never in the box", async () => {
+	it("a chat clones and pulls a private repository without asking; the token is set at the proxy, never in the box", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const env = box.env(undefined, box.egress?.env(91_001));
 		const dir = `/tmp/clone-${tag}`;
 		const clone = await sh(env, `git clone -q ${URL} ${dir} 2>&1; echo " code=$?"`);
@@ -314,7 +319,8 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 		expect("status" in inside ? inside.status : 0).not.toBe(200);
 	});
 
-	it("a push waits for the owner and lands nothing; approved, it lands once", async () => {
+	it("a push waits for the owner and lands nothing; approved, it lands once", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const env = box.env(undefined, box.egress?.env(91_002));
 		const dir = `/tmp/push-${tag}`;
 		expect((await sh(env, `git clone -q ${URL} ${dir} 2>&1; echo " code=$?"`)).out).toMatch(/code=0$/);
@@ -336,7 +342,8 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 		expect((await told(push.chat)).at(-1)).toContain("Sent.");
 	});
 
-	it("a push held says to allow its host; once the owner does, git push goes straight through and lands once", async () => {
+	it("a push held says to allow its host; once the owner does, git push goes straight through and lands once", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const env = box.env(undefined, box.egress?.env(91_004));
 		const dir = `/tmp/allow-${tag}`;
 		const host = `http://${FORGE_HOST}:8080`;
@@ -404,7 +411,8 @@ boxSuite(`git through the box's proxy (${realBox.kind})`, { timeout: 180_000 }, 
 		expect(await sweepReceipts(core.held(box.egress!), harness, Date.now, "settled")).toBe(0);
 	});
 
-	it("a host taken back stops taking writes at the proxy before the revoke returns", async () => {
+	it("a host taken back stops taking writes at the proxy before the revoke returns", async (ctx) => {
+		if (noGit !== undefined) ctx.skip(noGit);
 		const [id] = Object.keys((await harness.snapshot(Permissions, context))?.permissions ?? {});
 		expect(id).toBeDefined();
 		expect(await revoke(harness, id!, Date.now())).toBe(true);

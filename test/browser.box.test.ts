@@ -55,8 +55,8 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.note()
         signed = "session=s1" in (self.headers.get("cookie") or "")
-        # the shop, as another of its names (blog-) links to it
-        shop = (self.headers.get("host") or "").replace("blog-", "shop-")
+        # the shop, as another of its names (the blog) links to it
+        shop = os.environ["SHOP"]
         if self.path == "/via":
             # a third party's sign-in through the shop, where the owner is signed in
             self.send(302, "", {"location": f"http://{shop}/settings"})
@@ -197,7 +197,7 @@ boxSuite(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
 		site = await realBox.site(home, {
 			labels: ["shop", "blog"],
 			image: "python",
-			env: { SERVER: SITE },
+			env: { SERVER: SITE, SHOP: `${HOST}:8080` },
 			start: 'exec python3 -u -c "$SERVER"',
 		});
 	}, 20 * 60_000);
@@ -441,7 +441,9 @@ boxSuite(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
 		);
 		expect(requests().some((r) => r.startsWith("POST /keys "))).toBe(false);
 		const clicked = (await results(chat, "browser_click")).at(-1)!.text;
-		expect(clicked).toMatch(/The page tried to send POST http:\/\/shop-[0-9a-f]+\.example:8080\/keys \(write w\d+\)/);
+		expect(clicked).toMatch(
+			new RegExp(`The page tried to send POST ${SHOP.replaceAll(".", "\\.")}/keys \\(write w\\d+\\)`),
+		);
 		expect(ask.ask).toMatchObject({
 			type: "approval",
 			tool: "browser_send",
@@ -487,16 +489,14 @@ boxSuite(`the browser (${realBox.kind})`, { timeout: 300_000 }, () => {
 			.join("\n");
 		const entries = JSON.stringify(await items(chat));
 		const said = logs.join("\n");
-		// what the agent's commands can read: everything but the browser's own files, which the container's box mounts
-		// where its uid cannot open them, and the computer's not at all (the browser is a machine of its own)
+		// what the agent's commands can read: everything but the browser's own files: /browser is the browser's uid's
+		// alone in the image, and in the container the browser's volume besides
 		const files = await realBox.exec(
 			home,
 			"box",
 			`grep -rl -F -e '${SECRET}' -e '${OTHER}' -e '${siteKey()}' /workspace /work /tmp 2>/dev/null || true`,
 		);
-		expect(await realBox.exec(home, "box", "ls /browser 2>&1 || true")).toMatch(
-			realBox.kind === "container" ? /Permission denied/ : /No such file or directory/,
-		);
+		expect(await realBox.exec(home, "box", "ls /browser 2>&1 || true")).toContain("Permission denied");
 		for (const secret of secrets) {
 			expect(stored.includes(secret), "the store").toBe(false);
 			expect(entries.includes(secret), "an entry").toBe(false);

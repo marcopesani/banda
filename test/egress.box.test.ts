@@ -192,7 +192,9 @@ boxSuite(`the box's closed network (${realBox.kind})`, { timeout: 180_000 }, () 
 		// a server a command starts on the box's loopback (a project's own tests) is reached directly, not refused
 		const local = await sh(
 			env,
-			"python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 & sleep 1; " +
+			// socat, which the box image carries (it has no python3), answers each connection with a file
+			"printf 'HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok' > /tmp/loop.http; " +
+				"socat -U TCP4-LISTEN:8765,bind=127.0.0.1,reuseaddr,fork OPEN:/tmp/loop.http,rdonly >/dev/null 2>&1 & sleep 1; " +
 				"curl -sS -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/; kill %1",
 		);
 		expect(local.out).toBe("200");
@@ -223,11 +225,10 @@ boxSuite(`the box's closed network (${realBox.kind})`, { timeout: 180_000 }, () 
 		expect(mismatch.out).toContain("its Host names example.com");
 		const tunnel = await sh(env, `curl -sS -m 20 https://${ECHO_HOST}:8080/ -H 'Host: example.com'`);
 		expect(tunnel.out).toContain("its Host names example.com");
-		// the proxy the box reaches, with a password the daemon never gave
-		const marked = new URL(String(box.egress?.env(90_006).http_proxy));
-		marked.password = "0".repeat(32);
+		// the proxy as the box's own env names it, port included, with a password the daemon never gave
+		const marked = String(box.egress?.env(90_006).http_proxy).replace(/:[a-f0-9]+@/, `:${"0".repeat(32)}@`);
 		const forged = await sh(
-			box.env(undefined, { http_proxy: marked.href }),
+			box.env(undefined, { http_proxy: marked }),
 			`curl -sS -m 20 -o /dev/null -w '%{http_code}' http://${ECHO_HOST}:8080/`,
 		);
 		expect(forged.out).toBe("407");

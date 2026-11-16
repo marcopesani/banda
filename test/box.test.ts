@@ -33,6 +33,9 @@ async function sh(env: ExecutionEnv, command: string, ctx = context): Promise<{ 
  */
 const UPSTREAM = new Set(["windowed exec keeps the exact tail and counts what it skips"]);
 
+/** Every process's command line, one per line, words separated by spaces: the box ships no procps. */
+const PROCESSES = "for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo; done";
+
 /** Each conformance case in a fresh directory under `root`, in the box. */
 function conformance(name: string, box: () => Box, root: () => string) {
 	let n = 0;
@@ -90,7 +93,7 @@ boxSuite(`the box (${realBox.kind})`, () => {
 		const env = box.env();
 		const cancel = new AbortController();
 		const running = sh(env, "sleep 301 & sleep 302 & wait", withAbortSignal(cancel.signal, context));
-		const count = async () => (await sh(env, "pgrep -c -f '^sleep 30[12]$' || true")).out;
+		const count = async () => (await sh(env, `${PROCESSES} | grep -c '^sleep 30[12] $' || true`)).out;
 		await until(async () => (await count()) === "2");
 		cancel.abort();
 		expect((await running).out).toContain("aborted");
@@ -102,12 +105,12 @@ boxSuite(`the box (${realBox.kind})`, () => {
 		const env = box.env();
 		expect((await sh(env, "setsid sleep 307 > /dev/null 2>&1 < /dev/null & echo left")).out).toBe("left");
 		// detached, it starts after its command returned
-		await until(async () => (await sh(env, "pgrep -f '^sleep 307$' | wc -l")).out === "1");
+		await until(async () => (await sh(env, `${PROCESSES} | grep -c '^sleep 307 $' || true`)).out === "1");
 		// another daemon on the same home: its first bring-up restarts the box
 		const next = openBox(realBox.setup(home), () => {});
 		try {
 			const again = next.env();
-			expect((await sh(again, "pgrep -f '^sleep 307$' | wc -l")).out).toBe("0");
+			expect((await sh(again, `${PROCESSES} | grep -c '^sleep 307 $' || true`)).out).toBe("0");
 			expect((await sh(again, "cat /workspace/note 2>/dev/null; echo ok")).out).toMatch(/ok$/);
 		} finally {
 			await next.close();
