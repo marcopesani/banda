@@ -19,7 +19,7 @@ import { Accepted, shaOf } from "../../src/core/agents.ts";
 import { BlobStore } from "../../src/core/blobs.ts";
 import { type Gateway, OWNER } from "../../src/core/gateway.ts";
 import { Routines, routineId, routineOfPath, routinePath, WAKE, type WakeData } from "../../src/core/routines.ts";
-import { status } from "../../src/core/status.ts";
+import { stuck } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes, type TurnResult } from "../../src/core/turn.ts";
 import type { Workspace } from "../../src/server/agents.ts";
@@ -183,7 +183,7 @@ console.log(
 		wakes,
 		turns,
 		sent: readFileSync(join(home, "sent.jsonl"), { encoding: "utf8", flag: "a+" }).split("\n").filter(Boolean),
-		parked: (await status(harness)).parked,
+		parked: await stuck(harness),
 		commits: faults.hits("commit:after"),
 		models: faults.hits("model"),
 	}),

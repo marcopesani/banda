@@ -232,3 +232,8 @@ export async function cutOff(harness: Harness, ctx: Context = context): Promise<
 		return found;
 	}, ctx);
 }
+
+/** The work that will not finish: tasks that cannot run (`parked`) and those the restart limit ended (`cutOff`). */
+export async function stuck(harness: Harness, ctx: Context = context): Promise<Parked[]> {
+	return [...(await status(harness, ctx)).parked, ...(await cutOff(harness, ctx))];
+}

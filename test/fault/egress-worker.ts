@@ -35,7 +35,7 @@ import {
 import { type Gateway, OWNER } from "../../src/core/gateway.ts";
 import { Permissions } from "../../src/core/permissions.ts";
 import { RELEASE, RELEASED } from "../../src/core/release.ts";
-import { openWaits, status } from "../../src/core/status.ts";
+import { openWaits, stuck } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, type TurnResult } from "../../src/core/turn.ts";
 import { revive, WAIT, type WaitEnded } from "../../src/core/wait.ts";
@@ -224,7 +224,7 @@ const sends = readFileSync(join(home, "sends.jsonl"), { encoding: "utf8", flag: 
 	.split("\n")
 	.filter(Boolean)
 	.map((line) => (JSON.parse(line) as HeldRequest).ticket);
-const { parked } = await status(harness);
+const parked = await stuck(harness);
 console.log(
 	JSON.stringify({
 		waits,

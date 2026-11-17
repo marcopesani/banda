@@ -28,7 +28,7 @@ import { type Gateway, OWNER } from "../../src/core/gateway.ts";
 import type { McpTool } from "../../src/core/mcp.ts";
 import { Readings } from "../../src/core/objects.ts";
 import { Control } from "../../src/core/routines.ts";
-import { status } from "../../src/core/status.ts";
+import { stuck } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes, type TurnResult } from "../../src/core/turn.ts";
 import {
@@ -502,7 +502,7 @@ export async function watchScenario(
 			held,
 			turns,
 			sent: readFileSync(join(home, "sent.jsonl"), { encoding: "utf8", flag: "a+" }).split("\n").filter(Boolean),
-			parked: (await status(harness)).parked,
+			parked: await stuck(harness),
 			reads: readFileSync(join(home, "reads.jsonl"), { encoding: "utf8", flag: "a+" }).split("\n").filter(Boolean)
 				.length,
 			looks: faults.hits("watch:read"),

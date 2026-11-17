@@ -17,7 +17,7 @@ import { EFFECT } from "../../src/core/ask.ts";
 import { BlobStore } from "../../src/core/blobs.ts";
 import { type Gateway, OWNER } from "../../src/core/gateway.ts";
 import { openPermissions, Permissions, revoke } from "../../src/core/permissions.ts";
-import { openWaits, status } from "../../src/core/status.ts";
+import { openWaits, stuck } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { isMessageTool } from "../../src/core/toolsets.ts";
 import { defineCore, type TurnResult } from "../../src/core/turn.ts";
@@ -151,7 +151,7 @@ const results = page.items.filter(
 	(e) =>
 		e.kind === "pi.tool-result" && !isMessageTool((e.model?.[0] as { toolName?: string } | undefined)?.toolName ?? ""),
 ).length;
-const { parked } = await status(harness);
+const parked = await stuck(harness);
 const activity = (await harness.snapshot(ActivityLog, context))?.events.map((event) => event.what) ?? [];
 const permissions = Object.keys((await harness.snapshot(Permissions, context))?.permissions ?? {});
 console.log(

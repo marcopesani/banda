@@ -15,7 +15,7 @@ import { BlobStore } from "../../src/core/blobs.ts";
 import { type Gateway, OWNER } from "../../src/core/gateway.ts";
 
 import { Routines, routinePath, WAKE, type WakeData } from "../../src/core/routines.ts";
-import { status } from "../../src/core/status.ts";
+import { stuck } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes, type TurnResult } from "../../src/core/turn.ts";
 import { echoModels, FAUX_MODEL } from "../fixtures/models.ts";
@@ -146,7 +146,7 @@ console.log(
 		sent: sent.map((line) => JSON.parse(line).out.text as string),
 
 		live,
-		parked: (await status(harness)).parked,
+		parked: await stuck(harness),
 		commits: faults.hits("commit:after"),
 		models: faults.hits("model"),
 	}),

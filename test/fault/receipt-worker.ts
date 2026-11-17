@@ -24,7 +24,7 @@ import { type Gateway, OWNER, routeKey } from "../../src/core/gateway.ts";
 import { Permissions } from "../../src/core/permissions.ts";
 import { RELEASED } from "../../src/core/release.ts";
 import { RoutineRuns } from "../../src/core/routines.ts";
-import { openWaits, status } from "../../src/core/status.ts";
+import { cutOff, openWaits, status } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes } from "../../src/core/turn.ts";
 import { revive, WAIT } from "../../src/core/wait.ts";
@@ -397,7 +397,7 @@ async function main() {
 					ownerInputs: page.items.filter((entry) => entry.kind === "banda.inbound").length,
 					live: await live(opened),
 					open: (await openWaits(opened)).length,
-					parked: [...current.parked],
+					parked: [...current.parked, ...(await cutOff(opened))],
 					commits: faults.hits("commit:after"),
 					points: Object.fromEntries(RECEIPT_POINTS.map((point) => [point, faults.hits(point)])),
 				};
