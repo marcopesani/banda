@@ -617,7 +617,7 @@
 		}
 	},
 	"watch": {
-		"description": "Follow something outside until it changes: when you tell the owner you will keep an eye on something (a pull request, an issue, a CI run, a repository's releases, an email thread or a search of the inbox, a calendar event, a Drive file or folder: \"I'll let you know when it merges\"), make it a watch, or it will not happen: you remember nothing between runs. banda reads it on its own and wakes you with what changed, in words, until what ends it. It writes watches/<name>.md, which runs once the owner allows it; the same object again changes it.",
+		"description": "Follow something outside until it changes: when you tell the owner you will keep an eye on something (a pull request, an issue, a CI run, a repository's releases, an email thread or a search of the inbox, a calendar event, a Drive file or folder: \"I'll let you know when it merges\"), make it a watch, or it will not happen: you remember nothing between runs. banda reads it on its own and wakes you with what changed, in words, until what ends it. It writes agents/<you>/watches/<name>.md, which runs once the owner allows it; the same object as the same account again changes it.",
 		"parameters": {
 			"type": "object",
 			"required": ["object", "ask"],

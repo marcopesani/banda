@@ -811,6 +811,22 @@ export function Parts() {
 								ask: "Tell me when it is approved or a check fails.",
 							}}
 						/>
+						{/* a shared watch from before agents had folders, asked for in Otto's chat: it wakes Mara, and her own
+						    follows the same pull request too */}
+						<WatchProposal
+							watch={{
+								agent: "Otto",
+								runsAs: "Mara",
+								shared: true,
+								twin: true,
+								title: "purrgrammer/banda #142",
+								object: <Named>{FOLLOWED.pr.object}</Named>,
+								kind: "changed",
+								until: "merged",
+								account: "@bandarra",
+								ask: "Tell me when it is approved.",
+							}}
+						/>
 						<Line icon={EyeIcon}>
 							Mara followed <Named>{FOLLOWED.pr.object}</Named>
 						</Line>

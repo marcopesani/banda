@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	createRegistry,
@@ -111,13 +111,15 @@ describe("the agent's watch call", () => {
 		const { box, watch, close } = await setUp();
 		try {
 			const object = "https://github.com/acme/banda/pull/150";
-			const file = () => readFile(join(box.workspace, watchPath("acme-banda-150")), "utf8");
 			const refused = await watch({ object, wakes_a_day: 1001, ask: "Tell me when it is approved." });
 			expect(refused).toMatchObject({ isError: true });
-			await expect(file()).rejects.toMatchObject({ code: "ENOENT" });
+			await expect(readdir(join(box.workspace, "agents/sancho/watches"))).rejects.toMatchObject({ code: "ENOENT" });
 			const wrote = await watch({ object, wakes_a_day: 6, ask: "Tell me when it is approved." });
-			expect(wrote).toMatchObject({ details: { receipt: { kind: "watch", name: "acme-banda-150", change: "added" } } });
-			expect(await file()).toBe(
+			const receipt = (wrote as { details: { receipt: { id: string } } }).details.receipt;
+			expect(receipt).toMatchObject({ kind: "watch", change: "added" });
+			// in the lead's own folder, named by the object's words and what it is
+			expect(receipt.id).toMatch(/^sancho\/acme-banda-150-[0-9a-f]{12}$/);
+			expect(await readFile(join(box.workspace, watchPath(receipt.id)), "utf8")).toBe(
 				`---\nobject: ${object}\naccount: bandarra\nwakes_a_day: 6\n---\nTell me when it is approved.\n`,
 			);
 		} finally {

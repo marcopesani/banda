@@ -5,7 +5,7 @@
  * the agent, whose reply follows the event line. No live provider or network.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -157,13 +157,19 @@ for (const width of [390, 1440])
 					await click(page, item("Follow"));
 					await page.until(shows("Following"));
 					await shot("2-following");
-					// the watch is named after what it follows, and its first look (the baseline) came before it was live
-					const name = "a-channel-in-slack";
+					// the watch is in Mara's folder, named after the channel its card names and what it is (a channel in
+					// Slack, every one alike, names none); its first look (the baseline) came before it was live
+					const [file] = (await readdir(join(home, "workspace/agents/mara/watches"))).filter((each) =>
+						each.endsWith(".md"),
+					);
+					const id = `mara/${(file ?? "").slice(0, -3)}`;
+					expect(id).toMatch(/^mara\/[a-z0-9-]+-[0-9a-f]{12}$/);
+					expect(id).not.toMatch(/a-channel-in-slack/);
 					const check = async () => {
-						const { watches } = await api<{ watches: WatchView[] }>(`/watches/${name}/check`, "POST", {
+						const { watches } = await api<{ watches: WatchView[] }>(`/watches/${id}/check`, "POST", {
 							key: randomUUID(),
 						});
-						return watches.find((each) => each.name === name);
+						return watches.find((each) => each.id === id);
 					};
 
 					post("1700000500.000600", "U0BOB", "lunch at one?");

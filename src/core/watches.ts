@@ -89,7 +89,70 @@ import { DEFAULT_WAKES_A_DAY, MAX_WAKES_A_DAY } from "./watch-limits.ts";
 export const WATCH_NAME = AGENT_NAME;
 /** The kind of a watch's task: a timer over its record, whose waking and sleeping is no news to anyone. */
 export const WATCH_TASK = "banda.watch";
-export const watchPath = (name: string) => `watches/${name}.md`;
+
+/**
+ * Which watch: its name, and the agent whose folder holds it; none for one in the shared `watches/`, which runs as the
+ * agent its record names. Two agents' watches of one name, and a shared one of it, are three watches.
+ */
+export type WatchRef = { readonly agent?: string; readonly name: string };
+/**
+ * A watch's id, which the store, its task, its wakes, its card, the API and its history name it by: `<agent>/<name>`
+ * for one in its agent's folder, `<name>` for a shared one. Never its name alone, nor what it follows in words.
+ */
+export const watchId = (ref: WatchRef): string => (ref.agent === undefined ? ref.name : `${ref.agent}/${ref.name}`);
+/** The watch id `id` names; undefined when it is no id (a path's dots, more folders, a capital). */
+export function watchRef(id: string): WatchRef | undefined {
+	const [first = "", second, ...rest] = id.split("/");
+	if (rest.length > 0) return undefined;
+	if (second === undefined) return WATCH_NAME.test(first) ? { name: first } : undefined;
+	return AGENT_NAME.test(first) && WATCH_NAME.test(second) ? { agent: first, name: second } : undefined;
+}
+const refOfWatch = (id: string): WatchRef => {
+	const ref = watchRef(id);
+	if (ref === undefined) throw new Error(`"${id}" is not a watch id`);
+	return ref;
+};
+/** Watch `id`'s name, as its file is named. */
+export const watchName = (id: string): string => refOfWatch(id).name;
+/** The folder watch `id` is in, relative to the workspace. */
+export const watchFolder = (id: string): string => {
+	const { agent } = refOfWatch(id);
+	return agent === undefined ? "watches" : `agents/${agent}/watches`;
+};
+/** The folders watch `id`'s file is in, outermost first: each must be a folder, never a link. */
+export const watchFolders = (id: string): string[] => {
+	const { agent } = refOfWatch(id);
+	return agent === undefined ? ["watches"] : ["agents", `agents/${agent}`, `agents/${agent}/watches`];
+};
+/** Watch `id`'s file, relative to the workspace. */
+export const watchPath = (id: string): string => `${watchFolder(id)}/${watchName(id)}.md`;
+/** The watch id of the workspace file `path`; undefined when it holds no watch. */
+export function watchOfPath(path: string): string | undefined {
+	const shared = /^watches\/([^/]+)\.md$/.exec(path);
+	if (shared !== null) return watchRef(shared[1] ?? "") === undefined ? undefined : shared[1];
+	const own = /^agents\/([^/]+)\/watches\/([^/]+)\.md$/.exec(path);
+	if (own === null) return undefined;
+	const id = watchId({ agent: own[1] ?? "", name: own[2] ?? "" });
+	return watchRef(id) === undefined ? undefined : id;
+}
+
+/** How many hex digits of the identity's hash a watch's name carries: enough that two objects never share one. */
+const IDENTITY_DIGITS = 12;
+
+/**
+ * The name of agent `agent`'s watch on the object reading key `key` names: the object's words (`watchNameFor`), then
+ * a hash of the connection, the canonical object and the account, so the same object again is the same file and any
+ * other one is another, whatever their words. Three Slack channels the service names alike are three files.
+ */
+export function identityName(words: string, key: string): string {
+	const digest = createHash("sha256")
+		.update(JSON.stringify(["banda.watch", key]))
+		.digest("hex")
+		.slice(0, IDENTITY_DIGITS);
+	// `words` is a made name (`fileNameFor`), at most a line long
+	const name = `${words}-${digest}`;
+	return WATCH_NAME.test(name) ? name : `watch-${digest}`;
+}
 export const MAX_WATCH_BYTES = 16 * 1024;
 /** The most bytes one reading of a followed object may hold, every read's answer together. */
 export const MAX_READING_BYTES = 512 * 1024;
@@ -202,19 +265,25 @@ export const withWakesADay = (text: string, wakes: number): string | undefined =
 	withLine(text, "wakes_a_day", String(wakes));
 
 /**
- * What a `watch` call wrote, in its result's details: the watch by name, the hash of the file, and whether it made one
+ * What a `watch` call wrote, in its result's details: the watch by id and name, the hash of the file, and whether it made one
  * (`added`), changed one in effect (`changed`), or found it in effect as written (`same`).
  */
 export type WatchReceipt = {
 	readonly kind: "watch";
+	/** The watch's id (`watchId`); `name` is its file's name. */
+	readonly id: string;
 	readonly name: string;
 	readonly sha: string;
 	readonly change: "added" | "changed" | "same";
 };
 
-/** What the store knows of a watch beyond its file. */
+/** What the store knows of a watch beyond its file, by the watch's id (`watchId`). */
 export type WatchRecord = {
-	/** The agent it belongs to, whose chat its wakes go to: the agent whose chat wrote it, or the one the owner made it for. */
+	/**
+	 * The agent a shared watch (`watches/<name>.md`) belongs to, whose chat its wakes go to: the agent whose chat wrote
+	 * it, or the one the owner made it for; the lead when unset. A watch in an agent's folder is that agent's, whatever
+	 * this says.
+	 */
 	agent?: string;
 	/** When it was first allowed. */
 	since?: number;
@@ -290,6 +359,12 @@ export type WatchRecord = {
 	done?: { at: number; why: string; authority?: true };
 	/** The hashes of the box's versions the owner allowed, newest last (at most `ALLOWED_KEPT`). */
 	allowed?: string[];
+	/**
+	 * The hashes of the versions its own agent's `watch` tool wrote, newest last (at most `ALLOWED_KEPT`): a change in
+	 * the box whose hash is not here was written some other way (a command, another agent's write into this folder), and
+	 * its card says so rather than that its agent asked.
+	 */
+	asked?: string[];
 };
 
 export const ALLOWED_KEPT = 8;
@@ -397,19 +472,18 @@ export const Followed = defineDoc<{ objects: { [key: string]: FollowedReading } 
 	checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 16,
 });
 
-/** The watch `name` as accepted, or undefined when there is none, or what was accepted does not parse. */
-export async function acceptedWatch(tx: Tx, name: string): Promise<(Watch & { readonly sha: string }) | undefined> {
-	const file = (await tx.doc(Accepted)).files[watchPath(name)];
+/** The watch `id` as accepted, or undefined when there is none, or what was accepted does not parse. */
+export async function acceptedWatch(tx: Tx, id: string): Promise<(Watch & { readonly sha: string }) | undefined> {
+	if (watchRef(id) === undefined) return undefined;
+	const file = (await tx.doc(Accepted)).files[watchPath(id)];
 	if (file === undefined) return undefined;
-	const parsed = parseWatch(name, file.text);
+	const parsed = parseWatch(watchName(id), file.text);
 	return "watch" in parsed ? { ...parsed.watch, sha: file.sha } : undefined;
 }
 
-/** Every accepted watch's name. */
+/** Every accepted watch's id: each agent's own, and the shared ones. */
 export async function acceptedWatches(tx: Tx): Promise<string[]> {
-	return Object.keys((await tx.doc(Accepted)).files).flatMap(
-		(path) => /^watches\/(.+)\.md$/.exec(path)?.slice(1) ?? [],
-	);
+	return Object.keys((await tx.doc(Accepted)).files).flatMap((path) => watchOfPath(path) ?? []);
 }
 
 /** Every connection in effect, with its version. */
@@ -422,8 +496,11 @@ export async function acceptedConnections(tx: Tx): Promise<(Connection & { reado
 	return out;
 }
 
-/** The agent a watch belongs to: the one its record names, else the lead. */
-export const watchAgent = (record: WatchRecord): string => record.agent ?? LEAD;
+/**
+ * The agent watch `id` belongs to: the one whose folder holds it; for a shared one, the one its record names, else the
+ * lead.
+ */
+export const watchAgent = (id: string, record: WatchRecord): string => watchRef(id)?.agent ?? record.agent ?? LEAD;
 
 /**
  * In `tx`: drop the reading kept at `key` in `followed` unless an accepted watch that is not done holds it. A done
@@ -502,7 +579,7 @@ export async function endWatches(tx: Tx, authority: Authority, why: string, now:
 	for (const name of await acceptedWatches(tx)) {
 		const record = watches[name];
 		if (record === undefined || record.done !== undefined) continue;
-		if (authority.agent !== undefined && watchAgent(record) !== authority.agent) continue;
+		if (authority.agent !== undefined && watchAgent(name, record) !== authority.agent) continue;
 		let connection = record.connection;
 		if (connection === undefined) {
 			const watch = await acceptedWatch(tx, name);
@@ -723,10 +800,11 @@ const wakeKey = (
  * kept for it ("Economía 🏠" is economia); else the id behind "watch-". Always a name `WATCH_NAME` takes, whichever
  * path writes the file: the agent's tool, Follow on a card, or Add in the panel.
  */
-export function watchNameFor(objectName: string, card?: ObjectCard): string {
+export function watchNameFor(objectName: string, card?: ObjectCard, generic = false): string {
 	const own = fileNameFor(objectName, "watch");
-	// an opaque id: one long run of letters and digits, or one the maker had to put behind "watch-"
-	const opaque = own === "watch" || own.startsWith("watch-") || /^[a-z0-9]{10,}$/.test(own);
+	// an opaque id: one long run of letters and digits, or one the maker had to put behind "watch-"; or the kind's own
+	// words, the same for every object of it ("a channel in Slack"), which the card's name says better
+	const opaque = generic || own === "watch" || own.startsWith("watch-") || /^[a-z0-9]{10,}$/.test(own);
 	if (!opaque) return own;
 	const words =
 		card === undefined
@@ -741,6 +819,9 @@ export function watchNameFor(objectName: string, card?: ObjectCard): string {
 	const named = fileNameFor(words, "watch");
 	return named === "watch" || named.startsWith("watch-") ? own : named;
 }
+
+/** Whether the kind names every object of it alike ("a channel in Slack"): its name has no part of the object in it. */
+export const generic = (kind: Pick<ObjectKind, "name">): boolean => !/\{[^}]+\}/.test(kind.name);
 
 /** What the looks that held saw, with what this one sees: the wake's words, the tells', and the changes' ids. */
 export type Held = {
@@ -892,8 +973,26 @@ function stop(record: WatchRecord, off: OffRead, now: number) {
 	record.next = now + lookEvery({}, {});
 }
 
-/** The agent `chat` runs. */
-const agentOf = async (tx: Tx, chat: number) => (await tx.doc(ChatAgent, chat as ConversationId)).agent?.id ?? LEAD;
+/** The agent `chat` runs; undefined when it records none, so no watch is written as an agent guessed at. */
+const agentOf = async (tx: Tx, chat: number) => (await tx.doc(ChatAgent, chat as ConversationId)).agent?.id;
+
+/**
+ * In `tx`: the watch agent `agent` writes to follow the object reading key `key` names, called `words`: the live watch
+ * of its own already following exactly that (in its folder, or a shared one from before agents had folders, by what
+ * the store resolved it to, never by its words), so the same object again changes that one and never makes a second
+ * that would wake twice; else the file in its own folder named by that identity. Never another agent's.
+ */
+export async function watchFor(tx: Tx, agent: string, key: string, words: string): Promise<string> {
+	const made = watchId({ agent, name: identityName(words, key) });
+	const { watches } = await tx.doc(Watches);
+	const same = (await acceptedWatches(tx))
+		.filter((id) => {
+			const record = watches[id];
+			return record?.key === key && record.done === undefined && watchAgent(id, record) === agent;
+		})
+		.sort();
+	return same.includes(made) ? made : (same[0] ?? made);
+}
 
 export function defineWatches(options: WatchesOptions) {
 	/** In `tx`: everything a look needs, or why it cannot be made (noted on the record, so the row says so). */
@@ -904,7 +1003,7 @@ export function defineWatches(options: WatchesOptions) {
 		const watch = await acceptedWatch(tx, name);
 		const record = (await tx.doc(Watches)).watches[name];
 		if (watch === undefined || record === undefined) return { why: "gone" };
-		const agent = watchAgent(record);
+		const agent = watchAgent(name, record);
 		const chat = await options.agentChat(tx, agent);
 		if (chat === undefined) return { why: `${agent} is not active` };
 		const found = await followed(tx, watch.object);
@@ -940,6 +1039,9 @@ export function defineWatches(options: WatchesOptions) {
 			else delete record.skipped;
 		}
 		const key = readingKey(picked.account, refKey(ref, connection.objects ?? {}));
+		// its file now follows another object, or as another account: its cursor is on that one's readings, and
+		// diffing across it would be news of neither, so its next look is a baseline of what it follows now
+		if (record.key !== undefined && record.key !== key) afresh(record);
 		const seen = record.seen;
 		return {
 			watch,
@@ -985,7 +1087,7 @@ export function defineWatches(options: WatchesOptions) {
 		const since = before?.since ?? now;
 		let told = before?.told;
 		if (told === undefined && now - since >= TELL_AFTER) {
-			const target = chat ?? (await options.agentChat(tx, watchAgent(record)));
+			const target = chat ?? (await options.agentChat(tx, watchAgent(name, record)));
 			if (target !== undefined) {
 				const data: WatchTroubleData = {
 					watch: name,
@@ -1759,7 +1861,7 @@ export function defineWatches(options: WatchesOptions) {
 			const watch = await acceptedWatch(tx, name);
 			if (watch === undefined) throw new WatchRefused(`there is no watch named ${name}`, 404);
 			if (record?.checked?.includes(key)) return "already" as const;
-			const agent = watchAgent(record ?? {});
+			const agent = watchAgent(name, record ?? {});
 			if (await isArchived(tx, agent))
 				throw new WatchRefused(`${await agentWords(tx, agent)} is archived: restore it to check its watches`, 409);
 			return "looking" as const;
@@ -1812,6 +1914,7 @@ export function defineWatches(options: WatchesOptions) {
 		const object = args.object.trim();
 		const made = await api.commit(async (tx) => {
 			const agent = await agentOf(tx, Number(api.conversationId));
+			if (agent === undefined) throw new WatchRefused("Not written: this chat runs no agent a watch could belong to.");
 			const found = await followed(tx, object);
 			if (found === undefined) throw new WatchRefused(`Not written: ${await cannotFollow(tx, object)}.`);
 			const { ref, kind, connection } = found;
@@ -1825,14 +1928,11 @@ export function defineWatches(options: WatchesOptions) {
 			const picked = await accountFor(tx, agent, connection, args.account);
 			if ("refused" in picked) throw new WatchRefused(`Not written: ${picked.refused}.`);
 			const objectName = nameOf(ref, connection.objects ?? {});
-			// named by the object, or by the card the agent read when the object's own name is an id
+			// which watch is what it follows, the account it looks with and whose it is; its words only make the name
+			// readable: by the object, or by the card the agent read when the object's own name is an id or the kind's
 			const key = readingKey(picked.account, refKey(ref, connection.objects ?? {}));
-			const base = watchNameFor(objectName, (await tx.doc(Readings)).readings[key]?.card);
-			const { watches } = await tx.doc(Watches);
-			const files = (await tx.doc(Accepted)).files;
-			let name = base;
-			for (let n = 2; files[watchPath(name)] !== undefined && watchAgent(watches[name] ?? {}) !== agent; n++)
-				name = `${base}-${n}`;
+			const words = watchNameFor(objectName, (await tx.doc(Readings)).readings[key]?.card, generic(kind));
+			const name = await watchFor(tx, agent, key, words);
 			const text = watchText({
 				object,
 				...(picked.id === undefined ? {} : { account: picked.id }),
@@ -1840,18 +1940,28 @@ export function defineWatches(options: WatchesOptions) {
 				...(args.wakes_a_day === undefined ? {} : { wakesADay: args.wakes_a_day }),
 				ask: args.ask,
 			});
-			const parsed = parseWatch(name, text);
+			const parsed = parseWatch(watchName(name), text);
 			if ("errors" in parsed) throw new WatchRefused(`Not written: ${parsed.errors.join("; ")}.`);
 			const sha = shaOf(text);
-			const known = files[watchPath(name)]?.sha;
+			const known = (await tx.doc(Accepted)).files[watchPath(name)]?.sha;
+			const { watches } = await tx.doc(Watches);
 			watches[name] ??= {};
 			const record = watches[name] as WatchRecord;
-			if (known === undefined) record.agent = agent;
+			// its folder says whose it is; the record says it too, for a shared one and whoever reads only the record
+			record.agent = agent;
+			// the version its own agent asked for: a card says that agent asks only for these bytes
+			record.asked = [...(record.asked ?? []).filter((each) => each !== sha), sha].slice(-ALLOWED_KEPT);
 			return { name, text, sha, known, objectName };
 		}, ctx);
 		const change = made.known === made.sha ? "same" : made.known === undefined ? "added" : "changed";
-		const dir = await api.env.createDir(`${root}/watches`, { recursive: true }, ctx);
+		const dir = await api.env.createDir(`${root}/${watchFolder(made.name)}`, { recursive: true }, ctx);
 		if (!dir.ok) throw new WatchRefused(`Not written: ${dir.error.message}`);
+		// its folder is a folder, never a link elsewhere: what is written there is read back as this agent's alone
+		for (const folder of watchFolders(made.name)) {
+			const info = await api.env.fileInfo(`${root}/${folder}`, ctx);
+			if (!info.ok || info.value.kind !== "directory")
+				throw new WatchRefused(`Not written: ${folder} is not a folder (a link, or a file); the owner can fix it.`);
+		}
 		const written = await api.env.writeFile(`${root}/${watchPath(made.name)}`, made.text, ctx);
 		if (!written.ok) throw new WatchRefused(`Not written: ${written.error.message}`);
 		return {
@@ -1861,7 +1971,7 @@ export function defineWatches(options: WatchesOptions) {
 					: `Wrote ${watchPath(made.name)}: it follows ${made.objectName} once the owner allows it; until then it ` +
 						"looks at nothing. They see it in the chat as a card to set it up: do not ask them to approve it, nor " +
 						"say it is set.",
-			receipt: { kind: "watch", name: made.name, sha: made.sha, change },
+			receipt: { kind: "watch", id: made.name, name: watchName(made.name), sha: made.sha, change },
 		};
 	}
 
@@ -1877,7 +1987,7 @@ export function defineWatches(options: WatchesOptions) {
 			"request, an issue, a CI run, a repository's releases, an email thread or a search of the inbox, a calendar " +
 			'event, a Drive file or folder: "I\'ll let you know when it merges"), make it a watch, or it will not happen: ' +
 			"you remember nothing between runs. banda reads it on its own and wakes you with what changed, in words, until " +
-			"what ends it. It writes watches/<name>.md, which runs once the owner allows it; the same object again changes it.",
+			"what ends it. It writes agents/<you>/watches/<name>.md, which runs once the owner allows it; the same object as the same account again changes it.",
 		parameters: Type.Object({
 			object: Type.String({
 				minLength: 1,

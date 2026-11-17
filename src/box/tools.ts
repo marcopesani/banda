@@ -167,22 +167,26 @@ const BEFORE = ["agents", "routines", "watches"];
 
 /**
  * The "before" file at `at` (absolute), relative to the workspace; undefined for any other file. An agent's own
- * routines (`agents/<agent>/routines/<name>.md`) are before files as the shared ones are.
+ * routines and watches (`agents/<agent>/routines/<name>.md`, `agents/<agent>/watches/<name>.md`) are before files as
+ * the shared ones are.
  */
 function beforeFile(workspace: string, at: string): string | undefined {
 	const relative = posix.relative(workspace, at);
 	const folder = posix.dirname(relative);
-	return (BEFORE.includes(folder) || ownRoutines(folder)) &&
+	return (BEFORE.includes(folder) || ownFolder(folder)) &&
 		posix.extname(relative) === ".md" &&
 		AGENT_NAME.test(posix.basename(relative, ".md"))
 		? relative
 		: undefined;
 }
 
-/** Whether `folder` (relative to the workspace) is an agent's own routines folder. */
-const ownRoutines = (folder: string) => {
-	const [top, agent = "", routines, ...rest] = folder.split("/");
-	return top === "agents" && AGENT_NAME.test(agent) && routines === "routines" && rest.length === 0;
+/** The folders in an agent's own folder whose files take effect only once the owner accepts them. */
+const OWN = ["routines", "watches"];
+
+/** Whether `folder` (relative to the workspace) is an agent's own routines or watches folder. */
+const ownFolder = (folder: string) => {
+	const [top, agent = "", own = "", ...rest] = folder.split("/");
+	return top === "agents" && AGENT_NAME.test(agent) && OWN.includes(own) && rest.length === 0;
 };
 
 /** What the model is told of a "before" file a call changed (by its path in the workspace), as a diagnostic. */
@@ -230,11 +234,12 @@ async function beforeFiles(
 			return undefined;
 		}
 		for (const entry of listed.value) {
-			// an agent's folder holds its own routines: a real folder, never one reached through a link
-			if (folder === "agents" && entry.kind === "directory" && AGENT_NAME.test(entry.name)) {
-				const own = await env.fileInfo(`${workspace}/agents/${entry.name}/routines`, ctx);
-				if (own.ok && own.value.kind === "directory") folders.push(`agents/${entry.name}/routines`);
-			}
+			// an agent's folder holds its own routines and watches: each a real folder, never one reached through a link
+			if (folder === "agents" && entry.kind === "directory" && AGENT_NAME.test(entry.name))
+				for (const kind of OWN) {
+					const own = await env.fileInfo(`${workspace}/agents/${entry.name}/${kind}`, ctx);
+					if (own.ok && own.value.kind === "directory") folders.push(`agents/${entry.name}/${kind}`);
+				}
 			await look(`${workspace}/${folder}/${entry.name}`, entry);
 		}
 	}

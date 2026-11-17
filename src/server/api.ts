@@ -86,6 +86,8 @@ export type Receipt =
 	/** A `watch` call's file: the watch, its hash, and whether it made, changed or kept one. */
 	| {
 			readonly kind: "watch";
+			/** The watch's id (`WatchView.id`); `name` is its file's name. */
+			readonly id: string;
 			readonly name: string;
 			readonly sha: string;
 			readonly change: "added" | "changed" | "same";
@@ -698,9 +700,29 @@ export type WatchState = "allow" | "active" | "paused" | "failing" | "done";
  * and how it stands. `POST /api/watches/:name/check` looks now; `/pause`, `/resume` and `/remove` as routines.
  */
 export type WatchView = {
+	/**
+	 * Which watch: `<agent>/<name>` for one in its agent's folder (`agents/<agent>/watches/<name>.md`), `<name>` for a
+	 * shared one (`watches/<name>.md`). Every action on it, its wakes and its history name it by this.
+	 */
+	readonly id: string;
+	/** Its file's name, which two agents' watches, or an agent's and a shared one, may share. */
 	readonly name: string;
+	/** It is in the shared `watches/`, in no agent's folder; it runs as `agent` all the same. */
+	readonly shared?: true;
 	readonly accepted?: WatchFileView;
-	readonly change?: ({ readonly kind: "added" | "changed" } & Partial<WatchFileView>) | { readonly kind: "removed" };
+	/**
+	 * The change the box holds, waiting for the owner. `asked` when its agent's own `watch` tool wrote exactly these
+	 * bytes; without it, something else wrote them (a command, another agent writing into this folder), and nobody may
+	 * be said to have asked: it would still wake `agent`.
+	 */
+	readonly change?:
+		| ({ readonly kind: "added" | "changed"; readonly asked?: true } & Partial<WatchFileView>)
+		| { readonly kind: "removed" };
+	/**
+	 * Other watches of the same agent that follow the same object as the same account, by id: each wakes on its own, so
+	 * the owner is told rather than one hiding another.
+	 */
+	readonly twins?: readonly string[];
 	readonly state: WatchState;
 	/** The agent it belongs to, by id: its wakes happen in that agent's chat. */
 	readonly agent: string;

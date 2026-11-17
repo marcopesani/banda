@@ -32,7 +32,7 @@ import {
 import { agentOfChat } from "../core/permissions.ts";
 import { MAX_SLACK_FILE_BYTES } from "../core/slack-rest.ts";
 import { context } from "../core/store.ts";
-import { parseWatch, Watches, watchAgent, watchPath } from "../core/watches.ts";
+import { parseWatch, Watches, watchAgent, watchName, watchPath, watchRef } from "../core/watches.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { BadRequest } from "./http.ts";
 
@@ -293,13 +293,16 @@ export function openObjects({
 				by: Object.entries(records)
 					.filter(
 						([watch, record]) =>
-							record.key === key && record.done === undefined && files[watchPath(watch)] !== undefined,
+							watchRef(watch) !== undefined &&
+							record.key === key &&
+							record.done === undefined &&
+							files[watchPath(watch)] !== undefined,
 					)
 					.map(([watch, record]) => {
 						const file = files[watchPath(watch)] as (typeof files)[string];
-						const parsed = parseWatch(watch, file.text);
+						const parsed = parseWatch(watchName(watch), file.text);
 						const until = "watch" in parsed ? parsed.watch.until : record.until;
-						return { watch, agent: watchAgent(record), ...(until === undefined ? {} : { until }) };
+						return { watch, agent: watchAgent(watch, record), ...(until === undefined ? {} : { until }) };
 					}),
 			};
 		}

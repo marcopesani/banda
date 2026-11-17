@@ -7,7 +7,17 @@
 import type { Context } from "@earendil-works/chord";
 import type { Harness } from "@earendil-works/pi-durable";
 import { log } from "../core/activity.ts";
-import { Accepted, activeAgents, agentWords, isArchived, shaOf, unaccept } from "../core/agents.ts";
+import {
+	Accepted,
+	AGENT_NAME,
+	acceptedAgent,
+	activeAgents,
+	agentPath,
+	agentWords,
+	isArchived,
+	shaOf,
+	unaccept,
+} from "../core/agents.ts";
 import { Connected, toolName } from "../core/connections.ts";
 import { shippedDefinition } from "../core/definitions.ts";
 import { type OffRead, offWords } from "../core/object-access.ts";
@@ -22,17 +32,24 @@ import {
 	DEFAULT_WAKES_A_DAY,
 	Followed,
 	followed,
+	generic,
 	type Looked,
 	MAX_WATCH_BYTES,
 	parseWatch,
-	WATCH_NAME,
 	type Watch,
 	Watches,
 	type WatchRecord,
 	WatchRefused,
 	watchAgent,
+	watchFolder,
+	watchFolders,
+	watchFor,
+	watchId,
+	watchName,
 	watchNameFor,
+	watchOfPath,
 	watchPath,
+	watchRef,
 	watchText,
 	withUntil,
 	withWakesADay,
@@ -51,12 +68,58 @@ const summary = (watch: Watch): WatchSummary => ({
 	ask: watch.ask,
 });
 
-const fileView = (name: string, sha: string, text: string): WatchFileView => {
-	const parsed = parseWatch(name, text);
+const fileView = (id: string, sha: string, text: string): WatchFileView => {
+	const parsed = parseWatch(watchName(id), text);
 	return { sha, ...("watch" in parsed ? { watch: summary(parsed.watch) } : { errors: parsed.errors }) };
 };
 
-const watchFiles = (workspace: Workspace, ctx: Context) => boxFiles(workspace, ctx, "watches", MAX_WATCH_BYTES);
+type BoxFile = { readonly text: string } | { readonly unreadable: string };
+
+/**
+ * Whether `folder` (relative to the workspace) is a folder itself, never a link: an agent's watches folder linked to
+ * another's would show one file as two agents' watches.
+ */
+async function realFolder(workspace: Workspace, folder: string, ctx: Context): Promise<boolean> {
+	const info = await workspace.env().fileInfo(`${workspace.root}/${folder}`, ctx);
+	if (!info.ok) {
+		if (info.error.code === "not_found") return false;
+		throw info.error;
+	}
+	return info.value.kind === "directory";
+}
+
+/**
+ * Every watch file in the box, by id: the shared ones in `watches/`, and each agent's own in its folder,
+ * `agents/<agent>/watches/`; each folder a real one, never one reached through a link.
+ */
+async function watchFiles(workspace: Workspace, ctx: Context): Promise<{ files: Map<string, BoxFile> }> {
+	const files = new Map<string, BoxFile>(
+		(await realFolder(workspace, "watches", ctx))
+			? (await boxFiles(workspace, ctx, "watches", MAX_WATCH_BYTES)).files
+			: [],
+	);
+	if (!(await realFolder(workspace, "agents", ctx))) return { files };
+	const listed = await workspace.env().listDir(`${workspace.root}/agents`, ctx);
+	if (!listed.ok) {
+		if (listed.error.code === "not_found") return { files };
+		throw listed.error;
+	}
+	for (const entry of listed.value) {
+		if (entry.kind !== "directory" || !AGENT_NAME.test(entry.name)) continue;
+		const folder = `agents/${entry.name}/watches`;
+		if (!(await realFolder(workspace, `agents/${entry.name}`, ctx)) || !(await realFolder(workspace, folder, ctx)))
+			continue;
+		const own = await boxFiles(workspace, ctx, folder, MAX_WATCH_BYTES);
+		for (const [name, file] of own.files) files.set(watchId({ agent: entry.name, name }), file);
+	}
+	return { files };
+}
+
+/** Watch `id`'s file in the box, read from its own folder alone; none while that folder is no real folder. */
+async function watchFile(workspace: Workspace, id: string, ctx: Context): Promise<BoxFile | undefined> {
+	for (const folder of watchFolders(id)) if (!(await realFolder(workspace, folder, ctx))) return undefined;
+	return (await boxFiles(workspace, ctx, watchFolder(id), MAX_WATCH_BYTES)).files.get(watchName(id));
+}
 
 /** The words that can end a watch on the kind `ref` names (`github:pull_request:…`), as its definition says. */
 function endsOf(connection: string, ref: string) {
@@ -90,7 +153,10 @@ function offRead(
 	return undefined;
 }
 
-/** Every watch, accepted or only in the box, with the change the box holds and its state; by name. */
+/**
+ * Every watch, accepted or only in the box, with the change the box holds and its state: each agent's own and the
+ * shared ones, by id, a name shared by several being several watches.
+ */
 export async function watches(harness: Harness, workspace: Workspace, ctx: Context = context): Promise<WatchView[]> {
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files ?? {};
 	const records = (await harness.snapshot(Watches, ctx))?.watches ?? {};
@@ -103,14 +169,20 @@ export async function watches(harness: Harness, workspace: Workspace, ctx: Conte
 	} catch {
 		// the box is down: what is in effect still shows
 	}
-	const names = new Set([
-		...Object.keys(accepted).flatMap((path) => /^watches\/(.+)\.md$/.exec(path)?.slice(1) ?? []),
-		...(boxed?.keys() ?? []),
-	]);
-	const views = [...names].map((name): WatchView => {
-		const file = accepted[watchPath(name)];
-		const box = boxed?.get(name);
-		const record: WatchRecord = records[name] ?? {};
+	const ids = new Set([...Object.keys(accepted).flatMap((path) => watchOfPath(path) ?? []), ...(boxed?.keys() ?? [])]);
+	// the live watches each agent follows each object with, as the store resolved them: two of one, and the owner is told
+	const following = new Map<string, string[]>();
+	for (const id of ids) {
+		const record = records[id];
+		if (accepted[watchPath(id)] === undefined || record?.key === undefined || record.done !== undefined) continue;
+		const at = JSON.stringify([watchAgent(id, record), record.key]);
+		following.set(at, [...(following.get(at) ?? []), id]);
+	}
+	const views = [...ids].map((id): WatchView => {
+		const name = watchName(id);
+		const file = accepted[watchPath(id)];
+		const box = boxed?.get(id);
+		const record: WatchRecord = records[id] ?? {};
 		const change: WatchView["change"] =
 			boxed === undefined
 				? undefined
@@ -119,10 +191,15 @@ export async function watches(harness: Harness, workspace: Workspace, ctx: Conte
 						? undefined
 						: { kind: "removed" }
 					: "unreadable" in box
-						? { kind: file === undefined ? "added" : "changed", errors: [`${watchPath(name)}: ${box.unreadable}`] }
+						? { kind: file === undefined ? "added" : "changed", errors: [`${watchPath(id)}: ${box.unreadable}`] }
 						: shaOf(box.text) === file?.sha || shaOf(box.text) === record.edit?.base
 							? undefined
-							: { kind: file === undefined ? "added" : "changed", ...fileView(name, shaOf(box.text), box.text) };
+							: {
+									kind: file === undefined ? "added" : "changed",
+									// its agent asked for it only when its own tool wrote exactly these bytes
+									...(record.asked?.includes(shaOf(box.text)) ? { asked: true as const } : {}),
+									...fileView(id, shaOf(box.text), box.text),
+								};
 		// the reference its card is read by: as the record says, else from its reading's key (connection/account/rest)
 		const ref =
 			record.ref ??
@@ -149,11 +226,18 @@ export async function watches(harness: Harness, workspace: Workspace, ctx: Conte
 			record.done !== undefined || record.connection === undefined || ref === undefined
 				? undefined
 				: offRead(offNow, record.connection, ref);
+		const twins =
+			record.key === undefined
+				? []
+				: (following.get(JSON.stringify([watchAgent(id, record), record.key])) ?? []).filter((each) => each !== id);
 		const view = {
+			id,
 			name,
-			...(file === undefined ? {} : { accepted: fileView(name, file.sha, file.text) }),
+			...(watchRef(id)?.agent === undefined ? { shared: true as const } : {}),
+			...(file === undefined ? {} : { accepted: fileView(id, file.sha, file.text) }),
 			...(change === undefined ? {} : { change }),
-			agent: watchAgent(record),
+			...(twins.length === 0 || record.done !== undefined ? {} : { twins }),
+			agent: watchAgent(id, record),
 			...(object === undefined ? {} : { object }),
 			...(record.looked === undefined ? {} : { looked: record.looked }),
 			...(record.next === undefined || record.paused !== undefined || record.done !== undefined
@@ -191,12 +275,13 @@ export async function watches(harness: Harness, workspace: Workspace, ctx: Conte
 		};
 		return { ...view, state: stateOf(view, record) };
 	});
-	return views.sort((a, b) => a.name.localeCompare(b.name));
+	return views.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
-const named = (name: string) => {
-	if (!WATCH_NAME.test(name)) throw new BadRequest(`"${name}" is not a watch's name`);
-	return name;
+/** `id`, when it is a watch's id: `<agent>/<name>`, or a shared watch's `<name>`. */
+const identified = (id: string) => {
+	if (watchRef(id) === undefined) throw new BadRequest(`"${id}" is not a watch's id`);
+	return id;
 };
 
 /**
@@ -213,7 +298,7 @@ export async function accept(
 	now: number,
 	ctx: Context = context,
 ): Promise<void> {
-	const box = (await watchFiles(workspace, ctx)).files.get(named(name));
+	const box = await watchFile(workspace, identified(name), ctx);
 	if (sha === null) {
 		if (box !== undefined) throw new BadRequest(`${watchPath(name)} is back in the box: look again`, 409);
 		await harness.commit(async (tx) => {
@@ -223,13 +308,21 @@ export async function accept(
 	} else {
 		if (box === undefined || "unreadable" in box || shaOf(box.text) !== sha)
 			throw new BadRequest(`${watchPath(name)} changed since you saw it: look again`, 409);
-		const parsed = parseWatch(name, box.text);
+		const parsed = parseWatch(watchName(name), box.text);
 		if ("errors" in parsed) throw new BadRequest(parsed.errors.join("\n"));
 		const known = await harness.commit(async (tx) => {
+			// a watch wakes the agent its folder names, or a shared one's: allowed only for one that is there to wake
+			const { watches } = await tx.doc(Watches);
+			// (archived first: an archived agent is accepted as no agent at all, which would say less)
+			const runsAs = watchAgent(name, watches[name] ?? {});
+			if (await isArchived(tx, runsAs))
+				throw new BadRequest(`${await agentWords(tx, runsAs)} is archived: restore it first`, 409);
+			const owner = watchRef(name)?.agent;
+			if (owner !== undefined && (await acceptedAgent(tx, owner)) === undefined)
+				throw new BadRequest(`${agentPath(owner)} is no agent: a watch in its folder has no one to wake`, 409);
 			const files = (await tx.doc(Accepted)).files;
 			const known = files[watchPath(name)] !== undefined;
 			files[watchPath(name)] = { sha, text: box.text, at: now };
-			const { watches } = await tx.doc(Watches);
 			watches[name] ??= {};
 			const record = watches[name] as WatchRecord;
 			record.allowed = [...(record.allowed ?? []).filter((each) => each !== sha), sha].slice(-ALLOWED_KEPT);
@@ -254,7 +347,11 @@ export async function accept(
 
 /** Decline the box's change to watch `name`: the accepted file is written back, or a new one removed. */
 export async function decline(harness: Harness, workspace: Workspace, name: string, ctx: Context = context) {
-	const file = (await harness.snapshot(Accepted, ctx))?.files[watchPath(named(name))];
+	const file = (await harness.snapshot(Accepted, ctx))?.files[watchPath(identified(name))];
+	// never written or removed through a link: that file is some other folder's
+	for (const folder of watchFolders(name))
+		if (!(await realFolder(workspace, folder, ctx)))
+			throw new BadRequest(`${folder} is not a folder (a link, or a file): fix it in the workspace`, 409);
 	const env = workspace.env();
 	const path = `${workspace.root}/${watchPath(name)}`;
 	if (file !== undefined) return write(env, workspace, path, file.text, ctx);
@@ -271,8 +368,14 @@ export async function remove(
 	now: number,
 	ctx: Context = context,
 ): Promise<void> {
-	const removed = await workspace.env().remove(`${workspace.root}/${watchPath(named(name))}`, { force: true }, ctx);
-	if (!removed.ok) throw removed.error;
+	identified(name);
+	// its box file goes, unless a folder on its way is a link: that file is some other folder's, never removed through it
+	let real = true;
+	for (const folder of watchFolders(name)) real &&= await realFolder(workspace, folder, ctx);
+	if (real) {
+		const removed = await workspace.env().remove(`${workspace.root}/${watchPath(name)}`, { force: true }, ctx);
+		if (!removed.ok) throw removed.error;
+	}
 	await harness.commit(async (tx) => {
 		const files = (await tx.doc(Accepted)).files;
 		if (files[watchPath(name)] === undefined) return;
@@ -292,7 +395,7 @@ export async function pause(
 	ctx: Context = context,
 ): Promise<boolean> {
 	const found = await harness.commit(async (tx) => {
-		const watch = await acceptedWatch(tx, named(name));
+		const watch = await acceptedWatch(tx, identified(name));
 		if (watch === undefined) return false;
 		const { watches } = await tx.doc(Watches);
 		watches[name] ??= {};
@@ -340,10 +443,10 @@ export async function changeWatch(
 ): Promise<void> {
 	if (change.ask !== undefined && (change.ask.trim() === "" || change.ask.length > 8000))
 		throw new BadRequest("say what matters in a few lines");
-	const file = (await harness.snapshot(Accepted, ctx))?.files[watchPath(named(name))];
+	const file = (await harness.snapshot(Accepted, ctx))?.files[watchPath(identified(name))];
 	if (file === undefined) throw new BadRequest(`there is no watch named ${name}`, 404);
 	if (file.sha !== sha) throw new BadRequest("it changed since you saw it: look again", 409);
-	const box = (await watchFiles(workspace, ctx)).files.get(name);
+	const box = await watchFile(workspace, name, ctx);
 	if (box !== undefined && "unreadable" in box)
 		throw new BadRequest("it has a change waiting for you to allow it: answer that first", 409);
 	const pending = (await harness.snapshot(Watches, ctx))?.watches[name]?.edit;
@@ -355,7 +458,7 @@ export async function changeWatch(
 	if (change.until !== undefined) text = withUntil(text, change.until);
 	if (change.wakesADay !== undefined && text !== undefined) text = withWakesADay(text, change.wakesADay);
 	if (change.ask !== undefined && text !== undefined) text = withAsk(text, change.ask);
-	const parsed = text === undefined ? undefined : parseWatch(name, text);
+	const parsed = text === undefined ? undefined : parseWatch(watchName(name), text);
 	if (text === undefined || parsed === undefined || "errors" in parsed)
 		throw new BadRequest(
 			parsed !== undefined && "errors" in parsed ? parsed.errors.join("; ") : "it has no frontmatter",
@@ -398,15 +501,18 @@ async function finishEdit(harness: Harness, workspace: Workspace, name: string, 
 	const edit = records[name]?.edit;
 	if (edit === undefined) return;
 	const file = (await harness.snapshot(Accepted, ctx))?.files[watchPath(name)];
-	const box = (await watchFiles(workspace, ctx)).files.get(name);
+	const box = await watchFile(workspace, name, ctx);
 	const text = box === undefined ? undefined : "unreadable" in box ? null : box.text;
 	const held =
 		edit.base === null ? text === undefined : text !== undefined && text !== null && shaOf(text) === edit.base;
 	if (file?.sha === edit.sha && held) {
 		if (edit.base === null) {
-			const made = await workspace.env().createDir(`${workspace.root}/watches`, { recursive: true }, ctx);
+			const made = await workspace.env().createDir(`${workspace.root}/${watchFolder(name)}`, { recursive: true }, ctx);
 			if (!made.ok) throw made.error;
 		}
+		for (const folder of watchFolders(name))
+			if (!(await realFolder(workspace, folder, ctx)))
+				throw new Error(`${folder} is not a folder: the box keeps no copy`);
 		await write(workspace.env(), workspace, `${workspace.root}/${watchPath(name)}`, file.text, ctx);
 	}
 	await harness.commit(async (tx) => {
@@ -419,7 +525,7 @@ async function finishEdit(harness: Harness, workspace: Workspace, name: string, 
 export async function finishEdits(harness: Harness, workspace: Workspace, ctx: Context = context): Promise<void> {
 	const records = (await harness.snapshot(Watches, ctx))?.watches ?? {};
 	for (const [name, record] of Object.entries(records))
-		if (record.edit !== undefined) await finishEdit(harness, workspace, name, ctx);
+		if (record.edit !== undefined && watchRef(name) !== undefined) await finishEdit(harness, workspace, name, ctx);
 }
 
 /** What the owner follows from an object's card or the panel: whose watch, what, as whom, until what, and what matters. */
@@ -453,7 +559,7 @@ export async function createWatch(
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files ?? {};
 	if (!activeAgents(accepted).includes(made.agent)) throw new BadRequest(`there is no agent named ${made.agent}`, 404);
 	const boxed = (await watchFiles(workspace, ctx)).files;
-	const { name, text, sha } = await harness.commit(async (tx) => {
+	const { name, text, sha, before, earlier } = await harness.commit(async (tx) => {
 		if (await isArchived(tx, made.agent))
 			throw new BadRequest(`${await agentWords(tx, made.agent)} is archived: restore it first`, 409);
 		const found = await followed(tx, object);
@@ -464,43 +570,57 @@ export async function createWatch(
 				ends.length === 0 ? "nothing ends it: leave until out" : `until is one of ${ends.join(", ")}`,
 			);
 		const { watches } = await tx.doc(Watches);
-		// one agent follows an object once while that watch lives: following it again starts afresh once it ended
-		const ref = refKey(found.ref, found.connection.objects ?? {});
-		const live = Object.entries(watches).find(
-			([, record]) => watchAgent(record) === made.agent && record.ref === ref && record.done === undefined,
-		);
-		if (live !== undefined)
-			throw new BadRequest(`${await agentWords(tx, made.agent)} already follows it (${watchPath(live[0])})`, 409);
 		const picked = await accountFor(tx, made.agent, found.connection, made.account);
 		if ("refused" in picked) throw new BadRequest(picked.refused, 409);
+		// which watch is the agent, the connection, the object as it canonically is and the account; never its words
+		const ref = refKey(found.ref, found.connection.objects ?? {});
+		const key = readingKey(picked.account, ref);
 		// named by the object, or by its card when the object's own name is an id, as the agent's tool names it
-		const card = (await tx.doc(Readings)).readings[readingKey(picked.account, ref)]?.card;
-		const base = watchNameFor(nameOf(found.ref, found.connection.objects ?? {}), card);
+		const card = (await tx.doc(Readings)).readings[key]?.card;
+		const words = watchNameFor(nameOf(found.ref, found.connection.objects ?? {}), card, generic(found.kind));
+		const name = await watchFor(tx, made.agent, key, words);
+		// one agent follows an object as one account once while that watch lives: following it again starts afresh once
+		// it ended
+		const live = watches[name];
+		if ((await acceptedWatch(tx, name)) !== undefined && live?.key === key && live.done === undefined)
+			throw new BadRequest(`${await agentWords(tx, made.agent)} already follows it (${watchPath(name)})`, 409);
 		const files = (await tx.doc(Accepted)).files;
-		let name = base;
-		for (let n = 2; files[watchPath(name)] !== undefined || boxed.has(name) || watches[name] !== undefined; n++)
-			name = `${base}-${n}`;
+		// a change of that identity waiting in the box is the agent's ask, never written over unseen
+		const box = boxed.get(name);
+		// copies: the commit that puts them back, should the first look fail, is another
+		const held = files[watchPath(name)];
+		const before = held === undefined ? undefined : { ...held };
+		if (box !== undefined && ("unreadable" in box || shaOf(box.text) !== before?.sha))
+			throw new BadRequest(`${watchPath(name)} waits for you to allow or decline it: answer that first`, 409);
 		const text = watchText({
 			object,
 			...(picked.id === undefined ? {} : { account: picked.id }),
 			...(made.until === undefined ? {} : { until: made.until }),
 			ask,
 		});
-		const parsed = parseWatch(name, text);
+		const parsed = parseWatch(watchName(name), text);
 		if ("errors" in parsed) throw new BadRequest(parsed.errors.join("; "));
 		const sha = shaOf(text);
+		// following again what it followed until it ended starts that watch afresh: a new record, the box's file replaced
+		const earlier =
+			watches[name] === undefined ? undefined : (JSON.parse(JSON.stringify(watches[name])) as WatchRecord);
 		files[watchPath(name)] = { sha, text, at: now };
-		watches[name] = { agent: made.agent, edit: { sha, base: null }, since: now, sha };
+		watches[name] = { agent: made.agent, edit: { sha, base: before?.sha ?? null }, since: now, sha };
 		await log(tx, { at: now, watch: name, what: "You made it" });
-		return { name, text, sha };
+		return { name, text, sha, before, earlier };
 	}, ctx);
 	// the first look, before the watch is live: its baseline
 	const first = await look(harness, name, ctx);
 	if (first.outcome === "failed" || first.outcome === "gone") {
+		// no watch: what was there before stays as it was
 		await harness.commit(async (tx) => {
 			const files = (await tx.doc(Accepted)).files;
-			if (files[watchPath(name)]?.sha === sha) delete files[watchPath(name)];
-			delete (await tx.doc(Watches)).watches[name];
+			if (files[watchPath(name)]?.sha !== sha) return;
+			const { watches } = await tx.doc(Watches);
+			if (before === undefined) delete files[watchPath(name)];
+			else files[watchPath(name)] = before;
+			if (earlier === undefined) delete watches[name];
+			else watches[name] = earlier;
 		}, ctx);
 		throw new BadRequest(first.outcome === "failed" ? `it could not be read: ${first.why}` : "it is gone", 502);
 	}
@@ -518,7 +638,7 @@ export async function checkNow(
 ): Promise<Looked | { readonly outcome: "already" }> {
 	if (!/^[A-Za-z0-9-]{1,64}$/.test(key)) throw new BadRequest("key names the click: letters, digits and dashes");
 	try {
-		return await check(named(name), key);
+		return await check(identified(name), key);
 	} catch (error) {
 		if (error instanceof WatchRefused) throw new BadRequest(error.message, error.status);
 		throw error;

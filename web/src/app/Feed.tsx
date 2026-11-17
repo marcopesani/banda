@@ -344,19 +344,24 @@ function WatchCallLine({
 	agent: { readonly id: string; readonly name: string } | undefined;
 	segment: Extract<Segment, { kind: "watchCall" }>;
 }) {
-	const { watch, state, name } = segment;
+	const { watch, state, id } = segment;
+	const shell = useShell();
 	const change = watch?.change;
 	// the object as the owner's references draw it: by its key once the daemon resolved it, else by the file's link
 	const what = watchObject(segment);
 	const inline = (
 		<FollowedObject chat={chat} agent={agent} reference={watch?.object?.ref ?? what} fallback={what} strong />
 	);
-	if (state === "pending" && watch !== undefined && name !== undefined && change !== undefined) {
+	if (state === "pending" && watch !== undefined && id !== undefined && change !== undefined) {
 		const shown = change.kind === "removed" ? watch.accepted?.watch : change.watch;
 		return (
 			<WatchProposal
 				watch={{
 					agent: who.name,
+					// whom it wakes: the agent its folder (or, shared, its record) names, whose chat this need not be
+					runsAs: agentNameOf(shell, watch.agent),
+					shared: watch.shared === true,
+					twin: (watch.twins?.length ?? 0) > 0,
 					title: what,
 					object: inline,
 					kind: change.kind === "added" ? "new" : change.kind,
@@ -372,12 +377,12 @@ function WatchCallLine({
 					ask: shown?.ask ?? "",
 				}}
 				onAllow={() =>
-					void actOnWatch(name, {
+					void actOnWatch(id, {
 						action: "accept",
 						sha: change.kind === "removed" ? null : (change.sha ?? null),
 					}).then(showWatching)
 				}
-				onDecline={() => void actOnWatch(name, { action: "decline" }).then(showWatching)}
+				onDecline={() => void actOnWatch(id, { action: "decline" }).then(showWatching)}
 			/>
 		);
 	}

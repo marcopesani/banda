@@ -192,9 +192,19 @@ for (const width of [390, 1440])
 
 					// its first look is its baseline: GitHub changing before it would be no change at all
 					await page.until(shows("nothing new"));
-					const watchFile = (await readdir(join(home, "workspace/watches"))).find((file) => file.endsWith(".md"));
-					if (watchFile === undefined) throw new Error("the followed watch has no file");
-					const watchName = watchFile.slice(0, -3);
+					// the owner's own follow is in its agent's folder, named by the object and what it is: its id is both
+					const owned = await readdir(join(home, "workspace/agents"), { withFileTypes: true });
+					const found = await Promise.all(
+						owned
+							.filter((entry) => entry.isDirectory())
+							.map(async (entry) =>
+								(await readdir(join(home, "workspace/agents", entry.name, "watches")).catch(() => []))
+									.filter((file) => file.endsWith(".md"))
+									.map((file) => `${entry.name}/${file.slice(0, -3)}`),
+							),
+					);
+					const watchName = found.flat()[0];
+					if (watchName === undefined) throw new Error("the followed watch has no file");
 					const controlY = () => page.run<number>(`(${button("Check now")}).getBoundingClientRect().y`);
 					const beforeStatus = await controlY();
 					await api(`/watches/${watchName}/pause`, "POST", {});
