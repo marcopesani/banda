@@ -166,6 +166,29 @@ describe("a harness session over ACP v2", () => {
 		expect((await s.logged()).some((entry) => entry.closed !== undefined)).toBe(true);
 	});
 
+	/**
+	 * Claude Code's own follow-up on a finished background command (the run its task notification starts) must reach
+	 * the session before it ends done. In claude-agent-acp 0.100.0's order the list empties under `idle` first and the
+	 * follow-up's `running` comes only with the model's first output, so the session ends before it: this fails today
+	 * (`it.fails`), and passes once the order is fixed. The proposed adapter order (next test) passes with banda as is.
+	 */
+	it.fails("keeps a done session open for Claude Code's follow-up on its background command (0.100.0's order)", async () => {
+		const s = await setup({ FAKE_ACP_V2: "1", FAKE_ACP_FOLLOW_MS: "1500" });
+		const task = await s.begin("bgfollow 300 the tests passed, committing\nsay started the tests");
+		await until(() => s.woke.length === 1);
+		expect((await s.sessions())[task]?.state).toBe("done");
+		expect(s.result(s.woke[0]?.text).said).toContain("the tests passed, committing");
+	});
+
+	it("keeps it open when the adapter opens the follow-up's run before the list drops the command", async () => {
+		const s = await setup({ FAKE_ACP_V2: "1", FAKE_ACP_FOLLOWUP: "atomic", FAKE_ACP_FOLLOW_MS: "1500" });
+		const task = await s.begin("bgfollow 300 the tests passed, committing\nsay started the tests");
+		await until(() => s.woke.length === 1);
+		expect((await s.sessions())[task]?.state).toBe("done");
+		expect(s.result(s.woke[0]?.text).said).toContain("the tests passed, committing");
+		expect((await s.logged()).some((entry) => entry.followedUp !== undefined)).toBe(true);
+	});
+
 	it("an agent that never reports background work ends closed with its turn, never done, and says so", async () => {
 		const s = await setup({ FAKE_ACP_V2: "unreported" });
 		const task = await s.begin("say all done");

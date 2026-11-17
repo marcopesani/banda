@@ -34,6 +34,13 @@
  *   bgask <ms> <command>   a background command that, after ms, asks to run <command>, then ends
  *   withdraw <ms> <command> asks to run <command>, and withdraws the ask after ms ($/cancel_request), unanswered
  *   task <ms>              background work of a kind with no cancel of its own (`_claude/task`): only close ends it
+ *   bgfollow <ms> <text>   a background command that ends after ms, after which Claude Code's own follow-up run (on
+ *                          its task notification) says <text>. By default in claude-agent-acp 0.100.0's order: the
+ *                          command's exit, then `idle` with the list that drops it (acp-agent.js:4765 then the
+ *                          per-message sync at :3933), and only FAKE_ACP_FOLLOW_MS later (the model's first output,
+ *                          :7709-7723) `running`, the words and `idle`. FAKE_ACP_FOLLOWUP=atomic sends the proposed
+ *                          adapter order instead: `running` first, at the task notification, with the item still
+ *                          listed, so no `idle` with an empty list comes between the command and its follow-up
  */
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -250,6 +257,58 @@ async function run(sessionId: string, script: string): Promise<string> {
 			background(sessionId, "terminal", Number(rest[0] ?? 0));
 		} else if (v2 && verb === "monitor") {
 			background(sessionId, "tool_call", Number(rest[0] ?? 0));
+		} else if (v2 && verb === "bgfollow") {
+			const ms = Number(rest[0] ?? 0);
+			const text = rest.slice(1).join(" ");
+			const id = `term-${++call}`;
+			update(sessionId, { sessionUpdate: "terminal_update", terminalId: id, command: `bg ${ms}` });
+			update(sessionId, {
+				sessionUpdate: "tool_call_update",
+				toolCallId: id,
+				title: `bg ${ms}`,
+				kind: "execute",
+				status: "in_progress",
+				rawInput: { command: `bg ${ms}` },
+				content: [{ type: "terminal", terminalId: id }],
+			});
+			const drop = () => {
+				const at = items.findIndex((item) => item.id === id);
+				if (at < 0) return false;
+				update(sessionId, { sessionUpdate: "terminal_update", terminalId: id, exitStatus: { exitCode: 0 } });
+				update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" });
+				items.splice(at, 1);
+				record({ backgroundEnded: id, status: "completed" });
+				return true;
+			};
+			items.push({
+				type: "terminal",
+				id,
+				end: () => {
+					if (drop()) state(sessionId, foreground);
+				},
+			});
+			state(sessionId, foreground);
+			setTimeout(() => {
+				if (!items.some((item) => item.id === id)) return;
+				const atomic = process.env.FAKE_ACP_FOLLOWUP === "atomic";
+				// proposed: the follow-up's foreground opens at the task notification, before the item leaves the list
+				if (atomic) state(sessionId, "running");
+				drop();
+				state(sessionId, foreground);
+				setTimeout(
+					() => {
+						if (!atomic) state(sessionId, "running");
+						update(sessionId, {
+							sessionUpdate: "agent_message_chunk",
+							messageId: `said-${++said}`,
+							content: { type: "text", text },
+						});
+						record({ followedUp: text });
+						state(sessionId, "idle", "end_turn");
+					},
+					Number(process.env.FAKE_ACP_FOLLOW_MS ?? 1500),
+				);
+			}, ms);
 		} else if (v2 && verb === "task") {
 			background(sessionId, "_claude/task", Number(rest[0] ?? 0));
 		} else if (v2 && verb === "withdraw") {
