@@ -157,14 +157,13 @@ for (const width of [390, 1440])
 					await click(page, item("Follow"));
 					await page.until(shows("Following"));
 					await shot("2-following");
-					// the watch is in Mara's folder, named after the channel its card names and what it is (a channel in
-					// Slack, every one alike, names none); its first look (the baseline) came before it was live
+					// the watch is in Mara's folder, named by its connection, kind and what it follows, never by the channel's
+					// name, which can change; its first look (the baseline) came before it was live
 					const [file] = (await readdir(join(home, "workspace/agents/mara/watches"))).filter((each) =>
 						each.endsWith(".md"),
 					);
 					const id = `mara/${(file ?? "").slice(0, -3)}`;
-					expect(id).toMatch(/^mara\/[a-z0-9-]+-[0-9a-f]{12}$/);
-					expect(id).not.toMatch(/a-channel-in-slack/);
+					expect(id).toMatch(/^mara\/slack-channel-[0-9a-f]{24}$/);
 					const check = async () => {
 						const { watches } = await api<{ watches: WatchView[] }>(`/watches/${id}/check`, "POST", {
 							key: randomUUID(),

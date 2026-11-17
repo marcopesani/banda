@@ -41,6 +41,8 @@ export type WatchRowView = {
 	readonly twins?: number | undefined;
 	/** It is in the shared `watches/`, not the agent's own folder. */
 	readonly shared?: boolean | undefined;
+	/** The change waiting would make it follow another object or account: what it follows now, and what it would. */
+	readonly retarget?: { readonly from: string; readonly to: string } | undefined;
 	readonly onAllow?: (() => void) | undefined;
 	readonly onDecline?: (() => void) | undefined;
 };
@@ -124,10 +126,15 @@ export function watchRows(
 							: ("change" as const);
 			const saw = sawWords(watch, now);
 			const until = untilWords(watch);
+			const retarget = change !== undefined && change.kind !== "removed" ? change.retarget : undefined;
+			const said = (target: { readonly name: string; readonly account?: string }) =>
+				target.account === undefined ? target.name : `${target.name} as ${target.account}`;
 			return [
 				{
 					id: watch.id,
-					name: watchTitle(watch),
+					// a change to what it follows is named by what it follows now; the row says what it would
+					name: retarget === undefined ? watchTitle(watch) : retarget.from.name,
+					...(retarget === undefined ? {} : { retarget: { from: said(retarget.from), to: said(retarget.to) } }),
 					...(watch.shared === true ? { shared: true } : {}),
 					...(watch.twins === undefined || watch.twins.length === 0 ? {} : { twins: watch.twins.length }),
 					service: watch.object?.service,

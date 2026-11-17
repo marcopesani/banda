@@ -598,6 +598,11 @@ function WatchRow({
 						{watch.until === undefined ? "" : `${watch.until} · `}Waiting for you to{" "}
 						{watch.waiting === "set up" ? "set it up" : `${watch.waiting} it`}
 					</span>
+					{watch.retarget === undefined ? null : (
+						<span className="text-meta text-ink [overflow-wrap:anywhere]" data-watch-retarget>
+							Would follow {watch.retarget.to} instead of {watch.retarget.from}
+						</span>
+					)}
 					{watch.unasked === true ? (
 						<span className="text-meta text-danger">
 							{agent} didn't ask for this: it was written{" "}

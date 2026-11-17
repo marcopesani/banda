@@ -16,7 +16,7 @@ Entry points: ../src/core/watches.ts (the file, the task, the looks), ../src/ser
 `wakes_a_day` and a body the agent gets at every wake. The `watch` tool writes one as a card ("Follow banda#142 until merged?"); Follow on an object's
 card and the panel's Add write the owner's own, accepted in the commit that stores them. The store holds the watch's
 task only: its reading, its health, its wakes. Its identity is its agent, connection, canonical object and resolved
-account (DESIGN.md "Watches"); the file's name is the object's words and that identity's hash, and its id
+account (DESIGN.md "Watches"); the file's name is its connection, kind and that identity's hash, and its id
 (`<agent>/<name>`, a shared one's `<name>`) names it in the store, the API, its wakes and its card.
 
 **The task.** The first look happens before the watch is live and is its baseline; a failed first look makes no

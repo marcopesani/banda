@@ -21,7 +21,7 @@ import {
 import { Connected, toolName } from "../core/connections.ts";
 import { shippedDefinition } from "../core/definitions.ts";
 import { type OffRead, offWords } from "../core/object-access.ts";
-import { nameOf, Readings, readingKey, refKey } from "../core/objects.ts";
+import { readingKey, refKey } from "../core/objects.ts";
 import { withAsk } from "../core/routines.ts";
 import { context } from "../core/store.ts";
 import {
@@ -32,21 +32,21 @@ import {
 	DEFAULT_WAKES_A_DAY,
 	Followed,
 	followed,
-	generic,
 	type Looked,
 	MAX_WATCH_BYTES,
 	parseWatch,
+	targetOf,
 	type Watch,
 	Watches,
 	type WatchRecord,
 	WatchRefused,
+	type WatchTarget,
 	watchAgent,
 	watchFolder,
 	watchFolders,
 	watchFor,
 	watchId,
 	watchName,
-	watchNameFor,
 	watchOfPath,
 	watchPath,
 	watchRef,
@@ -55,7 +55,7 @@ import {
 	withWakesADay,
 } from "../core/watches.ts";
 import { boxFiles, type Workspace, write } from "./agents.ts";
-import type { WatchFileView, WatchState, WatchSummary, WatchView } from "./api.ts";
+import type { WatchFileView, WatchState, WatchSummary, WatchTargetView, WatchView } from "./api.ts";
 import { BadRequest } from "./http.ts";
 
 type Reconcile = (harness: Harness, ctx?: Context) => Promise<void>;
@@ -275,7 +275,61 @@ export async function watches(harness: Harness, workspace: Workspace, ctx: Conte
 		};
 		return { ...view, state: stateOf(view, record) };
 	});
-	return views.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+	// a change that would follow something else says what, and instead of what
+	const moving = await retargets(
+		harness,
+		views.flatMap((view) => {
+			const box = boxed?.get(view.id);
+			const file = accepted[watchPath(view.id)];
+			return view.change?.kind === "changed" && box !== undefined && "text" in box && file !== undefined
+				? [{ id: view.id, agent: view.agent, from: file.text, to: box.text }]
+				: [];
+		}),
+		ctx,
+	);
+	return views
+		.map((view) => {
+			const retarget = moving.get(view.id);
+			return retarget === undefined || view.change === undefined || view.change.kind === "removed"
+				? view
+				: { ...view, change: { ...view.change, retarget } };
+		})
+		.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+/**
+ * For each change waiting that would make a watch follow another object or account than its file in effect: what it
+ * follows now and what it would, as `targetOf` resolves them (a file that resolves to nothing is shown by its own
+ * object and account lines). In a commit that writes nothing.
+ */
+async function retargets(
+	harness: Harness,
+	changes: readonly { id: string; agent: string; from: string; to: string }[],
+	ctx: Context,
+): Promise<Map<string, { from: WatchTargetView; to: WatchTargetView }>> {
+	if (changes.length === 0) return new Map();
+	const shown = (target: WatchTarget | undefined, id: string, text: string): WatchTargetView => {
+		if (target !== undefined)
+			return {
+				name: target.name,
+				ref: target.ref,
+				...(target.account === undefined ? {} : { account: target.account }),
+			};
+		const parsed = parseWatch(watchName(id), text);
+		return "watch" in parsed
+			? { name: parsed.watch.object, ...(parsed.watch.account === undefined ? {} : { account: parsed.watch.account }) }
+			: { name: "a file that does not parse" };
+	};
+	return harness.commit(async (tx) => {
+		const out = new Map<string, { from: WatchTargetView; to: WatchTargetView }>();
+		for (const { id, agent, from, to } of changes) {
+			const before = await targetOf(tx, agent, watchName(id), from);
+			const after = await targetOf(tx, agent, watchName(id), to);
+			if (before === undefined || after === undefined || before.key !== after.key)
+				out.set(id, { from: shown(before, id, from), to: shown(after, id, to) });
+		}
+		return out;
+	}, ctx);
 }
 
 /** `id`, when it is a watch's id: `<agent>/<name>`, or a shared watch's `<name>`. */
@@ -559,6 +613,7 @@ export async function createWatch(
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files ?? {};
 	if (!activeAgents(accepted).includes(made.agent)) throw new BadRequest(`there is no agent named ${made.agent}`, 404);
 	const boxed = (await watchFiles(workspace, ctx)).files;
+	const texts = new Map([...boxed].flatMap(([id, file]) => ("text" in file ? [[id, file.text] as const] : [])));
 	const { name, text, sha, before, earlier } = await harness.commit(async (tx) => {
 		if (await isArchived(tx, made.agent))
 			throw new BadRequest(`${await agentWords(tx, made.agent)} is archived: restore it first`, 409);
@@ -572,17 +627,16 @@ export async function createWatch(
 		const { watches } = await tx.doc(Watches);
 		const picked = await accountFor(tx, made.agent, found.connection, made.account);
 		if ("refused" in picked) throw new BadRequest(picked.refused, 409);
-		// which watch is the agent, the connection, the object as it canonically is and the account; never its words
-		const ref = refKey(found.ref, found.connection.objects ?? {});
-		const key = readingKey(picked.account, ref);
-		// named by the object, or by its card when the object's own name is an id, as the agent's tool names it
-		const card = (await tx.doc(Readings)).readings[key]?.card;
-		const words = watchNameFor(nameOf(found.ref, found.connection.objects ?? {}), card, generic(found.kind));
-		const name = await watchFor(tx, made.agent, key, words);
+		// which watch is the agent, the connection, the object as it canonically is and the account; never its words.
+		// Matched against every file of the agent's in effect or waiting by what each actually follows
+		const key = readingKey(picked.account, refKey(found.ref, found.connection.objects ?? {}));
+		const chosen = await watchFor(tx, made.agent, key, texts);
+		if ("taken" in chosen)
+			throw new BadRequest(`${watchPath(chosen.taken)} holds a watch on something else: it is not replaced`, 409);
+		const name = chosen.id;
 		// one agent follows an object as one account once while that watch lives: following it again starts afresh once
 		// it ended
-		const live = watches[name];
-		if ((await acceptedWatch(tx, name)) !== undefined && live?.key === key && live.done === undefined)
+		if (chosen.as === "live")
 			throw new BadRequest(`${await agentWords(tx, made.agent)} already follows it (${watchPath(name)})`, 409);
 		const files = (await tx.doc(Accepted)).files;
 		// a change of that identity waiting in the box is the agent's ask, never written over unseen
@@ -590,7 +644,7 @@ export async function createWatch(
 		// copies: the commit that puts them back, should the first look fail, is another
 		const held = files[watchPath(name)];
 		const before = held === undefined ? undefined : { ...held };
-		if (box !== undefined && ("unreadable" in box || shaOf(box.text) !== before?.sha))
+		if (chosen.as === "waiting" || (box !== undefined && ("unreadable" in box || shaOf(box.text) !== before?.sha)))
 			throw new BadRequest(`${watchPath(name)} waits for you to allow or decline it: answer that first`, 409);
 		const text = watchText({
 			object,

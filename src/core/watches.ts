@@ -69,7 +69,6 @@ import {
 	cardOf,
 	keepReading,
 	nameOf,
-	type ObjectCard,
 	type ObjectKind,
 	type ObjectRead,
 	type ObjectRef,
@@ -136,21 +135,26 @@ export function watchOfPath(path: string): string | undefined {
 	return watchRef(id) === undefined ? undefined : id;
 }
 
-/** How many hex digits of the identity's hash a watch's name carries: enough that two objects never share one. */
-const IDENTITY_DIGITS = 12;
+/**
+ * How many hex digits of the identity's hash a watch's name carries: 96 bits, so two identities sharing one is not
+ * expected; should it happen, the second is refused, never written over the first (`watchFor`).
+ */
+const IDENTITY_DIGITS = 24;
 
 /**
- * The name of agent `agent`'s watch on the object reading key `key` names: the object's words (`watchNameFor`), then
- * a hash of the connection, the canonical object and the account, so the same object again is the same file and any
- * other one is another, whatever their words. Three Slack channels the service names alike are three files.
+ * The name of a watch on the object reading key `key` names (`<connection>/<account>/<kind>:<canonical>`): its
+ * connection and kind, then a hash of the whole key, so the same object as the same account is always the same file
+ * and any other is another. Nothing in it comes from what the object or its card are called, which change: a name
+ * made from them would make a second file for the same watch once they did.
  */
-export function identityName(words: string, key: string): string {
+export function identityName(key: string): string {
 	const digest = createHash("sha256")
 		.update(JSON.stringify(["banda.watch", key]))
 		.digest("hex")
 		.slice(0, IDENTITY_DIGITS);
-	// `words` is a made name (`fileNameFor`), at most a line long
-	const name = `${words}-${digest}`;
+	const [connection = ""] = key.split("/");
+	const kind = key.split("/").slice(2).join("/").split(":")[0] ?? "";
+	const name = `${fileNameFor(`${connection} ${kind}`, "watch")}-${digest}`;
 	return WATCH_NAME.test(name) ? name : `watch-${digest}`;
 }
 export const MAX_WATCH_BYTES = 16 * 1024;
@@ -794,32 +798,6 @@ const wakeKey = (
 		.digest("hex")
 		.slice(0, 24)}`;
 
-/**
- * A watch's file name, from what it follows: the object's name in lowercase words joined by dashes ("acme/banda #142"
- * is acme-banda-142); when that name is an opaque id (a Drive file's, an event's, a contact's), the words of the card
- * kept for it ("Economía 🏠" is economia); else the id behind "watch-". Always a name `WATCH_NAME` takes, whichever
- * path writes the file: the agent's tool, Follow on a card, or Add in the panel.
- */
-export function watchNameFor(objectName: string, card?: ObjectCard, generic = false): string {
-	const own = fileNameFor(objectName, "watch");
-	// an opaque id: one long run of letters and digits, or one the maker had to put behind "watch-"; or the kind's own
-	// words, the same for every object of it ("a channel in Slack"), which the card's name says better
-	const opaque = generic || own === "watch" || own.startsWith("watch-") || /^[a-z0-9]{10,}$/.test(own);
-	if (!opaque) return own;
-	const words =
-		card === undefined
-			? ""
-			: "title" in card
-				? card.title
-				: "name" in card
-					? card.name
-					: "subject" in card
-						? card.subject
-						: "";
-	const named = fileNameFor(words, "watch");
-	return named === "watch" || named.startsWith("watch-") ? own : named;
-}
-
 /** Whether the kind names every object of it alike ("a channel in Slack"): its name has no part of the object in it. */
 export const generic = (kind: Pick<ObjectKind, "name">): boolean => !/\{[^}]+\}/.test(kind.name);
 
@@ -976,22 +954,130 @@ function stop(record: WatchRecord, off: OffRead, now: number) {
 /** The agent `chat` runs; undefined when it records none, so no watch is written as an agent guessed at. */
 const agentOf = async (tx: Tx, chat: number) => (await tx.doc(ChatAgent, chat as ConversationId)).agent?.id;
 
+/** What a watch file follows, as agent `agent` would look: its identity (`key`), and how to show it. */
+export type WatchTarget = {
+	/** Its reading key: connection, account and canonical object; the watch's identity with its agent. */
+	readonly key: string;
+	/** The reference its card is read by. */
+	readonly ref: string;
+	/** The object in words: its card's name when one was read, else the kind's own name, else its canonical id. */
+	readonly name: string;
+	readonly service: string;
+	/** The account it looks with, as the service names it. */
+	readonly account?: string;
+};
+
 /**
- * In `tx`: the watch agent `agent` writes to follow the object reading key `key` names, called `words`: the live watch
- * of its own already following exactly that (in its folder, or a shared one from before agents had folders, by what
- * the store resolved it to, never by its words), so the same object again changes that one and never makes a second
- * that would wake twice; else the file in its own folder named by that identity. Never another agent's.
+ * In `tx`: what watch file `text` (named `name`) follows for agent `agent`, resolved as a look would resolve it (the
+ * connection that recognises its object, the account it names or the agent's one); undefined when it resolves to
+ * nothing, as a file that does not parse, an object no connection follows, or no account to say which.
  */
-export async function watchFor(tx: Tx, agent: string, key: string, words: string): Promise<string> {
-	const made = watchId({ agent, name: identityName(words, key) });
+export async function targetOf(tx: Tx, agent: string, name: string, text: string): Promise<WatchTarget | undefined> {
+	const parsed = parseWatch(name, text);
+	if (!("watch" in parsed)) return undefined;
+	const found = await followed(tx, parsed.watch.object);
+	if (found === undefined) return undefined;
+	const picked = await accountFor(tx, agent, found.connection, parsed.watch.account);
+	if ("refused" in picked) return undefined;
+	let ref: string;
+	try {
+		ref = refKey(found.ref, found.connection.objects ?? {});
+	} catch {
+		return undefined;
+	}
+	const key = readingKey(picked.account, ref);
+	const card = (await tx.doc(Readings)).readings[key]?.card;
+	const carded = card === undefined ? "" : "title" in card ? card.title : "name" in card ? card.name : "";
+	// a kind that names every object alike says the canonical id instead, which is safe to show and tells them apart
+	const name_ =
+		typeof carded === "string" && carded.trim() !== ""
+			? carded
+			: generic(found.kind)
+				? ref.split(":").slice(2).join(":")
+				: nameOf(found.ref, found.connection.objects ?? {});
+	return {
+		key,
+		ref,
+		name: name_,
+		service: found.connection.service,
+		...(picked.name === undefined ? {} : { account: picked.name }),
+	};
+}
+
+/** The watch files of the shared folder and of agent `agent`'s own, by id, as text: none through a link, nor too big. */
+export async function boxWatchTexts(
+	env: NonNullable<Parameters<ToolRegistration["execute"]>[1]["env"]>,
+	root: string,
+	agent: string,
+	ctx: Context,
+): Promise<Map<string, string>> {
+	const out = new Map<string, string>();
+	for (const [folder, idOf] of [
+		["watches", (name: string) => name],
+		[`agents/${agent}/watches`, (name: string) => watchId({ agent, name })],
+	] as const) {
+		let real = true;
+		for (const each of watchFolders(idOf("x"))) {
+			const info = await env.fileInfo(`${root}/${each}`, ctx);
+			real &&= info.ok && info.value.kind === "directory";
+		}
+		if (!real) continue;
+		const listed = await env.listDir(`${root}/${folder}`, ctx);
+		if (!listed.ok) continue;
+		for (const entry of listed.value) {
+			const name = /^(.+)\.md$/.exec(entry.name)?.[1];
+			if (name === undefined || entry.kind !== "file" || !WATCH_NAME.test(name)) continue;
+			const opened = await env.openBinaryReader(`${root}/${folder}/${entry.name}`, { noFollow: true }, ctx);
+			if (!opened.ok) continue;
+			try {
+				const info = await opened.value.info(ctx);
+				if (!info.ok || info.value.size > MAX_WATCH_BYTES) continue;
+				const bytes = await opened.value.read(0, info.value.size, ctx);
+				if (bytes.ok) out.set(idOf(name), new TextDecoder("utf-8", { fatal: true }).decode(bytes.value));
+			} catch {
+				// not text: no watch
+			} finally {
+				await opened.value.close(ctx);
+			}
+		}
+	}
+	return out;
+}
+
+/**
+ * In `tx`: the watch agent `agent` writes to follow what reading key `key` names, among the files in effect and those
+ * waiting in the box (`boxed`, by id), each matched by what it actually follows, never by its name or words: its live
+ * watch already following exactly that (in its folder, or a shared one from before agents had folders), else a change
+ * of its waiting for the owner that would, else the file in its own folder that identity names. The same object again
+ * changes that one and never makes a second that would wake twice. Never another agent's, and never a file that holds
+ * something else, in effect or waiting (`taken`): that is refused, not written over.
+ */
+export async function watchFor(
+	tx: Tx,
+	agent: string,
+	key: string,
+	boxed: ReadonlyMap<string, string>,
+): Promise<{ readonly id: string; readonly as: "live" | "waiting" | "new" } | { readonly taken: string }> {
+	const made = watchId({ agent, name: identityName(key) });
 	const { watches } = await tx.doc(Watches);
-	const same = (await acceptedWatches(tx))
-		.filter((id) => {
-			const record = watches[id];
-			return record?.key === key && record.done === undefined && watchAgent(id, record) === agent;
-		})
-		.sort();
-	return same.includes(made) ? made : (same[0] ?? made);
+	const files = (await tx.doc(Accepted)).files;
+	const mine = (id: string) => watchAgent(id, watches[id] ?? {}) === agent;
+	const follows = async (id: string, text: string) => (await targetOf(tx, agent, watchName(id), text))?.key === key;
+	const live: string[] = [];
+	for (const id of await acceptedWatches(tx)) {
+		const file = files[watchPath(id)];
+		if (file !== undefined && mine(id) && watches[id]?.done === undefined && (await follows(id, file.text)))
+			live.push(id);
+	}
+	const waiting: string[] = [];
+	for (const [id, text] of boxed)
+		if (mine(id) && shaOf(text) !== files[watchPath(id)]?.sha && (await follows(id, text))) waiting.push(id);
+	const pick = (ids: readonly string[]) => (ids.includes(made) ? made : [...ids].sort()[0]);
+	const id = pick(live) ?? pick(waiting) ?? made;
+	// whatever is at that file, in effect or waiting, must follow this; anything else is not this watch's to replace
+	for (const text of [files[watchPath(id)]?.text, boxed.get(id)])
+		if (text !== undefined && !(await follows(id, text))) return { taken: id };
+	return { id, as: live.includes(id) ? "live" : waiting.includes(id) ? "waiting" : "new" };
 }
 
 export function defineWatches(options: WatchesOptions) {
@@ -1912,9 +1998,15 @@ export function defineWatches(options: WatchesOptions) {
 		if (root === undefined || api.env === undefined)
 			throw new WatchRefused("Not written: there is no workspace to write to.");
 		const object = args.object.trim();
+		const env = api.env;
+		// what the box holds of this agent's and the shared watches, waiting or in effect, read before the commit that
+		// decides which file this is: a change waiting for the owner on the same object is this watch too
+		const asker = await api.commit((tx) => agentOf(tx, Number(api.conversationId)), ctx);
+		if (asker === undefined) throw new WatchRefused("Not written: this chat runs no agent a watch could belong to.");
+		const boxed = await boxWatchTexts(env, root, asker, ctx);
 		const made = await api.commit(async (tx) => {
 			const agent = await agentOf(tx, Number(api.conversationId));
-			if (agent === undefined) throw new WatchRefused("Not written: this chat runs no agent a watch could belong to.");
+			if (agent !== asker) throw new WatchRefused("Not written: this chat runs no agent a watch could belong to.");
 			const found = await followed(tx, object);
 			if (found === undefined) throw new WatchRefused(`Not written: ${await cannotFollow(tx, object)}.`);
 			const { ref, kind, connection } = found;
@@ -1928,11 +2020,15 @@ export function defineWatches(options: WatchesOptions) {
 			const picked = await accountFor(tx, agent, connection, args.account);
 			if ("refused" in picked) throw new WatchRefused(`Not written: ${picked.refused}.`);
 			const objectName = nameOf(ref, connection.objects ?? {});
-			// which watch is what it follows, the account it looks with and whose it is; its words only make the name
-			// readable: by the object, or by the card the agent read when the object's own name is an id or the kind's
+			// which watch is what it follows, the account it looks with and whose it is: never what any of it is called
 			const key = readingKey(picked.account, refKey(ref, connection.objects ?? {}));
-			const words = watchNameFor(objectName, (await tx.doc(Readings)).readings[key]?.card, generic(kind));
-			const name = await watchFor(tx, agent, key, words);
+			const chosen = await watchFor(tx, agent, key, boxed);
+			if ("taken" in chosen)
+				throw new WatchRefused(
+					`Not written: ${watchPath(chosen.taken)} holds a watch on something else, in effect or waiting for the ` +
+						"owner; it is not yours to replace. Tell the owner.",
+				);
+			const name = chosen.id;
 			const text = watchText({
 				object,
 				...(picked.id === undefined ? {} : { account: picked.id }),

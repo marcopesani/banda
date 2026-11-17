@@ -191,6 +191,15 @@ export const WATCHES: readonly WatchRowView[] = [
 		waiting: "set up",
 		unasked: true,
 	},
+	// a change written into her folder that would make her watch on #ops-b follow another channel: both are named
+	{
+		id: "mara/slack-channel-0c1d2e3f4a5b6c7d8e9f0a1b",
+		name: "#ops-b",
+		service: "Slack",
+		waiting: "change",
+		unasked: true,
+		retarget: { from: "#ops-b as U0MARA", to: "slack/C0TESTOPSC as U0MARA" },
+	},
 	// a shared watch from before agents had folders and her own follow #142 as the same account: each wakes alone
 	{
 		id: "banda-142-shared",

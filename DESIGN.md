@@ -695,14 +695,17 @@ or not the model remembers it.
 - **A watch is what it follows, never what it is called.** Its identity is its agent, the connection, the object as
   that connection canonically names it (a link, an id and the canonical words for one object are one) and the account
   it looks with, resolved (named or the agent's one, by the service's id for it, never a credential). Its file's name is
-  the object's words and a hash of that identity, so the same object again is the same file, changed, and any other is
-  another, however alike their words; its id, `<agent>/<name>` or a shared one's `<name>`, names it everywhere: the
+  its connection and kind and a hash of that identity, nothing a label or card says, so the same object again is the
+  same file, changed, and any other is another, however alike or changed their words; its id, `<agent>/<name>` or a shared one's `<name>`, names it everywhere: the
   store, its task, its wakes, its cursor, its card, the API and its history. One agent's watch on an object as one
-  account is found by what the store resolved it to, a shared one included, so asking again never makes a second; a
+  account is found among its files in effect and waiting by what each actually follows, never by its name, a shared one
+  included, so asking again never makes a second; a file that follows something else is never written over, by the
+  tool or the owner's follow, whatever its name; a
   file that comes to follow another object or account starts from a fresh baseline, never a cursor on another's
   readings. A watch in an agent's folder is that agent's; a shared one is the agent the store recorded for it, else
   the lead, and is never moved by guessing. A change in a folder its agent's `watch` tool did not write (a command,
-  another agent writing there) is shown as nobody's ask, though allowing it wakes that agent; a card says who asks and
+  another agent writing there) is shown as nobody's ask, though allowing it wakes that agent, and one that would follow
+  another object or account names what it follows now and what it would; a card says who asks and
   whom it wakes, own or shared, and answers only the bytes it showed. A folder that names no active agent wakes
   nobody: allowing a watch there is refused. A watch's folders are folders, never links: a linked one is read as
   nothing and written through by no tool. Two live watches of one agent on one object as one account each say so.

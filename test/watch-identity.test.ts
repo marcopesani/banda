@@ -1,13 +1,14 @@
 /**
  * A watch is what it follows, never what it is called (DESIGN.md "Watches"): its agent, the connection it reads
  * through, the object as that connection canonically names it, and the account it looks with. An agent's own watches
- * are in its folder, `agents/<agent>/watches/`, each named by the object's words and a hash of that identity, so the
- * same object again is the same file and any other is another, whatever their words. Found when one agent followed
+ * are in its folder, `agents/<agent>/watches/`, each named by its connection and kind and a hash of that identity
+ * (nothing a label or a card says), so the same object again is the same file and any other is another, whatever
+ * their words, in effect or waiting for the owner. Found when one agent followed
  * three Slack channels, each "a channel in Slack": each write landed on `watches/a-channel-in-slack.md`, the last over
  * the others, and their cards and approvals folded into one.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	createRegistry,
@@ -21,6 +22,7 @@ import { openBox } from "../src/box/box.ts";
 import { Accepted, ChatAgent, shaOf } from "../src/core/agents.ts";
 import { accountKey, Connected } from "../src/core/connections.ts";
 import { agentMainThread, OWNER } from "../src/core/gateway.ts";
+import { Readings } from "../src/core/objects.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import {
@@ -45,8 +47,8 @@ import { added, definition, shipping } from "./fixtures/shipped.ts";
 import { blobStore, FakeGateway, tempHome } from "./helpers.ts";
 
 const NOW = new Date(2026, 10, 17, 9, 0).getTime();
-/** The three channels of the home where it was found, which Slack's kind names alike. */
-const CHANNELS = ["C0B1EAZ2Y7P", "C0CG0PQCHST", "C09T7THNUQ4"] as const;
+/** Three channels, which Slack's kind names alike (made up: the ids of the home where it was found are not here). */
+const CHANNELS = ["C0TESTAAA01", "C0TESTBBB02", "C0TESTCCC03"] as const;
 const WORK = "U0WORK";
 const HOME = "U0HOME";
 const agentText = (name: string) =>
@@ -162,15 +164,18 @@ describe("a watch's id", () => {
 	});
 
 	it("names the identity, not the words: another connection, account or object is another name", () => {
-		const one = identityName("a-channel-in-slack", "slack/u0work/channel:slack/C0B1EAZ2Y7P");
-		expect(one).toMatch(/^a-channel-in-slack-[0-9a-f]{12}$/);
-		expect(identityName("a-channel-in-slack", "slack/u0work/channel:slack/C0B1EAZ2Y7P")).toBe(one);
+		const one = identityName("slack/u0work/channel:slack/C0TESTAAA01");
+		// its connection and kind, then 96 bits of the whole identity: nothing a label or a card says
+		expect(one).toMatch(/^slack-channel-[0-9a-f]{24}$/);
+		expect(identityName("slack/u0work/channel:slack/C0TESTAAA01")).toBe(one);
+		expect(identityName("github/bandarra/pull_request:acme/banda#142")).toMatch(/^github-pull-request-[0-9a-f]{24}$/);
+		expect(identityName("drive/a-1f2e/file:drive/1e0DrWx78")).toMatch(/^drive-file-[0-9a-f]{24}$/);
 		for (const key of [
-			"slack/u0home/channel:slack/C0B1EAZ2Y7P",
-			"slack/u0work/channel:slack/C0CG0PQCHST",
-			"other/u0work/channel:slack/C0B1EAZ2Y7P",
+			"slack/u0home/channel:slack/C0TESTAAA01",
+			"slack/u0work/channel:slack/C0TESTBBB02",
+			"other/u0work/channel:slack/C0TESTAAA01",
 		])
-			expect(identityName("a-channel-in-slack", key), key).not.toBe(one);
+			expect(identityName(key), key).not.toBe(one);
 	});
 });
 
@@ -184,7 +189,7 @@ describe("an agent's watch call", () => {
 			const ids = wrote.map((each) => each.id);
 			expect(new Set(ids).size).toBe(3);
 			for (const [i, id] of ids.entries()) {
-				expect(id).toMatch(/^curro\/a-channel-in-slack-[0-9a-f]{12}$/);
+				expect(id).toMatch(/^curro\/slack-channel-[0-9a-f]{24}$/);
 				expect(wrote[i]?.change).toBe("added");
 				// each file follows its own channel, none written over by another
 				expect(await boxed(watchPath(id))).toContain(`object: slack/${CHANNELS[i]}`);
@@ -234,7 +239,7 @@ describe("an agent's watch call", () => {
 			for (const [i, form] of forms.entries())
 				ids.push((await receipt("sancho", { ...form, ask: `${ask} (${i})` } as JsonObject)).id);
 			expect(new Set(ids).size).toBe(1);
-			expect(ids[0]).toMatch(/^sancho\/a-channel-in-slack-[0-9a-f]{12}$/);
+			expect(ids[0]).toMatch(/^sancho\/slack-channel-[0-9a-f]{24}$/);
 			// the newest write is the definition, the account always written as the service names it
 			const text = await boxed(watchPath(ids[0] as string));
 			expect(text).toContain(`account: ${WORK}`);
@@ -487,6 +492,201 @@ describe("whom a watch file wakes", () => {
 			expect(refused.isError).toBe(true);
 			expect(refused.output[0]?.text).toContain("agents/otto/watches is not a folder");
 			expect((await views()).filter((each) => each.id.startsWith("curro/"))).toHaveLength(1);
+		} finally {
+			await close();
+		}
+	});
+});
+
+/** The reading key of Slack channel `channel` as account `account`: the identity a watch on it has, with its agent. */
+const slackKey = (channel: string, account = WORK) => `slack/${accountKey(account)}/channel:slack/${channel}`;
+
+/** In `harness`: a card read for Slack channel `channel`, named `name`, as the object's card leaves it. */
+const carded = (harness: Harness, channel: string, name: string) =>
+	harness.commit(async (tx) => {
+		(await tx.doc(Readings)).readings[slackKey(channel)] = {
+			connection: "slack",
+			account: accountKey(WORK),
+			kind: "channel",
+			source: "test",
+			at: NOW,
+			card: { card: "channel", name } as never,
+		};
+	}, context);
+
+describe("a watch waiting for the owner", () => {
+	it("is the same watch when its card's name comes, or changes, before it is allowed: no second file", async () => {
+		const { receipt, harness, box, views, close } = await setUp(await tempHome());
+		try {
+			const [channel] = CHANNELS;
+			const first = await receipt("curro", { object: `slack/${channel}`, account: WORK, ask });
+			await carded(harness, channel, "#general");
+			const second = await receipt("curro", {
+				object: `https://acme.slack.com/archives/${channel}`,
+				account: WORK,
+				ask: `${ask}!`,
+			});
+			await carded(harness, channel, "#general-renamed");
+			const third = await receipt("curro", {
+				object: `slack:channel:slack/${channel}`,
+				account: WORK,
+				ask: `${ask}!!`,
+			});
+			expect([second.id, third.id]).toEqual([first.id, first.id]);
+			expect(
+				(await readdir(join(box.workspace, "agents/curro/watches"))).filter((f) => f.endsWith(".md")),
+			).toHaveLength(1);
+			const waiting = (await views()).filter((each) => each.change !== undefined);
+			expect(waiting.map((each) => each.id)).toEqual([first.id]);
+			// the card of the first call no longer offers to allow: what waits is the third's
+			const all = await views();
+			expect(watchState(all, first.id, undefined, 0, first.sha).state).not.toBe("pending");
+			expect(watchState(all, third.id, undefined, 0, third.sha).state).toBe("pending");
+		} finally {
+			await close();
+		}
+	});
+
+	it("written by any name, is found by what it follows: the tool changes it and the owner's follow waits for it", async () => {
+		const { receipt, harness, workspace, box, close } = await setUp(await tempHome());
+		try {
+			const [channel] = CHANNELS;
+			const hand = `---\nobject: slack/${channel}\naccount: ${WORK}\n---\nWritten by hand.\n`;
+			await mkdir(join(box.workspace, "agents/curro/watches"), { recursive: true });
+			await writeFile(join(box.workspace, "agents/curro/watches/by-hand.md"), hand);
+			await expect(
+				createWatch(
+					harness,
+					workspace,
+					reconcile,
+					baseline,
+					{ agent: "curro", object: `slack/${channel}`, account: WORK },
+					NOW,
+					context,
+				),
+			).rejects.toMatchObject({
+				status: 409,
+				message: expect.stringContaining("agents/curro/watches/by-hand.md waits"),
+			});
+			const again = await receipt("curro", { object: `slack/${channel}`, account: WORK, ask });
+			expect(again.id).toBe("curro/by-hand");
+			expect((await readdir(join(box.workspace, "agents/curro/watches"))).filter((f) => f.endsWith(".md"))).toEqual([
+				"by-hand.md",
+			]);
+		} finally {
+			await close();
+		}
+	});
+
+	it("calls at once, by every form of the object, while its card's name changes, make one file", async () => {
+		const { receipt, harness, box, close } = await setUp(await tempHome());
+		try {
+			const [channel] = CHANNELS;
+			const forms = [
+				`slack/${channel}`,
+				`https://acme.slack.com/archives/${channel}`,
+				`slack:channel:slack/${channel}`,
+				`  slack/${channel}  `,
+			];
+			const wrote = await Promise.all([
+				...forms.map((object, i) =>
+					receipt("curro", { object, account: i % 2 === 0 ? WORK : WORK.toLowerCase(), ask }),
+				),
+				carded(harness, channel, "#one").then(() => carded(harness, channel, "#two")),
+			]);
+			const ids = new Set(wrote.flatMap((each) => (each !== undefined && "id" in each ? [each.id] : [])));
+			expect(ids.size).toBe(1);
+			expect(
+				(await readdir(join(box.workspace, "agents/curro/watches"))).filter((f) => f.endsWith(".md")),
+			).toHaveLength(1);
+		} finally {
+			await close();
+		}
+	});
+});
+
+describe("a file another identity holds", () => {
+	it("is never written over, waiting or in effect, by the tool or by the owner's follow", async () => {
+		const { receipt, watchAs, harness, workspace, box, close } = await setUp(await tempHome());
+		try {
+			const [a, b] = CHANNELS;
+			// A's file holds a watch on B, as a hash collision would leave it: waiting, then in effect
+			const id = `curro/${identityName(slackKey(a))}`;
+			const other = `---\nobject: slack/${b}\naccount: ${WORK}\n---\nAnother watch.\n`;
+			await mkdir(join(box.workspace, "agents/curro/watches"), { recursive: true });
+			await writeFile(join(box.workspace, watchPath(id)), other);
+			const refused = await watchAs("curro", { object: `slack/${a}`, account: WORK, ask });
+			expect(refused.isError).toBe(true);
+			expect(refused.output[0]?.text).toContain(`${watchPath(id)} holds a watch on something else`);
+			expect(await readFile(join(box.workspace, watchPath(id)), "utf8")).toBe(other);
+			await expect(
+				createWatch(
+					harness,
+					workspace,
+					reconcile,
+					baseline,
+					{ agent: "curro", object: `slack/${a}`, account: WORK },
+					NOW,
+					context,
+				),
+			).rejects.toMatchObject({ status: 409, message: expect.stringContaining("holds a watch on something else") });
+			await accept(harness, workspace, reconcile, baseline, id, shaOf(other), NOW, context);
+			expect((await watchAs("curro", { object: `slack/${a}`, account: WORK, ask })).isError).toBe(true);
+			await expect(
+				createWatch(
+					harness,
+					workspace,
+					reconcile,
+					baseline,
+					{ agent: "curro", object: `slack/${a}`, account: WORK },
+					NOW,
+					context,
+				),
+			).rejects.toMatchObject({ status: 409 });
+			expect((await harness.snapshot(Accepted, context))?.files[watchPath(id)]?.text).toBe(other);
+			expect(await readFile(join(box.workspace, watchPath(id)), "utf8")).toBe(other);
+			// B itself, asked for, is the watch already holding it
+			expect((await receipt("curro", { object: `slack/${b}`, account: WORK, ask })).id).toBe(id);
+		} finally {
+			await close();
+		}
+	});
+});
+
+describe("a change that would follow something else", () => {
+	it("says in its row what the watch follows now and what it would, by safe ids when no card names them", async () => {
+		const { receipt, harness, workspace, box, views, close } = await setUp(await tempHome());
+		try {
+			const [, b, c] = CHANNELS;
+			const own = await receipt("curro", { object: `slack/${b}`, account: WORK, ask });
+			await accept(harness, workspace, reconcile, baseline, own.id, own.sha, NOW, context);
+			const forged = `---\nobject: slack/${c}\naccount: ${HOME}\n---\n${ask}\n`;
+			await writeFile(join(box.workspace, watchPath(own.id)), forged);
+			const view = (await views()).find((each) => each.id === own.id) as WatchView;
+			expect(view.change).toMatchObject({
+				kind: "changed",
+				retarget: {
+					from: { name: `slack/${b}`, ref: `slack:channel:slack/${b}`, account: WORK },
+					to: { name: `slack/${c}`, ref: `slack:channel:slack/${c}`, account: HOME },
+				},
+			});
+			const [row] = watchRows([view], "curro", NOW);
+			expect(row).toMatchObject({
+				name: `slack/${b}`,
+				waiting: "change",
+				unasked: true,
+				retarget: { from: `slack/${b} as ${WORK}`, to: `slack/${c} as ${HOME}` },
+			});
+			// a card read since names it instead; a change of what matters alone is no retarget
+			await carded(harness, b, "#ops-b");
+			const named = (await views()).find((each) => each.id === own.id);
+			expect(named?.change && "retarget" in named.change ? named.change.retarget?.from.name : undefined).toBe("#ops-b");
+			await writeFile(
+				join(box.workspace, watchPath(own.id)),
+				`---\nobject: slack/${b}\naccount: ${WORK}\n---\nOnly this.\n`,
+			);
+			const same = (await views()).find((each) => each.id === own.id);
+			expect(same?.change && "retarget" in same.change ? same.change.retarget : undefined).toBeUndefined();
 		} finally {
 			await close();
 		}

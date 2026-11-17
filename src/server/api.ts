@@ -699,6 +699,9 @@ export type WatchState = "allow" | "active" | "paused" | "failing" | "done";
  * /api/watches/:name/accept` and the `sha` shown, or null for a removal), what it follows as the store resolved it,
  * and how it stands. `POST /api/watches/:name/check` looks now; `/pause`, `/resume` and `/remove` as routines.
  */
+/** What a watch file follows, to show: the object in words, its card's reference when known, and the account. */
+export type WatchTargetView = { readonly name: string; readonly ref?: string; readonly account?: string };
+
 export type WatchView = {
 	/**
 	 * Which watch: `<agent>/<name>` for one in its agent's folder (`agents/<agent>/watches/<name>.md`), `<name>` for a
@@ -716,7 +719,15 @@ export type WatchView = {
 	 * be said to have asked: it would still wake `agent`.
 	 */
 	readonly change?:
-		| ({ readonly kind: "added" | "changed"; readonly asked?: true } & Partial<WatchFileView>)
+		| ({
+				readonly kind: "added" | "changed";
+				readonly asked?: true;
+				/**
+				 * The change would make it follow another object, or as another account: what it follows now and what it
+				 * would, each by its card's name, else its canonical id (never a label every object of its kind shares).
+				 */
+				readonly retarget?: { readonly from: WatchTargetView; readonly to: WatchTargetView };
+		  } & Partial<WatchFileView>)
 		| { readonly kind: "removed" };
 	/**
 	 * Other watches of the same agent that follow the same object as the same account, by id: each wakes on its own, so

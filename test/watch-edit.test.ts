@@ -117,8 +117,8 @@ describe("the agent's watch call", () => {
 			const wrote = await watch({ object, wakes_a_day: 6, ask: "Tell me when it is approved." });
 			const receipt = (wrote as { details: { receipt: { id: string } } }).details.receipt;
 			expect(receipt).toMatchObject({ kind: "watch", change: "added" });
-			// in the lead's own folder, named by the object's words and what it is
-			expect(receipt.id).toMatch(/^sancho\/acme-banda-150-[0-9a-f]{12}$/);
+			// in the lead's own folder, named by its connection, kind and what it is: never by its words
+			expect(receipt.id).toMatch(/^sancho\/github-pull-request-[0-9a-f]{24}$/);
 			expect(await readFile(join(box.workspace, watchPath(receipt.id)), "utf8")).toBe(
 				`---\nobject: ${object}\naccount: bandarra\nwakes_a_day: 6\n---\nTell me when it is approved.\n`,
 			);
