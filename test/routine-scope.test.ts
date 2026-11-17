@@ -38,7 +38,7 @@ import { startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
 import type { Workspace } from "../src/server/agents.ts";
 import type { ControlView, RoutineRunsPage, RoutineView } from "../src/server/api.ts";
-import { accept, routines } from "../src/server/routines.ts";
+import { accept, finishEdits, routines } from "../src/server/routines.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { blobStore, echoModels, FAUX_MODEL, FakeGateway, tempHome, until } from "./helpers.ts";
 
@@ -405,6 +405,35 @@ describe("a routine's folders are folders", () => {
 					path.includes("routines"),
 				),
 			).toEqual([]);
+		} finally {
+			await harness.close(context);
+		}
+	});
+});
+
+describe("the owner's own routine for an agent, cut short between the store and the box", () => {
+	it("is finished into that agent's folder on start, once, under its own name", async () => {
+		const home = await tempHome();
+		const box = openBox(hostBox(home), () => {});
+		const harness = await openStore(home, { models: echoModels().models, registry: createRegistry() });
+		const workspace: Workspace = { env: () => box.env(), root: box.workspace, tools: () => [], known: () => true };
+		const text = "---\ndescription: Brief\ncron: 0 7 * * *\n---\nTell the owner what is on today.\n";
+		try {
+			// what createRoutine commits before it writes the box: accepted, and the box still owed it (base null)
+			await harness.commit(async (tx) => {
+				(await tx.doc(Accepted)).files[routinePath("sancho/brief")] = { sha: shaOf(text), text, at: 0 };
+				(await tx.doc(Routines)).routines["sancho/brief"] = { agent: "sancho", edit: { sha: shaOf(text), base: null } };
+			}, context);
+			expect(existsSync(join(box.workspace, "agents", "sancho", "routines"))).toBe(false);
+			await finishEdits(harness, workspace);
+			expect(await readFile(join(box.workspace, "agents", "sancho", "routines", "brief.md"), "utf8")).toBe(text);
+			expect(existsSync(join(box.workspace, "routines", "brief.md"))).toBe(false);
+			expect((await harness.snapshot(Routines, context))?.routines["sancho/brief"]?.edit).toBeUndefined();
+			// in effect, nothing waiting: the box holds what the store accepted
+			expect(await routines(harness, workspace, Date.now())).toEqual([
+				expect.objectContaining({ id: "sancho/brief", agent: "sancho" }),
+			]);
+			expect((await routines(harness, workspace, Date.now()))[0]?.change).toBeUndefined();
 		} finally {
 			await harness.close(context);
 		}
