@@ -5,7 +5,8 @@
  * process does what is not yet in effect, as the owner would look and click again, and finishes an edit a kill cut
  * short as the daemon does on start. The clock never moves, so nothing is due: every run is the owner's. The echo
  * model's requests pass `model`; the eager routine's message, `send:before` and `send:after`. Then the owner makes a
- * routine of their own from the panel (`brief`, written into the box through the same points). Prints what happened.
+ * routine of their own from the panel (`brief`, in the lead's folder, written into the box through the same points).
+ * Prints what happened.
  *
  * argv: home, fault schedule JSON (Fault[])
  */
@@ -17,7 +18,7 @@ import { boxEnv, boxTools } from "../../src/box/tools.ts";
 import { Accepted, shaOf } from "../../src/core/agents.ts";
 import { BlobStore } from "../../src/core/blobs.ts";
 import { type Gateway, OWNER } from "../../src/core/gateway.ts";
-import { Routines, routinePath, WAKE, type WakeData } from "../../src/core/routines.ts";
+import { Routines, routineId, routineOfPath, routinePath, WAKE, type WakeData } from "../../src/core/routines.ts";
 import { status } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes, type TurnResult } from "../../src/core/turn.ts";
@@ -57,7 +58,9 @@ const gateway: Gateway = {
 
 const box = openBox(hostBox(home), () => {});
 const path = `${box.workspace}/${routinePath("tea")}`;
-const briefPath = `${box.workspace}/${routinePath("brief")}`;
+/** The owner's own routine for the lead, from the panel: in the lead's folder, `agents/sancho/routines/brief.md`. */
+const BRIEF = routineId({ agent: "sancho", name: "brief" });
+const briefPath = `${box.workspace}/${routinePath(BRIEF)}`;
 const workspace: Workspace = {
 	// the owner's edit reaching the box passes `when:before` and `when:after`
 	env: () =>
@@ -122,7 +125,7 @@ if ((await harness.snapshot(Accepted, context))?.files[routinePath("tea")]?.sha 
 // and runs it now: the same click, sent again after a kill
 await core.runRoutine(harness, "tea", "k1");
 // and makes one of their own from the panel, unless the store holds it already
-if ((await harness.snapshot(Accepted, context))?.files[routinePath("brief")] === undefined)
+if ((await harness.snapshot(Accepted, context))?.files[routinePath(BRIEF)] === undefined)
 	await createRoutine(
 		harness,
 		workspace,
@@ -166,11 +169,12 @@ console.log(
 	JSON.stringify({
 		accepted: (await harness.snapshot(Accepted, context))?.files[routinePath("tea")]?.text,
 		brief: {
-			accepted: (await harness.snapshot(Accepted, context))?.files[routinePath("brief")]?.text,
+			accepted: (await harness.snapshot(Accepted, context))?.files[routinePath(BRIEF)]?.text,
 			box: readFileSync(briefPath, "utf8"),
-			record: (await harness.snapshot(Routines, context))?.routines.brief,
-			names: Object.keys((await harness.snapshot(Accepted, context))?.files ?? {}).filter((each) =>
-				each.startsWith("routines/"),
+			record: (await harness.snapshot(Routines, context))?.routines[BRIEF],
+			// every routine file the store holds, shared or in an agent's folder
+			names: Object.keys((await harness.snapshot(Accepted, context))?.files ?? {}).filter(
+				(each) => routineOfPath(each) !== undefined,
 			),
 		},
 		box: readFileSync(path, "utf8"),
