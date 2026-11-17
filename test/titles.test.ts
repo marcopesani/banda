@@ -7,6 +7,8 @@ describe("routine titles", () => {
 		expect(routineTitle("call-ana", "Every Monday at 9:00, remind you to call Ana.")).toBe("Call Ana");
 		expect(routineTitle("portugal-fun-fact", "Share one fun fact about Portugal")).toBe("Portugal fun fact");
 		expect(routineTitle("pr-watch")).toBe("Pr watch");
+		// an agent's own routine by its id: the title is its name's
+		expect(routineTitle("curro/weekly-summary-draft")).toBe("Weekly summary draft");
 		expect(routineTitle("pr-watch", "Watch my PR queue")).toBe("PR watch");
 	});
 });

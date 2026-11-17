@@ -31,46 +31,48 @@ export function lastWords(last: RoutineView["last"], now: number): string | unde
  * read at `now`, and a change the agent made waiting for the owner, as it would be.
  */
 export function routineRows(all: readonly RoutineView[], agent: string, now: number): RoutineRowView[] {
-	return all
-		.filter((routine) => routine.agent === agent)
-		.flatMap((routine): RoutineRowView[] => {
-			const change = routine.change;
-			// a change waiting for the owner shows as it would be; a removal as the routine it stops
-			const file =
-				(change !== undefined && change.kind !== "removed" ? change.routine : undefined) ?? routine.accepted?.routine;
-			if (file === undefined) return [];
-			const waiting =
-				change === undefined
-					? undefined
-					: change.kind === "removed"
-						? ("stop" as const)
-						: routine.accepted === undefined
-							? ("set up" as const)
-							: ("change" as const);
-			const last = lastWords(routine.last, now);
-			return [
-				{
-					id: routine.name,
-					// its file's name as words: portugal-fun-fact reads Portugal fun fact
-					name: routineTitle(routine.name, file.description),
-					when: file.when,
-					...(change === undefined
-						? {}
-						: {
-								waiting,
-								onAllow: () =>
-									void actOnRoutine(routine.name, {
-										action: "accept",
-										sha: change.kind === "removed" ? null : (change.sha ?? null),
-									}).then(showControl),
-								onDecline: () => void actOnRoutine(routine.name, { action: "decline" }).then(showControl),
-							}),
-					...(routine.next === undefined ? {} : { next: near(routine.next, now) }),
-					...(last === undefined ? {} : { last }),
-					paused: routine.paused !== undefined,
-				},
-			];
-		});
+	const mine = all.filter((routine) => routine.agent === agent);
+	// a shared routine that runs as this agent beside one of its own of the same name says which it is
+	const twin = (routine: RoutineView) =>
+		routine.shared === true && mine.some((each) => each.id !== routine.id && each.name === routine.name);
+	return mine.flatMap((routine): RoutineRowView[] => {
+		const change = routine.change;
+		// a change waiting for the owner shows as it would be; a removal as the routine it stops
+		const file =
+			(change !== undefined && change.kind !== "removed" ? change.routine : undefined) ?? routine.accepted?.routine;
+		if (file === undefined) return [];
+		const waiting =
+			change === undefined
+				? undefined
+				: change.kind === "removed"
+					? ("stop" as const)
+					: routine.accepted === undefined
+						? ("set up" as const)
+						: ("change" as const);
+		const last = lastWords(routine.last, now);
+		return [
+			{
+				id: routine.id,
+				// its file's name as words: portugal-fun-fact reads Portugal fun fact
+				name: `${routineTitle(routine.name, file.description)}${twin(routine) ? " (shared)" : ""}`,
+				when: file.when,
+				...(change === undefined
+					? {}
+					: {
+							waiting,
+							onAllow: () =>
+								void actOnRoutine(routine.id, {
+									action: "accept",
+									sha: change.kind === "removed" ? null : (change.sha ?? null),
+								}).then(showControl),
+							onDecline: () => void actOnRoutine(routine.id, { action: "decline" }).then(showControl),
+						}),
+				...(routine.next === undefined ? {} : { next: near(routine.next, now) }),
+				...(last === undefined ? {} : { last }),
+				paused: routine.paused !== undefined,
+			},
+		];
+	});
 }
 
 /** Its newest runs and the page before them, kept as the owner reads back. */
@@ -121,7 +123,7 @@ export function RoutineHistory({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: a push of its runs is what reads them again
 	useEffect(() => {
 		let live = true;
-		routineRuns(routine.name).then(
+		routineRuns(routine.id).then(
 			(newest) => {
 				if (!live) return;
 				setError(undefined);
@@ -142,7 +144,7 @@ export function RoutineHistory({
 		return () => {
 			live = false;
 		};
-	}, [routine.name, moved]);
+	}, [routine.id, moved]);
 	const file = routine.accepted?.routine;
 	const paused = routine.paused !== undefined;
 	const when = file?.when ?? "";
@@ -175,7 +177,7 @@ export function RoutineHistory({
 			{...(routine.accepted?.sha === undefined ? {} : { onEdit })}
 			onPause={(pause) => {
 				setActing(undefined);
-				void actOnRoutine(routine.name, { action: pause ? "pause" : "resume" }).then(showControl, (failed: unknown) =>
+				void actOnRoutine(routine.id, { action: pause ? "pause" : "resume" }).then(showControl, (failed: unknown) =>
 					setActing(failed instanceof Error ? failed.message : String(failed)),
 				);
 			}}
@@ -183,7 +185,7 @@ export function RoutineHistory({
 				const before = runs?.earlier;
 				if (before === undefined) return;
 				setEarlierError(undefined);
-				void routineRuns(routine.name, before).then(
+				void routineRuns(routine.id, before).then(
 					(page) =>
 						setRuns((was) => ({
 							runs: [...(was?.runs ?? []), ...page.runs],
@@ -236,7 +238,7 @@ export function EditRoutine({
 	const sha = routine?.accepted?.sha;
 	return (
 		<RoutineEditor
-			key={routine === undefined ? "new" : `${routine.name}:${sha}`}
+			key={routine === undefined ? "new" : `${routine.id}:${sha}`}
 			agent={name}
 			routine={edited}
 			now={now}
@@ -254,7 +256,7 @@ export function EditRoutine({
 					showControl(made.control);
 				} else
 					showControl(
-						await actOnRoutine(routine.name, {
+						await actOnRoutine(routine.id, {
 							action: "edit",
 							sha,
 							when,
@@ -267,11 +269,11 @@ export function EditRoutine({
 			{...(routine === undefined
 				? {}
 				: {
-						onRunNow: () => actOnRoutine(routine.name, { action: "run", key: clickKey() }).then(showControl),
+						onRunNow: () => actOnRoutine(routine.id, { action: "run", key: clickKey() }).then(showControl),
 						onPause: (paused: boolean) =>
-							actOnRoutine(routine.name, { action: paused ? "pause" : "resume" }).then(showControl),
+							actOnRoutine(routine.id, { action: paused ? "pause" : "resume" }).then(showControl),
 						onDelete: () =>
-							actOnRoutine(routine.name, { action: "remove" }).then((control) => {
+							actOnRoutine(routine.id, { action: "remove" }).then((control) => {
 								showControl(control);
 								onDone();
 							}),

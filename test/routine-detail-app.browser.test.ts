@@ -70,7 +70,7 @@ async function daemonOn(home: string) {
 						stopReason: "toolUse",
 					});
 				return fauxAssistantMessage(
-					[fauxToolCall("write", { path: "routines/morning-brief.md", content: CHANGE_CONTENT })],
+					[fauxToolCall("write", { path: "agents/sancho/routines/morning-brief.md", content: CHANGE_CONTENT })],
 					{ stopReason: "toolUse" },
 				);
 			}
@@ -113,10 +113,10 @@ for (const width of [390, 1440])
 			if (SHOTS !== undefined) await mkdir(SHOTS, { recursive: true });
 			await writeFile(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
 			let { daemon, base, token, api } = await daemonOn(home);
-			const runs = () => api<RoutineRunsPage>("/routines/morning-brief/runs");
+			const runs = () => api<RoutineRunsPage>("/routines/sancho/morning-brief/runs");
 			const ended = async (name: string, count: number) =>
 				until(async () => {
-					const page = await api<RoutineRunsPage>(`/routines/${name}/runs`);
+					const page = await api<RoutineRunsPage>(`/routines/sancho/${name}/runs`);
 					return page.runs.length >= count && page.runs.every((run) => !["waiting", "running"].includes(run.state));
 				}, 30_000);
 			try {
@@ -128,7 +128,7 @@ for (const width of [390, 1440])
 				await make("Quiet check", "Look, and stay quiet.");
 				await make("Flaky check", "FAIL on purpose.");
 				const runNow = async (name: string, key: string, count: number) => {
-					await api(`/routines/${name}/run`, "POST", { key });
+					await api(`/routines/sancho/${name}/run`, "POST", { key });
 					await ended(name, count);
 				};
 				await runNow("morning-brief", "speak-1", 1);
@@ -137,11 +137,11 @@ for (const width of [390, 1440])
 				await runNow("morning-brief", "speak-2", 2);
 				const real = await runs();
 				expect(real.runs.map((run) => run.state)).toEqual(["said", "said"]);
-				expect((await api<RoutineRunsPage>("/routines/quiet-check/runs")).runs).toEqual([
+				expect((await api<RoutineRunsPage>("/routines/sancho/quiet-check/runs")).runs).toEqual([
 					expect.objectContaining({ state: "quiet" }),
 				]);
 				expect(real.runs[0]?.said).toBe(FIRST);
-				const failed = (await api<RoutineRunsPage>("/routines/flaky-check/runs")).runs[0];
+				const failed = (await api<RoutineRunsPage>("/routines/sancho/flaky-check/runs")).runs[0];
 				expect(failed?.state).toBe("failed");
 				expect(failed?.line).toBeDefined();
 
@@ -152,7 +152,7 @@ for (const width of [390, 1440])
 				const store = await openStore(home, { models: createModels(), registry: createRegistry() });
 				const said = real.runs[1];
 				const chat = said?.line?.chat as number;
-				const records = (await store.snapshot(Routines, context))?.routines["morning-brief"]?.runs ?? [];
+				const records = (await store.snapshot(Routines, context))?.routines["sancho/morning-brief"]?.runs ?? [];
 				const copied = records.find((run) => run.line === said?.line?.entry);
 				const ran = await (await store.conversation(copied?.run as ConversationId, context))!.entries(
 					{ order: "ascending" },
@@ -169,11 +169,11 @@ for (const width of [390, 1440])
 						(
 							await tx.appendEntry(chat as ConversationId, {
 								kind: ROUTINE_SAID,
-								data: { routine: "morning-brief", run: copied?.run ?? 0, call: "fixture", text: SECOND, at: 1 },
+								data: { routine: "sancho/morning-brief", run: copied?.run ?? 0, call: "fixture", text: SECOND, at: 1 },
 							})
 						).id,
 					);
-					const record = (await tx.doc(Routines)).routines["morning-brief"] as RoutineRecord;
+					const record = (await tx.doc(Routines)).routines["sancho/morning-brief"] as RoutineRecord;
 					record.runs = [
 						...(record.runs ?? []),
 						{ ...copied, at: (record.runs?.at(-1)?.at ?? 0) + 1, entry: result, line: missing } as NonNullable<
@@ -325,12 +325,12 @@ for (const width of [390, 1440])
 							"document.querySelector('section[aria-labelledby=\"routine-runs\"]')?.parentElement",
 						);
 						await page.until(`(${detailEdit})?.disabled === true`);
-						await expect(api("/routines/morning-brief/edit", "POST", { sha, description: "Sneaky" })).rejects.toThrow(
-							/409/,
-						);
+						await expect(
+							api("/routines/sancho/morning-brief/edit", "POST", { sha, description: "Sneaky" }),
+						).rejects.toThrow(/409/);
 						await shot("9-change-waits");
 						await darkToo("9-change-waits");
-						await api("/routines/morning-brief/decline", "POST", {});
+						await api("/routines/sancho/morning-brief/decline", "POST", {});
 						await page.until(`!${shows("Waiting for you")} && (${detailEdit})?.disabled === false`);
 
 						// Back: the list, on the Routines tab

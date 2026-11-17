@@ -118,10 +118,10 @@ it.each(["direct", "finished routine"])(
 					when: "every 24h",
 					ask: "Check the receipt.",
 				});
-				await call(first, "/routines/retained-request/run", { key: "run-once" });
+				await call(first, `/routines/${LEAD}/retained-request/run`, { key: "run-once" });
 				const Runs = Type.Object({ runs: Type.Array(Type.Object({ state: Type.String() })) });
 				await until(async () => {
-					const value: unknown = await (await call(first, "/routines/retained-request/runs")).json();
+					const value: unknown = await (await call(first, `/routines/${LEAD}/retained-request/runs`)).json();
 					assert.ok(Value.Check(Runs, value));
 					return value.runs.some((run) => run.state === "said");
 				});
@@ -139,7 +139,7 @@ it.each(["direct", "finished routine"])(
 				assert.ok(run);
 				chat = Number(run[0]);
 				parent = run[1].chat;
-				expect(run[1]).toMatchObject({ agent: LEAD, routine: "retained-request" });
+				expect(run[1]).toMatchObject({ agent: LEAD, routine: `${LEAD}/retained-request` });
 				expect((await stored.snapshot(AgentChats, context))?.chats[chat]).toBeUndefined();
 			} finally {
 				await stored.close(context);

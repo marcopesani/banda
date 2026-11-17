@@ -5,7 +5,13 @@ import { type Live, shown, view } from "../web/src/lib/chat.ts";
 describe("routines in the app", () => {
 	const idle: Live = { busy: false, running: [], thinking: false };
 	/** The receipt of the daemon's write of tea: the line names the routine by it. */
-	const wrote = { kind: "routine" as const, name: "tea", sha: "a".repeat(64), change: "added" as const };
+	const wrote = {
+		kind: "routine" as const,
+		id: "sancho/tea",
+		name: "tea",
+		sha: "a".repeat(64),
+		change: "added" as const,
+	};
 	const call = (
 		id: number,
 		name: string,
@@ -23,7 +29,7 @@ describe("routines in the app", () => {
 				2,
 				"schedule",
 				{ name: "tea", description: "Tea time", every: "1d", ask: "Tea." },
-				{ error: false, text: "Wrote routines/tea.md.", receipt: wrote },
+				{ error: false, text: "Wrote agents/sancho/routines/tea.md.", receipt: wrote },
 			),
 			...call(
 				4,
@@ -37,6 +43,7 @@ describe("routines in the app", () => {
 		const routines: RoutineView[] = [
 			{
 				agent: "sancho",
+				id: "sancho/tea",
 				name: "tea",
 				state: "active",
 				accepted: {
@@ -85,6 +92,7 @@ describe("routines in the app", () => {
 			line([
 				{
 					agent: "sancho",
+					id: "sancho/tea",
 					name: "tea",
 					state: "allow",
 					change: { kind: "added", sha: "a".repeat(64), routine: summary },
@@ -96,6 +104,7 @@ describe("routines in the app", () => {
 			line([
 				{
 					agent: "sancho",
+					id: "sancho/tea",
 					name: "tea",
 					state: "active",
 					accepted,
@@ -103,19 +112,21 @@ describe("routines in the app", () => {
 				},
 			]),
 		).toEqual(["Routine change: Tea time · waiting for you"]);
-		expect(line([{ agent: "sancho", name: "tea", state: "active", accepted, change: { kind: "removed" } }])).toEqual([
-			"Remove routine Tea time? Waiting for you",
-		]);
-		expect(line([{ agent: "sancho", name: "tea", state: "active", accepted }])).toEqual([
+		expect(
+			line([
+				{ agent: "sancho", id: "sancho/tea", name: "tea", state: "active", accepted, change: { kind: "removed" } },
+			]),
+		).toEqual(["Remove routine Tea time? Waiting for you"]);
+		expect(line([{ agent: "sancho", id: "sancho/tea", name: "tea", state: "active", accepted }])).toEqual([
 			"Routine scheduled: Tea time",
 		]);
-		expect(line([{ agent: "sancho", name: "tea", state: "paused", accepted, paused: "owner" }])).toEqual([
-			"Routine paused: Tea time",
-		]);
-		expect(line([{ agent: "sancho", name: "tea", state: "done", accepted, done: 5 }])).toEqual([
+		expect(
+			line([{ agent: "sancho", id: "sancho/tea", name: "tea", state: "paused", accepted, paused: "owner" }]),
+		).toEqual(["Routine paused: Tea time"]);
+		expect(line([{ agent: "sancho", id: "sancho/tea", name: "tea", state: "done", accepted, done: 5 }])).toEqual([
 			"Routine ran: Tea time",
 		]);
 		expect(line([])).toEqual(["Routine not set up: tea"]);
-		expect(line([], { "routines/tea.md": 9 })).toEqual(["Routine removed: tea"]);
+		expect(line([], { "agents/sancho/routines/tea.md": 9 })).toEqual(["Routine removed: tea"]);
 	});
 });

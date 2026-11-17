@@ -467,7 +467,7 @@ function Main() {
 			const openRoutine =
 				editing?.routine === undefined
 					? undefined
-					: shell.control?.routines.find((each) => each.name === editing.routine && each.accepted !== undefined);
+					: shell.control?.routines.find((each) => each.id === editing.routine && each.accepted !== undefined);
 			const editor =
 				editing?.agent !== where.id ? undefined : openWatch !== undefined ? (
 					<WatchDetail
@@ -486,7 +486,7 @@ function Main() {
 						routine={openRoutine}
 						now={pushedAt}
 						// saved, deleted or Back: its detail again, or the list once it is gone
-						onDone={() => setEditing({ agent: where.id, routine: openRoutine.name })}
+						onDone={() => setEditing({ agent: where.id, routine: openRoutine.id })}
 					/>
 				) : (
 					<RoutineHistory
@@ -497,9 +497,9 @@ function Main() {
 						focusRun={editing.run}
 						allPaused={shell.control?.paused !== undefined}
 						onBack={backToRoutines}
-						onEdit={() => setEditing({ agent: where.id, routine: openRoutine.name, edit: true })}
+						onEdit={() => setEditing({ agent: where.id, routine: openRoutine.id, edit: true })}
 						onOpenRun={(at, entry) => {
-							setEditing({ agent: where.id, routine: openRoutine.name, run: at });
+							setEditing({ agent: where.id, routine: openRoutine.id, run: at });
 							runLine.current = entry;
 							// on the phone the sheet closes so the chat shows; the detail waits beneath for it to open again
 							if (phone) setSheet(false);

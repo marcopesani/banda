@@ -182,7 +182,14 @@ function ChangeLine({ who, segment }: { who: Who; segment: Extract<Segment, { ki
 			<RoutineLine
 				chat={0}
 				who={who}
-				segment={{ kind: "routine", key: segment.key, state, name, routine: subject.routine }}
+				segment={{
+					kind: "routine",
+					key: segment.key,
+					state,
+					id: name,
+					name: subject.routine.name,
+					routine: subject.routine,
+				}}
 			/>
 		);
 	if (state === "done" || state === "declined")
@@ -206,9 +213,9 @@ function RoutineLine({
 	chat: number;
 	who: Who;
 	segment: Extract<Segment, { kind: "routine" }>;
-	onRoutine?: ((name: string) => void) | undefined;
+	onRoutine?: ((id: string) => void) | undefined;
 }) {
-	const { routine, state, name } = segment;
+	const { routine, state, name, id } = segment;
 	const title =
 		name === undefined
 			? "a routine"
@@ -221,7 +228,7 @@ function RoutineLine({
 	if (state === "pending") sawOpen(segment.key);
 	const set = routine?.accepted?.routine;
 	if (state === "done" && set !== undefined) {
-		const open = name === undefined || onRoutine === undefined ? undefined : () => onRoutine(name);
+		const open = id === undefined || onRoutine === undefined ? undefined : () => onRoutine(id);
 		const edited = segment.sha !== undefined && routine?.edited?.includes(segment.sha) === true;
 		const card = (
 			<RoutineProposal
@@ -258,7 +265,7 @@ function RoutineLine({
 		return (
 			<Done kind="declined" action={state === "declined" ? "didn't set up" : "stopped"} reference={{ where: title }} />
 		);
-	if (state === "pending" && routine !== undefined && name !== undefined && change !== undefined) {
+	if (state === "pending" && routine !== undefined && id !== undefined && change !== undefined) {
 		const shown = change.kind === "removed" ? routine.accepted?.routine : change.routine;
 		return (
 			<RoutineProposal
@@ -277,14 +284,14 @@ function RoutineLine({
 				// keeps the owner's edit to correct
 				onAllow={(edit) =>
 					void attempt(change.kind === "removed" ? "stop it" : "set it up", () =>
-						actOnRoutine(name, {
+						actOnRoutine(id, {
 							action: "accept",
 							sha: change.kind === "removed" ? null : (change.sha ?? null),
 							...edit,
 						}).then(showControl),
 					)
 				}
-				onDecline={() => void attempt("decline it", () => actOnRoutine(name, { action: "decline" }).then(showControl))}
+				onDecline={() => void attempt("decline it", () => actOnRoutine(id, { action: "decline" }).then(showControl))}
 			/>
 		);
 	}

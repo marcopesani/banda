@@ -165,15 +165,25 @@ function taking(
 /** The folders of the workspace whose files take effect only once the owner accepts them ("before" files). */
 const BEFORE = ["agents", "routines", "watches"];
 
-/** The "before" file at `at` (absolute), relative to the workspace; undefined for any other file. */
+/**
+ * The "before" file at `at` (absolute), relative to the workspace; undefined for any other file. An agent's own
+ * routines (`agents/<agent>/routines/<name>.md`) are before files as the shared ones are.
+ */
 function beforeFile(workspace: string, at: string): string | undefined {
 	const relative = posix.relative(workspace, at);
-	return BEFORE.includes(posix.dirname(relative)) &&
+	const folder = posix.dirname(relative);
+	return (BEFORE.includes(folder) || ownRoutines(folder)) &&
 		posix.extname(relative) === ".md" &&
 		AGENT_NAME.test(posix.basename(relative, ".md"))
 		? relative
 		: undefined;
 }
+
+/** Whether `folder` (relative to the workspace) is an agent's own routines folder. */
+const ownRoutines = (folder: string) => {
+	const [top, agent = "", routines, ...rest] = folder.split("/");
+	return top === "agents" && AGENT_NAME.test(agent) && routines === "routines" && rest.length === 0;
+};
 
 /** What the model is told of a "before" file a call changed (by its path in the workspace), as a diagnostic. */
 export const awaiting = (path: string) => ({
@@ -211,13 +221,20 @@ async function beforeFiles(
 			await opened.value.close(ctx);
 		}
 	};
-	for (const folder of BEFORE) {
+	const folders = [...BEFORE];
+	for (let at = 0; at < folders.length; at++) {
+		const folder = folders[at] as string;
 		const listed = await env.listDir(`${workspace}/${folder}`, ctx);
 		if (!listed.ok) {
 			if (listed.error.code === "not_found") continue;
 			return undefined;
 		}
-		for (const entry of listed.value) await look(`${workspace}/${folder}/${entry.name}`, entry);
+		for (const entry of listed.value) {
+			// an agent's folder holds its own routines: a real folder, never one reached through a link
+			if (folder === "agents" && entry.kind === "directory" && AGENT_NAME.test(entry.name))
+				folders.push(`agents/${entry.name}/routines`);
+			await look(`${workspace}/${folder}/${entry.name}`, entry);
+		}
 	}
 	return found;
 }

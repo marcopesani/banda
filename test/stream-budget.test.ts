@@ -169,7 +169,7 @@ describe("what the daemon sends a client", () => {
 		}
 		// a second agent and its routine, run by hand: each run goes to the agent's own chat, which no one else writes in
 		await send("/agents/helper", { text: HELPER, base: null }, "PUT");
-		const { name } = await send<{ name: string }>("/routines", {
+		const { id } = await send<{ id: string }>("/routines", {
 			agent: "helper",
 			description: "Morning check",
 			when: "cron 0 8 * * *",
@@ -179,12 +179,12 @@ describe("what the daemon sends a client", () => {
 		});
 		let routine: number | undefined;
 		for (let n = 1; n <= RUNS; n++) {
-			await send(`/routines/${name}/run`, { key: `run-${n}` });
+			await send(`/routines/${id}/run`, { key: `run-${n}` });
 			routine ??= await until(async () => (await get<ChatRow[]>("/chats")).find((row) => row.agent === "helper")?.chat);
 			// a run is apart from the chat (DESIGN.md "Routines"): it leaves its line and, after it, what it said
 			const chat = routine;
 			fedChat = await until(async () => {
-				const view = (await get<ControlView>("/control")).routines.find((each) => each.name === name);
+				const view = (await get<ControlView>("/control")).routines.find((each) => each.id === id);
 				if (view === undefined || view.running === true) return false;
 				const items = await all(chat);
 				const said = items.filter((item) => item.role === "assistant" && (item.calls?.length ?? 0) > 0).length;

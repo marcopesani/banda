@@ -480,7 +480,7 @@ export function archivedFile(name: string, file: AcceptedFile | undefined): bool
 export function activeAgents(files: { readonly [path: string]: AcceptedFile }): string[] {
 	return Object.entries(files)
 		.flatMap(([path, file]) => {
-			const id = /^agents\/(.+)\.md$/.exec(path)?.[1];
+			const id = /^agents\/([^/]+)\.md$/.exec(path)?.[1];
 			if (id === undefined) return [];
 			const parsed = parseAgent(id, file.text);
 			return "agent" in parsed && parsed.agent.state === "active" ? [id] : [];
