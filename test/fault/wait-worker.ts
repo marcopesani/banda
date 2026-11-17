@@ -7,8 +7,9 @@
  */
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, defineExtension, type TaskId } from "@earendil-works/pi-durable";
+import { Type } from "typebox";
 import { BlobStore } from "../../src/core/blobs.ts";
 import { type Gateway, OWNER } from "../../src/core/gateway.ts";
 import { openWaits, status } from "../../src/core/status.ts";

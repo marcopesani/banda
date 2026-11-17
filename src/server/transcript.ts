@@ -3,7 +3,7 @@
  * events from pi-durable's agent event stream. All derived from the store; nothing here writes.
  */
 
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Op } from "@earendil-works/chord/delta";
 import {
 	type AssistantMessage,

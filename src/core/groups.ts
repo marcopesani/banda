@@ -5,8 +5,7 @@
  * speaks with `message_group`, which posts to the room (`say`); whom it may ask is in that tool's schema, the other
  * active members' names, which its chat's own extension narrows `ask` to (`asks`).
  */
-import type { Context } from "@earendil-works/chord";
-import { type TSchema, Type } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord/context";
 import {
 	AssistantEntry,
 	CompactionEntry,
@@ -27,6 +26,7 @@ import {
 	type Tx,
 	wrapTool,
 } from "@earendil-works/pi-durable";
+import { type TSchema, Type } from "typebox";
 import { Accepted, acceptedAgent, agentWords, agentWordsIn, asMember, isArchived, startAs } from "./agents.ts";
 import { ASK_WORDS } from "./ask.ts";
 import { type Attachment, blobLink, hold } from "./blobs.ts";

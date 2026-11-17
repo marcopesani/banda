@@ -1,6 +1,6 @@
 /** Status (DESIGN.md "Flows"), derived from the task graph and the tasks' own inputs: nothing records it. */
 
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Harness, TaskGraphNode, TaskId } from "@earendil-works/pi-durable";
 import { LEAD } from "./agents.ts";
 

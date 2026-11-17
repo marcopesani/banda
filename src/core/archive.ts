@@ -5,7 +5,7 @@
  * after the commit (`stopArchived`), and again at every start, so a crash between the two leaves nothing running.
  * Restoring is the same file saying `state: active`: its routines stay paused and its permissions stay gone.
  */
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ConversationId, Harness, TaskId, Tx } from "@earendil-works/pi-durable";
 import { log } from "./activity.ts";
 import { Accepted, AgentChats, agentPath, agentWords, archivedFile } from "./agents.ts";

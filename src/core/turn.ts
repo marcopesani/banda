@@ -3,8 +3,7 @@
  * its notes, never sent: an agent speaks with its speaking tools (`message_user`, `ask_user`, `react`, …), whose messages a Message task delivers at least once and
  * in order per origin.
  */
-import type { Context } from "@earendil-works/chord";
-import type { TSchema } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord/context";
 import {
 	AssistantEntry,
 	CompactionEntry,
@@ -29,6 +28,7 @@ import {
 	type Tx,
 	wrapSection,
 } from "@earendil-works/pi-durable";
+import type { TSchema } from "typebox";
 import {
 	Accepted,
 	AgentChats,

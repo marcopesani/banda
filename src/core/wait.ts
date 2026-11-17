@@ -5,7 +5,7 @@
  * decided in the commit that reads the slot, so an answer and an expiry never both win.
  */
 import { randomInt } from "node:crypto";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import {
 	type ConversationId,
 	defineDoc,

@@ -2,15 +2,9 @@
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-	createModels,
-	fauxAssistantMessage,
-	fauxProvider,
-	fauxToolCall,
-	type Static,
-	Type,
-} from "@earendil-works/pi-ai";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { createRegistry, type Harness, SessionFailed } from "@earendil-works/pi-durable";
+import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { ActivityLog } from "../../src/core/activity.ts";
 import {
