@@ -52,6 +52,12 @@ async function daemon() {
 			const last = ctx.messages.at(-1);
 			if (last?.role !== "user") return fauxAssistantMessage("done");
 			const said = textOf(last.content);
+			// a message as the model wrote it, its arguments whole
+			const whole = /^say (\{.*\})$/s.exec(said);
+			if (whole !== null)
+				return fauxAssistantMessage([fauxToolCall("message_user", JSON.parse(whole[1] ?? "{}"))], {
+					stopReason: "toolUse",
+				});
 			const shown = /^show (.+)$/.exec(said);
 			if (shown !== null)
 				return fauxAssistantMessage(
@@ -116,7 +122,10 @@ describe("artifacts in the daemon", () => {
 			await d.say("publish plan.md Trip");
 			const id = artifactId(d.box("plan.md"));
 			const result = (await d.items()).find((item) => item.role === "tool" && item.name === "publish");
-			expect(result).toMatchObject({ error: false, text: `Published as version 1; its id is ${id}.` });
+			expect(result).toMatchObject({ error: false });
+			expect(result?.role === "tool" && result.text).toMatch(
+				new RegExp(`^Published as version 1; its id is ${id}\\. `),
+			);
 			await d.say(`show ${id}`);
 			const shownResult = () =>
 				d.items().then((items) => items.filter((item) => item.role === "tool" && item.name === "message_user"));
@@ -139,6 +148,76 @@ describe("artifacts in the daemon", () => {
 			await d.close();
 		}
 	});
+
+	it("tells the model what the owner sees: a publish's card, the same bytes as no new version, and an artifact linked in its words or shown as a card", async () => {
+		const d = await daemon();
+		try {
+			await mkdir(join(d.home, "workspace"), { recursive: true });
+			await writeFile(d.box("plan.md"), "# Friday\n");
+			await writeFile(d.box("old.md"), "# Old\n");
+			const id = artifactId(d.box("plan.md"));
+			const results = async (name: string) =>
+				(await d.items()).flatMap((item) => (item.role === "tool" && item.name === name ? [item] : []));
+			const last = async (name: string) => (await results(name)).at(-1);
+			// a first publish: the version it made, that the card shows now, and how to show or name it later
+			await d.say("publish plan.md Trip plan");
+			expect((await last("publish"))?.text).toBe(
+				`Published as version 1; its id is ${id}. The owner sees “Trip plan” here now, as its card at version 1; ` +
+					`showing it again in this run adds nothing. Later, \`artifacts: ["${id}"]\` in a message shows its card ` +
+					`again; \`[words](artifact:${id})\` in its text links it by its title.`,
+			);
+			// the same bytes again make no version, and the model is not told it made one
+			await d.say("publish plan.md");
+			expect((await last("publish"))?.text).toMatch(
+				new RegExp(`^Unchanged: the file holds version 1's bytes, so no new version; its id is ${id}\\. `),
+			);
+			await writeFile(d.box("plan.md"), "# Friday\n\nback at six\n");
+			await d.say("publish plan.md | back at six");
+			expect((await last("publish"))?.text).toMatch(/^Published as version 2; .* as its card at version 2;/);
+
+			// linked in the words and shown as a card, side by side: both, each said
+			await d.say(`say ${JSON.stringify({ text: `See [my notes](artifact:${id}).`, artifacts: [id] })}`);
+			expect(await last("message_user")).toMatchObject({
+				error: false,
+				text: "Sent. The owner sees “Trip plan” as its card, at version 2; “Trip plan” as a link in your words.",
+				receipt: { kind: "artifacts", artifacts: [{ id, n: 2 }] },
+			});
+			// linked alone: no card, no receipt
+			await d.say(`say ${JSON.stringify({ text: `Read [this](artifact:${id}) first.` })}`);
+			const linked = await last("message_user");
+			expect(linked).toMatchObject({ error: false, text: "Sent. The owner sees “Trip plan” as a link in your words." });
+			expect(linked?.role === "tool" && linked.receipt).toBeFalsy();
+			const sent = (await d.items()).filter((item) => item.role === "assistant");
+			expect(JSON.stringify(sent)).toContain(`Read [this](artifact:${id}) first.`);
+
+			// an id the Library does not hold, or one it held and the owner removed: nothing is sent, and the model
+			// hears this chat's ids
+			const count = (await results("message_user")).length;
+			await d.say(`say ${JSON.stringify({ text: "See [it](artifact:0123456789abcdef)." })}`);
+			await d.say("publish old.md Old notes");
+			const old = artifactId(d.box("old.md"));
+			expect((await d.call(`/artifacts/${old}`, { method: "DELETE" })).ok).toBe(true);
+			await d.say(`say ${JSON.stringify({ text: `See [the old one](artifact:${old}).` })}`);
+			// not an artifact link: the scheme in another case, or no id
+			await d.say(`say ${JSON.stringify({ text: `See [x](Artifact:${id}).` })}`);
+			await d.say(`say ${JSON.stringify({ text: "Run [x](artifact:javascript:alert(1))." })}`);
+			const refused = (await results("message_user")).slice(count).map((item) => item.role === "tool" && item);
+			expect(refused.map((item) => item && [item.error, item.text])).toEqual([
+				[true, `Not sent: no artifact 0123456789abcdef in the Library; this chat's are ${id} (Trip plan).`],
+				[true, `Not sent: no artifact ${old} in the Library; this chat's are ${id} (Trip plan).`],
+				[
+					true,
+					`Not sent: "Artifact:${id}" is no artifact link: link one as [words](artifact:<id>), its id as \`publish\` returned it.`,
+				],
+				[
+					true,
+					'Not sent: "artifact:javascript:alert(1" is no artifact link: link one as [words](artifact:<id>), its id as `publish` returned it.',
+				],
+			]);
+		} finally {
+			await d.close();
+		}
+	}, 60_000);
 
 	it("publishes versions, keeps the same bytes as one, and the owner's edit and restore reach the box and the chat", async () => {
 		const d = await daemon();

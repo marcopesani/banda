@@ -18,7 +18,7 @@ import {
 	type Tx,
 } from "@earendil-works/pi-durable";
 import { log } from "./activity.ts";
-import { publishedBy } from "./artifacts.ts";
+import { Artifacts, publishedBy } from "./artifacts.ts";
 import { type Attachment, attachmentLine, type BlobStore, safeName, sizeOf, tooBig } from "./blobs.ts";
 import { oneEmoji } from "./choices.ts";
 import { sameToolAuthority, type ToolAuthority, validToolAuthority } from "./connections.ts";
@@ -281,6 +281,7 @@ function speak(
 		if (why !== undefined) return text(`Not sent: ${why}.`, true);
 		let attached: readonly Attachment[] = [];
 		let receipt: JsonObject | undefined;
+		const seen: string[] = [];
 		let posted: { readonly note?: string } | undefined;
 		if (said !== "" || paths.length > 0 || carried) {
 			// the blobs are stored and the message that refers to them committed under one lock, so no sweep comes between
@@ -290,7 +291,8 @@ function speak(
 				for (const part of parts) {
 					const prepared = await part.prepare?.(raw, api, ctx, { blobs, limit, to });
 					if (typeof prepared === "string") return { refused: prepared };
-					if (prepared !== undefined) receipt = prepared.receipt;
+					if (prepared?.receipt !== undefined) receipt = prepared.receipt;
+					if (prepared?.seen !== undefined) seen.push(prepared.seen);
 				}
 				attached = files;
 				// a message of parts alone with no words of their own has nothing to send: the app shows the parts
@@ -321,14 +323,14 @@ function speak(
 				if ("undelivered" in outcome.result) return text(`Not delivered: ${outcome.result.undelivered}.`, true);
 			}
 		}
+		// what the owner sees of the message's parts, said where it is not plain from the call (an artifact by its id)
+		const also = seen.map((words) => ` ${words.charAt(0).toUpperCase()}${words.slice(1)}.`).join("");
 		const sent =
 			posted !== undefined
-				? posted.note === undefined
-					? "Posted to the group."
-					: `Posted to the group; ${posted.note}.`
+				? `${posted.note === undefined ? "Posted to the group." : `Posted to the group; ${posted.note}.`}${also}`
 				: attached.length === 0
-					? "Sent."
-					: `Sent, with:\n${attached.map((file) => `- ${attachmentLine(file)}`).join("\n")}`;
+					? `Sent.${also}`
+					: `Sent, with:\n${attached.map((file) => `- ${attachmentLine(file)}`).join("\n")}${also === "" ? "" : `\n${also.trim()}`}`;
 		if (ask === undefined) return { ...text(sent), ...(receipt === undefined ? {} : { details: { receipt } }) };
 		const deadline = api.now() + (args.minutes === undefined ? DEFAULT_DEADLINE : args.minutes * 60_000);
 		// the deadline is fixed by the first call: a rerun finds the Wait and ignores it
@@ -491,6 +493,20 @@ export function reactTool({ asking, sending, blobs, limit, venue }: Speaking): T
 	});
 }
 
+/**
+ * What a publish tells the model: the version it made (or that the bytes were the newest's already), that the owner
+ * sees its card now, and how to show or name it later, by its id.
+ */
+export const publishedWords = (made: {
+	readonly id: string;
+	readonly n: number;
+	readonly title: string;
+	readonly fresh: boolean;
+}) =>
+	`${made.fresh ? `Published as version ${made.n}` : `Unchanged: the file holds version ${made.n}'s bytes, so no new version`}; its id is ${made.id}. ` +
+	`The owner sees “${made.title}” here now, as its card at version ${made.n}; showing it again in this run adds nothing. ` +
+	`Later, \`artifacts: ["${made.id}"]\` in a message shows its card again; \`[words](artifact:${made.id})\` in its text links it by its title.`;
+
 /** `publish`: a file of the box to the owner as its next version, shown as a card in the chat (DESIGN.md "The app"). */
 export function publishTool({ asking, sending, blobs, limit, venue }: Speaking): ToolRegistration {
 	const send = speak(asking, sending, blobs, limit, venue, [artifact]);
@@ -498,10 +514,11 @@ export function publishTool({ asking, sending, blobs, limit, venue }: Speaking):
 		name: PUBLISH,
 		description:
 			"Publish a file you made for the owner (a document in markdown, a table as CSV, a plan, a page as HTML, an " +
-			"image, a PDF) to them as its next version; the chat shows it as a card they open. `path` is " +
+			"image, a PDF) to them as its next version; the chat shows it now, as a card they open. `path` is " +
 			"the file in your box, `title` its name in their words, `change` what changed since its last version, in " +
-			"one line. Publish the same path again when you change it; every version is kept. It returns the artifact's " +
-			"id, which a message's `artifacts` shows again. They may edit it: what they change reaches you as their words.",
+			"one line. Publish the same path again when you change it; every version is kept. It returns the " +
+			"artifact's id, which a message's `artifacts` shows again or its text links. They may edit it: what they " +
+			"change reaches you as their words.",
 		parameters: Type.Object({
 			path: Type.String({ minLength: 1, description: "The file in your box." }),
 			title: Type.Optional(Type.String({ minLength: 1, maxLength: 80, description: "Its name, in their words." })),
@@ -514,10 +531,20 @@ export function publishTool({ asking, sending, blobs, limit, venue }: Speaking):
 		execute: async (args, api, ctx) => {
 			const result = await send(messageArgs(PUBLISH, args) as Said, api, ctx);
 			if (result.isError === true) return result;
-			const made = await api.commit((tx) => publishedBy(tx, Number(api.conversationId), api.callId), ctx);
-			return made === undefined
-				? result
-				: { ...result, output: [{ type: "text", text: `Published as version ${made.n}; its id is ${made.id}.` }] };
+			const chat = Number(api.conversationId);
+			const made = await api.commit(async (tx) => {
+				const found = await publishedBy(tx, chat, api.callId);
+				if (found === undefined) return undefined;
+				const artifact = (await tx.doc(Artifacts)).artifacts[found.id];
+				const version = artifact?.versions[found.n - 1];
+				// a version is this call's when it made it; the same bytes as the newest made none
+				return {
+					...found,
+					title: artifact?.title ?? "",
+					fresh: version?.call === api.callId && version.chat === chat,
+				};
+			}, ctx);
+			return made === undefined ? result : { ...result, output: [{ type: "text", text: publishedWords(made) }] };
 		},
 	});
 }

@@ -8,6 +8,7 @@ import {
 	ClockIcon,
 	ExternalLinkIcon,
 	FileTextIcon,
+	FileXIcon,
 	GlobeIcon,
 	MonitorIcon,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { cn } from "@/lib/cn";
 import { pathEnds } from "@/lib/ends";
 import { Bubble } from "./Feed.tsx";
 import { ImageFile, MESSAGE_IMAGE_WIDTH } from "./Files.tsx";
+import { INLINE_LINK, INLINE_TEXT } from "./inline.ts";
 import { KeepEnd } from "./KeepEnd.tsx";
 
 /** The frame every card shares: a hairline, the tile radius, the measure. */
@@ -68,6 +70,51 @@ export function ArtifactCard({
 				Open
 			</Button>
 		</Tile>
+	);
+}
+
+/**
+ * An artifact a message's words link, inline: its icon and its title in the Library, a link that opens it in place
+ * (`href`, the app's route to it), never a card. `unavailable`: the Library no longer holds it, so the words the link
+ * was written with stay, marked so, and open nothing.
+ */
+export function ArtifactLink({
+	title,
+	kind,
+	href,
+	unavailable = false,
+}: {
+	title: ReactNode;
+	/** Its kind in words ("Document"), said to a screen reader and on hover. */
+	kind: string;
+	href?: string | undefined;
+	unavailable?: boolean;
+}) {
+	if (unavailable || href === undefined)
+		return (
+			<span
+				data-artifact-link="unavailable"
+				className="inline-flex max-w-full items-baseline gap-1 align-baseline text-ink-2"
+				title="No longer in the Library"
+			>
+				<FileXIcon aria-hidden="true" className="size-3.5 shrink-0 self-center" />
+				<span className={cn(INLINE_TEXT, "line-through")}>{title}</span>
+				<span className="shrink-0">(unavailable)</span>
+			</span>
+		);
+	const named = typeof title === "string" ? title : undefined;
+	return (
+		<span data-artifact-link="" className="inline-flex max-w-full items-baseline gap-1 align-baseline">
+			<FileTextIcon aria-hidden="true" className="size-3.5 shrink-0 self-center" />
+			<a
+				href={href}
+				className={cn(INLINE_LINK, "rounded-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2")}
+				title={named === undefined ? kind : `${kind}: ${named}`}
+				aria-label={named === undefined ? undefined : `${named}, ${kind.toLowerCase()}`}
+			>
+				{title}
+			</a>
+		</span>
 	);
 }
 
