@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useContext } from "react";
 import { cn } from "@/lib/cn";
+import { LEAD } from "../../../src/core/agent-id.ts";
 import { defaultAvatarFace } from "../../../src/core/avatar-face.ts";
 import { DEFAULT_WAKES_A_DAY } from "../../../src/core/watch-limits.ts";
 import { actOnRoutine } from "../areas/routines.ts";
@@ -182,7 +183,14 @@ function ChangeLine({ who, segment }: { who: Who; segment: Extract<Segment, { ki
 			<RoutineLine
 				chat={0}
 				who={who}
-				segment={{ kind: "routine", key: segment.key, state, name, routine: subject.routine }}
+				segment={{
+					kind: "routine",
+					key: segment.key,
+					state,
+					id: name,
+					name: subject.routine.name,
+					routine: subject.routine,
+				}}
 			/>
 		);
 	if (state === "done" || state === "declined")
@@ -197,6 +205,13 @@ function ChangeLine({ who, segment }: { who: Who; segment: Extract<Segment, { ki
 	return <Line icon={state === "removed" ? FileXIcon : FilePenIcon}>{changeWords(segment)}</Line>;
 }
 
+/** An agent's name as the app says it, by its id: the lead's is the companion's. */
+function agentNameOf(shell: ReturnType<typeof useShell>, id: string): string {
+	const accepted = shell.agents.find((view) => view.accepted?.agent?.id === id)?.accepted?.agent;
+	if (id === LEAD) return shell.companion?.name ?? accepted?.name ?? "Sancho";
+	return accepted?.name ?? id;
+}
+
 /** A routine an agent wrote: its card while it waits for the owner; set up, declined or stopped, a row. */
 function RoutineLine({
 	who,
@@ -206,9 +221,17 @@ function RoutineLine({
 	chat: number;
 	who: Who;
 	segment: Extract<Segment, { kind: "routine" }>;
-	onRoutine?: ((name: string) => void) | undefined;
+	onRoutine?: ((id: string) => void) | undefined;
 }) {
-	const { routine, state, name } = segment;
+	const { routine, state, name, id } = segment;
+	const shell = useShell();
+	// whom it runs as: the agent its folder (or, shared, its record) names, whose chat this need not be
+	const runsAs = routine?.agent === undefined ? undefined : agentNameOf(shell, routine.agent);
+	const scope = {
+		...(runsAs === undefined ? {} : { runsAs }),
+		shared: routine?.shared === true,
+		...(routine?.twins?.length ? { twin: routine.shared === true ? ("own" as const) : ("shared" as const) } : {}),
+	};
 	const title =
 		name === undefined
 			? "a routine"
@@ -221,12 +244,13 @@ function RoutineLine({
 	if (state === "pending") sawOpen(segment.key);
 	const set = routine?.accepted?.routine;
 	if (state === "done" && set !== undefined) {
-		const open = name === undefined || onRoutine === undefined ? undefined : () => onRoutine(name);
+		const open = id === undefined || onRoutine === undefined ? undefined : () => onRoutine(id);
 		const edited = segment.sha !== undefined && routine?.edited?.includes(segment.sha) === true;
 		const card = (
 			<RoutineProposal
 				routine={{
 					agent: who.name,
+					...scope,
 					title,
 					kind: "new",
 					when: set.when,
@@ -258,12 +282,13 @@ function RoutineLine({
 		return (
 			<Done kind="declined" action={state === "declined" ? "didn't set up" : "stopped"} reference={{ where: title }} />
 		);
-	if (state === "pending" && routine !== undefined && name !== undefined && change !== undefined) {
+	if (state === "pending" && routine !== undefined && id !== undefined && change !== undefined) {
 		const shown = change.kind === "removed" ? routine.accepted?.routine : change.routine;
 		return (
 			<RoutineProposal
 				routine={{
 					agent: who.name,
+					...scope,
 					title,
 					kind: change.kind === "added" ? "new" : change.kind,
 					when: shown?.when ?? "",
@@ -277,14 +302,14 @@ function RoutineLine({
 				// keeps the owner's edit to correct
 				onAllow={(edit) =>
 					void attempt(change.kind === "removed" ? "stop it" : "set it up", () =>
-						actOnRoutine(name, {
+						actOnRoutine(id, {
 							action: "accept",
 							sha: change.kind === "removed" ? null : (change.sha ?? null),
 							...edit,
 						}).then(showControl),
 					)
 				}
-				onDecline={() => void attempt("decline it", () => actOnRoutine(name, { action: "decline" }).then(showControl))}
+				onDecline={() => void attempt("decline it", () => actOnRoutine(id, { action: "decline" }).then(showControl))}
 			/>
 		);
 	}

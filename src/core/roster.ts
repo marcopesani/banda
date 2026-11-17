@@ -42,7 +42,7 @@ export const rosterSection: PromptSection = {
 		const files = (await read.snapshot(Accepted, ctx))?.files ?? {};
 		const lead = (await read.snapshot(Companion, ctx))?.name ?? DEFAULT_NAME;
 		const agents = Object.entries(files).flatMap(([path, file]) => {
-			const id = /^agents\/(.+)\.md$/.exec(path)?.[1];
+			const id = /^agents\/([^/]+)\.md$/.exec(path)?.[1];
 			if (id === undefined) return [];
 			const parsed = parseAgent(id, file.text);
 			if (!("agent" in parsed) || parsed.agent.state !== "active") return [];

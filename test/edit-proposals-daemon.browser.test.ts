@@ -552,7 +552,7 @@ for (const [width, height, delivery] of [
 					});
 					expect(set.change).toBeUndefined();
 					// the box holds the owner's version
-					const box = await readFile(join(home, "workspace", "routines", "tea.md"), "utf8");
+					const box = await readFile(join(home, "workspace", "agents", "sancho", "routines", "tea.md"), "utf8");
 					expect(box).toContain("every: 2h");
 					expect(box).toContain("Brew the owner a pot of tea, kindly.");
 					expect(box).not.toContain("green tea");

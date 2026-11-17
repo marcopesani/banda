@@ -75,6 +75,7 @@ const segments = (settled: boolean) => [
 	{
 		kind: "routine",
 		key: "12",
+		id: "sancho/fare-watch",
 		name: "fare-watch",
 		state: settled ? "done" : "pending",
 		routine: settled
@@ -223,7 +224,7 @@ for (const width of [390, 1280]) {
 				expect(await page.run(`!!${row("agent")}.querySelector('a[href="#/a/mara"]')`)).toBe(true);
 				// a routine's chip opens it
 				await page.run(`${row("routine")}.querySelector('button[aria-label="Open the routine Fare watch"]').click()`);
-				expect(await page.run<string[]>(`window.opened`)).toEqual(["fare-watch"]);
+				expect(await page.run<string[]>(`window.opened`)).toEqual(["sancho/fare-watch"]);
 				expect(
 					await page.run<string>(`document.querySelectorAll('[data-done="permission"]')[0].textContent`),
 				).toContain("Allowed");

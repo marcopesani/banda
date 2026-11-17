@@ -18,7 +18,9 @@ export type RoutineSegment = {
 	readonly kind: "routine";
 	readonly key: string;
 	readonly state: FeedState;
-	/** The routine's name, as the call's receipt names the file it wrote. */
+	/** Which routine (`RoutineView.id`), as the call's receipt names the file it wrote. */
+	readonly id?: string;
+	/** Its file's name, which says nothing of whose it is. */
 	readonly name?: string;
 	/** The hash of what the call wrote, and whether it made the routine, changed one in effect, or found it as written. */
 	readonly sha?: string;
@@ -42,25 +44,31 @@ declare module "./types.ts" {
 	}
 }
 
+/** Routine `id`'s file in the workspace: `agents/<agent>/routines/<name>.md`, or a shared `routines/<name>.md`. */
+export const routinePathOf = (id: string): string => {
+	const [first, second] = id.split("/");
+	return second === undefined ? `routines/${first}.md` : `agents/${first}/routines/${second}.md`;
+};
+
 /**
- * How routine `name` stands now, for a line whose call wrote `sha` at `since`: waiting for the owner while any change
+ * How routine `id` stands now, for a line whose call wrote `sha` at `since`: waiting for the owner while any change
  * of it waits; done while what the call wrote is in effect, or was allowed (whatever the owner changed since); removed
  * when it was taken out of effect after the call; declined otherwise (never allowed).
  */
 export function routineState(
 	routines: readonly RoutineView[],
-	name: string,
+	id: string,
 	removed: { readonly [path: string]: number } | undefined,
 	since = 0,
 	sha?: string,
 ): { state: FeedState; routine?: RoutineView } {
-	const routine = routines.find((each) => each.name === name);
+	const routine = routines.find((each) => each.id === id);
 	if (routine?.change !== undefined) return { state: "pending", routine };
 	const allowed =
 		routine?.accepted?.routine !== undefined &&
 		(sha === undefined || routine.accepted.sha === sha || routine.allowed?.includes(sha) === true);
 	if (allowed) return { state: "done", routine };
-	const gone = removed?.[`routines/${name}.md`];
+	const gone = removed?.[routinePathOf(id)];
 	if (gone !== undefined && gone >= since) return { state: "removed" };
 	return routine === undefined ? { state: "declined" } : { state: "declined", routine };
 }
@@ -112,7 +120,9 @@ export const routines: Segmenter = {
 			kind: "routine",
 			key,
 			state: early ?? (receipt === undefined ? "refused" : "working"),
-			...(receipt === undefined ? {} : { name: receipt.name, sha: receipt.sha, change: receipt.change }),
+			...(receipt === undefined
+				? {}
+				: { id: receipt.id, name: receipt.name, sha: receipt.sha, change: receipt.change }),
 			...(early === "refused" ? { why: refusalWhy(at.result) } : {}),
 			...(at.result?.at === undefined ? {} : { at: at.result.at }),
 		};
@@ -122,15 +132,15 @@ export const routines: Segmenter = {
 	after: (segments, input) => {
 		const last = new Map<string, number>();
 		segments.forEach((segment, i) => {
-			if (segment.kind === "routine" && segment.name !== undefined) last.set(segment.name, i);
+			if (segment.kind === "routine" && segment.id !== undefined) last.set(segment.id, i);
 		});
 		return segments.flatMap((segment, i): Segment[] => {
 			if (segment.kind !== "routine") return [segment];
-			if (segment.name === undefined) return [{ ...segment, state: settled(segment.key, segment.state, input) }];
-			if (last.get(segment.name) !== i) return [];
+			if (segment.id === undefined) return [{ ...segment, state: settled(segment.key, segment.state, input) }];
+			if (last.get(segment.id) !== i) return [];
 			const { routines, removed, agents } = input.context;
 			if (routines === undefined) return [segment];
-			const now = routineState(routines, segment.name, removed, segment.at, segment.sha);
+			const now = routineState(routines, segment.id, removed, segment.at, segment.sha);
 			const agent =
 				now.routine?.agent === undefined ? undefined : agents?.find((each) => each.name === now.routine?.agent);
 			const shown = agent?.accepted?.agent;

@@ -211,7 +211,7 @@ describe("a routine's history from the store", () => {
 		expect(third?.runs.map((each) => each.at)).toEqual([START + 3 * MINUTE, START + 2 * MINUTE, START + MINUTE]);
 		expect(third?.earlier).toBeUndefined();
 		expect(await routineRuns(harness, "coffee", undefined)).toBeUndefined();
-		await expect(routineRuns(harness, "../x", undefined)).rejects.toThrow(/not a routine's name/);
+		await expect(routineRuns(harness, "../x", undefined)).rejects.toThrow(/not a routine's id/);
 		await harness.close(context);
 	});
 });

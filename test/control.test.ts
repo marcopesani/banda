@@ -58,7 +58,7 @@ describe("the control room", () => {
 				method: "POST",
 				body: JSON.stringify({ id: randomUUID(), thread: randomUUID(), text: "remind me about tea daily" }),
 			});
-			const file = join(home, "workspace", "routines", "tea.md");
+			const file = join(home, "workspace", "agents", "sancho", "routines", "tea.md");
 			await scheduled;
 			expect(await readFile(file, "utf8")).toBe(
 				"---\ndescription: Tea time\nevery: 1d\n---\nRemind the owner to drink tea.\n",
@@ -75,15 +75,18 @@ describe("the control room", () => {
 			expect(waiting.next).toBeUndefined();
 			// a stale hash is refused
 			await expect(
-				api(`/routines/tea/accept`, { method: "POST", body: JSON.stringify({ sha: "0".repeat(64) }) }),
+				api(`/routines/sancho/tea/accept`, { method: "POST", body: JSON.stringify({ sha: "0".repeat(64) }) }),
 			).rejects.toThrow(/409/);
 			const sha = (waiting.change as { sha: string }).sha;
-			const allowed = await api<ControlView>("/routines/tea/accept", { method: "POST", body: JSON.stringify({ sha }) });
+			const allowed = await api<ControlView>("/routines/sancho/tea/accept", {
+				method: "POST",
+				body: JSON.stringify({ sha }),
+			});
 			const tea = allowed.routines.find((routine) => routine.name === "tea");
 			expect(tea?.change).toBeUndefined();
 			expect(tea?.accepted?.routine?.description).toBe("Tea time");
 			expect(tea?.next).toBeGreaterThan(Date.now() + 23 * 60 * 60_000);
-			expect(allowed.activity[0]).toMatchObject({ routine: "tea", what: "You allowed it" });
+			expect(allowed.activity[0]).toMatchObject({ routine: "sancho/tea", what: "You allowed it" });
 
 			const paused = await api<ControlView>("/control/pause", { method: "POST" });
 			expect(paused.paused).toBeDefined();
@@ -93,9 +96,9 @@ describe("the control room", () => {
 			expect(resumed.paused).toBeUndefined();
 			expect(resumed.routines.find((routine) => routine.name === "tea")?.next).toBeDefined();
 
-			const held = await api<ControlView>("/routines/tea/pause", { method: "POST" });
+			const held = await api<ControlView>("/routines/sancho/tea/pause", { method: "POST" });
 			expect(held.routines.find((routine) => routine.name === "tea")).toMatchObject({ paused: "owner" });
-			const removed = await api<ControlView>("/routines/tea/remove", { method: "POST" });
+			const removed = await api<ControlView>("/routines/sancho/tea/remove", { method: "POST" });
 			expect(removed.routines.find((routine) => routine.name === "tea")).toBeUndefined();
 			expect(existsSync(file)).toBe(false);
 		} finally {
