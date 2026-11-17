@@ -79,13 +79,27 @@ async function setup(signed?: string, settleMs?: number) {
 			type,
 			request: { url, method, headers: {} },
 		});
-	const paused = (id: string, network: string, url: string, method: string, type: string, frame = "top") =>
+	/** `origin`: the Origin header the browser set, naming the origin that started it. */
+	const paused = (
+		id: string,
+		network: string,
+		url: string,
+		method: string,
+		type: string,
+		frame = "top",
+		origin?: string,
+	) =>
 		cdp.emit("Fetch.requestPaused", {
 			requestId: id,
 			networkId: network,
 			resourceType: type,
 			frameId: frame,
-			request: { method, url, headers: { "Content-Type": "text/plain" }, postDataEntries: [] },
+			request: {
+				method,
+				url,
+				headers: { "Content-Type": "text/plain", ...(origin === undefined ? {} : { Origin: origin }) },
+				postDataEntries: [],
+			},
 		});
 	return { cdp, browser, committed, willSend, paused };
 }
@@ -216,13 +230,66 @@ describe("a signed-in page's write, whatever DevTools tells late or never, is ne
 		await flush();
 		expect(s.cdp.answers("d0")).toEqual(["Fetch.continueRequest"]);
 		// its form sends itself elsewhere, paused by the browser before the bank's renderer says its page opened
-		s.paused("f0", "LF", `${EVIL}/collect`, "POST", "Document");
+		s.paused("f0", "LF", `${EVIL}/collect`, "POST", "Document", "top", BANK);
 		await flush();
 		expect(asNobody(await s.browser.writes(0))).toEqual([]);
 		s.committed(`${BANK}/form`, "LB");
 		await flush();
 		expect((await s.browser.writes(0)).map((write) => [write.url, write.page, write.origin])).toEqual([
 			[`${EVIL}/collect`, `${BANK}/form`, `${BANK}/form`],
+		]);
+	});
+
+	it("a signed-in page's form sent while another site's page is opening, that page then opening: never that page's", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BANK}/inbox`, "LA");
+		s.paused("d0", "LB", `${EVIL}/landing`, "GET", "Document");
+		await flush();
+		expect(s.cdp.answers("d0")).toEqual(["Fetch.continueRequest"]);
+		// the bank's page, still standing, sends a form elsewhere; then the other page opens
+		s.paused("f0", "LF", `${EVIL}/collect`, "POST", "Document", "top", BANK);
+		await flush();
+		s.committed(`${EVIL}/landing`, "LB");
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		await unheard();
+		expect(asNobody(await s.browser.writes(0))).toEqual([]);
+	});
+
+	it("a signed-in page's form paused only after another site's page opened: failed, never that page's", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BANK}/inbox`, "LA");
+		s.paused("d0", "LB", `${EVIL}/landing`, "GET", "Document");
+		await flush();
+		s.committed(`${EVIL}/landing`, "LB");
+		s.paused("f0", "LF", `${EVIL}/collect`, "POST", "Document", "top", BANK);
+		await flush();
+		expect(asNobody(await s.browser.writes(0))).toEqual([]);
+		await unheard();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("f0")).toEqual(["Fetch.failRequest"]);
+	});
+
+	it("a form whose origin is hidden or not named fails: nothing says which page sent it", async () => {
+		const s = await setup();
+		s.committed(`${BLOG}/form`, "L1");
+		s.paused("f0", "LF", `${BLOG}/save`, "POST", "Document", "top", "null");
+		s.paused("f1", "LG", `${BLOG}/save`, "POST", "Document");
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("f0")).toEqual(["Fetch.failRequest"]);
+		expect(s.cdp.answers("f1")).toEqual(["Fetch.failRequest"]);
+	});
+
+	it("a form is its standing page's though a navigation it began never ended (a download, a 204)", async () => {
+		const s = await setup();
+		s.committed(`${BLOG}/form`, "L1");
+		s.paused("d0", "LX", `${BLOG}/download`, "GET", "Document");
+		await flush();
+		s.paused("f0", "LF", `${BLOG}/save`, "POST", "Document", "top", BLOG);
+		await flush();
+		expect((await s.browser.writes(0)).map((write) => [write.url, write.page])).toEqual([
+			[`${BLOG}/save`, `${BLOG}/form`],
 		]);
 	});
 

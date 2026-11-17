@@ -983,7 +983,8 @@ valid stamp.
   every time. One carrying a sensitive value or a key is never drafted: only the owner sends it. Which page made a
   write is the request's own word of its document (its frame and loader), never the order the browser tells of things
   in: one made in a frame inside the page, by a document left behind (a reload too) or by one not known in time fails
-  in the browser. A navigation that writes is the standing page's once no other navigation is under way, or fails.
+  in the browser. A navigation that writes (a form) names no document, only the origin that started it, in the Origin
+  header the browser sets: it is the standing page's while that page is of that origin, and fails otherwise or unnamed.
 - **Take-over.** The owner watches the page live and takes it over from the app: while they hold it what the browser
   sends is theirs, and an agent's call that drives it waits for them, in a Wait that outlives a restart; taking it cuts
   a call at work short, and Stop ends a call at once. Given back, the call goes on with the page as they left it, what

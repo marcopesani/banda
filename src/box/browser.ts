@@ -218,6 +218,15 @@ export type BrowserOptions = {
 };
 
 const READS = new Set(["GET", "HEAD", "OPTIONS"]);
+/** An address's origin as an Origin header names it, or undefined for one that has none. */
+const originOf = (address: string) => {
+	try {
+		const { origin } = new URL(address);
+		return origin === "null" ? undefined : origin;
+	} catch {
+		return undefined;
+	}
+};
 /** How long a paused request waits to hear from the renderer which document made it (`madeFrom`). */
 const HEARING_MS = 2_000;
 const VIEWPORT = { width: 1280, height: 800 };
@@ -306,8 +315,6 @@ type Session = {
 	readonly loaders: Map<string, string>;
 	/** Loaders of documents left behind: what they made is never the page's standing. */
 	readonly left: Set<string>;
-	/** The main frame's navigations under way, by network id: until one commits, the page standing may be leaving. */
-	readonly going: Set<string>;
 	/** Who waits on the renderer's news (`heard`): each looks again whenever some arrives. */
 	readonly waking: Set<() => void>;
 	loading: boolean;
@@ -451,18 +458,22 @@ export function openBrowser(options: BrowserOptions): Browser {
 	/**
 	 * The document that made request `p` (`writing`: one the page's write must come from), standing in the tab: by the
 	 * request's own word of its frame, loader and address (`madeBy`), never by the order the browser tells of it, so a
-	 * pause that overtook the renderer's news waits for it. A navigation's is the page standing once no other navigation
-	 * of the tab is under way. Undefined, so the request fails, when its document was left behind, is not known in time,
-	 * or (writing) is a frame's inside the page.
+	 * pause that overtook the renderer's news waits for it. A navigation names no document, only, in the Origin header
+	 * the browser sets, the origin that started it ("null" when the page hides it): it is the page standing's only while
+	 * that page is of that origin. Undefined, so the request fails, when its document was left behind, is not known in
+	 * time, or (writing) is a frame's inside the page.
 	 */
 	const madeFrom = (s: Session, p: Record<string, unknown>, writing: boolean) => {
 		const network = p.networkId as string | undefined;
+		const headers = (p.request as { headers?: Record<string, string> }).headers ?? {};
+		const started = Object.entries(headers).find(([name]) => name.toLowerCase() === "origin")?.[1];
 		return heard(s, (): { readonly document: string; readonly loader: string } | null | undefined => {
 			if (p.resourceType === "Document") {
-				if (s.main === undefined || p.frameId !== s.main) return null;
-				if ([...s.going].some((id) => id !== network)) return undefined;
+				if (s.main === undefined || p.frameId !== s.main || started === undefined || started === "null") return null;
 				const loader = s.loaders.get(s.main);
-				return loader === undefined ? null : { document: s.url, loader };
+				if (loader === undefined) return null;
+				// another origin's page stands: the one that sent it may yet be heard of as standing, or never
+				return originOf(s.url) === started ? { document: s.url, loader } : undefined;
 			}
 			if (network === undefined) return null;
 			const made = s.madeBy.get(network);
@@ -505,10 +516,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 			// a page of a signed-in site this task did not allow: stopped where it stands, and told
 			s.openings.set(request.url, target.site);
 			const network = p.networkId as string | undefined;
-			if (network !== undefined) {
-				s.inflight.delete(network);
-				s.going.delete(network);
-			}
+			if (network !== undefined) s.inflight.delete(network);
 			await s.cdp.send("Fetch.failRequest", { requestId: id, errorReason: "BlockedByClient" }, s.page);
 			return;
 		}
@@ -533,11 +541,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 		const body = Buffer.concat(entries.map((entry) => Buffer.from(entry.bytes ?? "", "base64")));
 		const network = p.networkId as string | undefined;
 		const made = await by();
-		if (network !== undefined) {
-			s.inflight.delete(network);
-			// a navigation that writes is stopped here, kept or not: it is not under way
-			if (navigation) s.going.delete(network);
-		}
+		if (network !== undefined) s.inflight.delete(network);
 		if (made === undefined || s.main === undefined || s.loaders.get(s.main) !== made.loader) {
 			// not the page standing's own, or not known to be: it never goes, and never waits
 			await s.cdp.send("Fetch.failRequest", { requestId: id, errorReason: "BlockedByClient" }, s.page);
@@ -572,12 +576,6 @@ export function openBrowser(options: BrowserOptions): Browser {
 			case "Fetch.requestPaused": {
 				const request = p.request as { method: string; url: string; headers: Record<string, string> };
 				const id = p.requestId as string;
-				if (
-					p.resourceType === "Document" &&
-					p.networkId !== undefined &&
-					(s.main === undefined || p.frameId === s.main)
-				)
-					s.going.add(p.networkId as string);
 				const replay = s.replaying;
 				if (replay !== undefined && p.resourceType === "Document" && request.url === replay.url) {
 					// the approved write, sent as the navigation it was: exactly its method, headers and body
@@ -606,7 +604,6 @@ export function openBrowser(options: BrowserOptions): Browser {
 				s.deciding.add(id);
 				void guarded(s, p, request, id)
 					.catch(() => {
-						if (p.networkId !== undefined) s.going.delete(p.networkId as string);
 						void s.cdp
 							.send("Fetch.failRequest", { requestId: id, errorReason: "BlockedByClient" }, s.page)
 							.catch(() => undefined);
@@ -650,7 +647,6 @@ export function openBrowser(options: BrowserOptions): Browser {
 			case "Network.loadingFailed":
 				s.inflight.delete(p.requestId as string);
 				s.madeBy.delete(p.requestId as string);
-				if (s.going.delete(p.requestId as string)) wakeAll(s);
 				return;
 			case "Page.frameStartedLoading":
 				s.loading = true;
@@ -693,7 +689,6 @@ export function openBrowser(options: BrowserOptions): Browser {
 							s.left.add(loader);
 							s.loaders.delete(id);
 						}
-					if (frame.loaderId !== undefined) s.going.delete(frame.loaderId);
 					s.url = frame.url;
 					s.title = "";
 					s.frame = undefined;
@@ -852,7 +847,6 @@ export function openBrowser(options: BrowserOptions): Browser {
 				madeBy: new Map(),
 				loaders: new Map(),
 				left: new Set(),
-				going: new Set(),
 				waking: new Set(),
 				loading: false,
 				writes: new Map(),
