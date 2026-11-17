@@ -204,6 +204,13 @@ function ChangeLine({ who, segment }: { who: Who; segment: Extract<Segment, { ki
 	return <Line icon={state === "removed" ? FileXIcon : FilePenIcon}>{changeWords(segment)}</Line>;
 }
 
+/** An agent's name as the app says it, by its id: the lead's is the companion's. */
+function agentNameOf(shell: ReturnType<typeof useShell>, id: string): string {
+	const accepted = shell.agents.find((view) => view.accepted?.agent?.id === id)?.accepted?.agent;
+	if (id === "sancho") return shell.companion?.name ?? accepted?.name ?? "Sancho";
+	return accepted?.name ?? id;
+}
+
 /** A routine an agent wrote: its card while it waits for the owner; set up, declined or stopped, a row. */
 function RoutineLine({
 	who,
@@ -216,6 +223,14 @@ function RoutineLine({
 	onRoutine?: ((id: string) => void) | undefined;
 }) {
 	const { routine, state, name, id } = segment;
+	const shell = useShell();
+	// whom it runs as: the agent its folder (or, shared, its record) names, whose chat this need not be
+	const runsAs = routine?.agent === undefined ? undefined : agentNameOf(shell, routine.agent);
+	const scope = {
+		...(runsAs === undefined ? {} : { runsAs }),
+		shared: routine?.shared === true,
+		...(routine?.twins?.length ? { twin: routine.shared === true ? ("own" as const) : ("shared" as const) } : {}),
+	};
 	const title =
 		name === undefined
 			? "a routine"
@@ -234,6 +249,7 @@ function RoutineLine({
 			<RoutineProposal
 				routine={{
 					agent: who.name,
+					...scope,
 					title,
 					kind: "new",
 					when: set.when,
@@ -271,6 +287,7 @@ function RoutineLine({
 			<RoutineProposal
 				routine={{
 					agent: who.name,
+					...scope,
 					title,
 					kind: change.kind === "added" ? "new" : change.kind,
 					when: shown?.when ?? "",

@@ -7,7 +7,17 @@
 import type { Context } from "@earendil-works/chord";
 import type { Harness, TaskId, Tx } from "@earendil-works/pi-durable";
 import { ActivityLog, log } from "../core/activity.ts";
-import { Accepted, AGENT_NAME, activeAgents, agentWords, isArchived, shaOf, unaccept } from "../core/agents.ts";
+import {
+	Accepted,
+	AGENT_NAME,
+	acceptedAgent,
+	activeAgents,
+	agentPath,
+	agentWords,
+	isArchived,
+	shaOf,
+	unaccept,
+} from "../core/agents.ts";
 import { fileNameFor } from "../core/names.ts";
 import { openPermissions } from "../core/permissions.ts";
 import {
@@ -15,6 +25,7 @@ import {
 	Control,
 	DEFAULT_RUNS_A_DAY,
 	dueOf,
+	folderChain,
 	MAX_ROUTINE_BYTES,
 	parseRoutine,
 	type Routine,
@@ -69,10 +80,15 @@ type BoxFile = { readonly text: string } | { readonly unreadable: string };
 
 /**
  * Every routine file in the box, by id: the shared ones in `routines/`, and each agent's own in its folder,
- * `agents/<agent>/routines/` (a real folder, never one reached through a link).
+ * `agents/<agent>/routines/`; each folder a real one, never one reached through a link.
  */
 async function routineFiles(workspace: Workspace, ctx: Context): Promise<{ files: Map<string, BoxFile> }> {
-	const files = new Map<string, BoxFile>((await boxFiles(workspace, ctx, "routines", MAX_ROUTINE_BYTES)).files);
+	const files = new Map<string, BoxFile>(
+		(await realFolder(workspace, "routines", ctx))
+			? (await boxFiles(workspace, ctx, "routines", MAX_ROUTINE_BYTES)).files
+			: [],
+	);
+	if (!(await realFolder(workspace, "agents", ctx))) return { files };
 	const listed = await workspace.env().listDir(`${workspace.root}/agents`, ctx);
 	if (!listed.ok) {
 		if (listed.error.code === "not_found") return { files };
@@ -80,15 +96,32 @@ async function routineFiles(workspace: Workspace, ctx: Context): Promise<{ files
 	}
 	for (const entry of listed.value) {
 		if (entry.kind !== "directory" || !AGENT_NAME.test(entry.name)) continue;
-		const own = await boxFiles(workspace, ctx, `agents/${entry.name}/routines`, MAX_ROUTINE_BYTES);
+		const folder = `agents/${entry.name}/routines`;
+		if (!(await realFolder(workspace, folder, ctx))) continue;
+		const own = await boxFiles(workspace, ctx, folder, MAX_ROUTINE_BYTES);
 		for (const [name, file] of own.files) files.set(routineId({ agent: entry.name, name }), file);
 	}
 	return { files };
 }
 
-/** Routine `id`'s file in the box, read from its own folder alone. */
-const routineFile = async (workspace: Workspace, id: string, ctx: Context): Promise<BoxFile | undefined> =>
-	(await boxFiles(workspace, ctx, routineFolder(id), MAX_ROUTINE_BYTES)).files.get(routineName(id));
+/**
+ * Whether `folder` (relative to the workspace) is a folder itself, never a link: an agent's routines folder linked to
+ * another's would show one file as two agents' routines.
+ */
+async function realFolder(workspace: Workspace, folder: string, ctx: Context): Promise<boolean> {
+	const info = await workspace.env().fileInfo(`${workspace.root}/${folder}`, ctx);
+	if (!info.ok) {
+		if (info.error.code === "not_found") return false;
+		throw info.error;
+	}
+	return info.value.kind === "directory";
+}
+
+/** Routine `id`'s file in the box, read from its own folder alone; none while that folder is no real folder. */
+async function routineFile(workspace: Workspace, id: string, ctx: Context): Promise<BoxFile | undefined> {
+	for (const folder of folderChain(id)) if (!(await realFolder(workspace, folder, ctx))) return undefined;
+	return (await boxFiles(workspace, ctx, routineFolder(id), MAX_ROUTINE_BYTES)).files.get(routineName(id));
+}
 
 const DAY = 24 * 60 * 60_000;
 const lowerFirst = (words: string) => (words[0] ?? "").toLowerCase() + words.slice(1);
@@ -185,7 +218,14 @@ export async function routines(
 			return { ...view, state: stateOf(view, record) };
 		}),
 	);
-	return views.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+	// routines of one name that wake the same agent: each says the others, so neither runs beside the other unseen
+	const twinned = views.map((view) => {
+		const twins = views
+			.filter((each) => each.id !== view.id && each.name === view.name && each.agent === view.agent)
+			.map((each) => each.id);
+		return twins.length === 0 ? view : { ...view, twins };
+	});
+	return twinned.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 /** `id`, when it is a routine's id: `<agent>/<name>`, or a shared routine's `<name>`. */
@@ -231,6 +271,12 @@ export async function accept(
 		const { text, fields } = editedText(id, box.text, parsed.routine, change, now);
 		const runs = shaOf(text);
 		await harness.commit(async (tx) => {
+			// a routine in an agent's folder runs as that agent: allowed only for one that is there to run it
+			const owner = routineRef(id)?.agent;
+			if (owner !== undefined && (await acceptedAgent(tx, owner)) === undefined)
+				throw new BadRequest(`${agentPath(owner)} is no agent: a routine in its folder has no one to run as`, 409);
+			if (owner !== undefined && (await isArchived(tx, owner)))
+				throw new BadRequest(`${await agentWords(tx, owner)} is archived: restore it first`, 409);
 			const files = (await tx.doc(Accepted)).files;
 			const known = files[routinePath(id)] !== undefined;
 			files[routinePath(id)] = { sha: runs, text, at: now };
@@ -518,6 +564,9 @@ async function finishEdit(harness: Harness, workspace: Workspace, id: string, ct
 			const made = await workspace.env().createDir(`${workspace.root}/${routineFolder(id)}`, { recursive: true }, ctx);
 			if (!made.ok) throw made.error;
 		}
+		for (const folder of folderChain(id))
+			if (!(await realFolder(workspace, folder, ctx)))
+				throw new Error(`${folder} is not a folder: the box keeps no copy`);
 		await write(workspace.env(), workspace, `${workspace.root}/${routinePath(id)}`, file.text, ctx);
 	}
 	await harness.commit(async (tx) => {

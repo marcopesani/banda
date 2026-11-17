@@ -231,8 +231,10 @@ async function beforeFiles(
 		}
 		for (const entry of listed.value) {
 			// an agent's folder holds its own routines: a real folder, never one reached through a link
-			if (folder === "agents" && entry.kind === "directory" && AGENT_NAME.test(entry.name))
-				folders.push(`agents/${entry.name}/routines`);
+			if (folder === "agents" && entry.kind === "directory" && AGENT_NAME.test(entry.name)) {
+				const own = await env.fileInfo(`${workspace}/agents/${entry.name}/routines`, ctx);
+				if (own.ok && own.value.kind === "directory") folders.push(`agents/${entry.name}/routines`);
+			}
 			await look(`${workspace}/${folder}/${entry.name}`, entry);
 		}
 	}

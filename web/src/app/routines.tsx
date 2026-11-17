@@ -33,8 +33,7 @@ export function lastWords(last: RoutineView["last"], now: number): string | unde
 export function routineRows(all: readonly RoutineView[], agent: string, now: number): RoutineRowView[] {
 	const mine = all.filter((routine) => routine.agent === agent);
 	// a shared routine that runs as this agent beside one of its own of the same name says which it is
-	const twin = (routine: RoutineView) =>
-		routine.shared === true && mine.some((each) => each.id !== routine.id && each.name === routine.name);
+	const twin = (routine: RoutineView) => routine.shared === true && (routine.twins?.length ?? 0) > 0;
 	return mine.flatMap((routine): RoutineRowView[] => {
 		const change = routine.change;
 		// a change waiting for the owner shows as it would be; a removal as the routine it stops

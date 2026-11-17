@@ -607,6 +607,8 @@ export type RoutineView = {
 	readonly name: string;
 	/** It is in the shared `routines/`, in no agent's folder; it runs as `agent` all the same. */
 	readonly shared?: true;
+	/** The other routines of its name that wake the same agent (its own and a shared one): each runs on its own. */
+	readonly twins?: readonly string[];
 	readonly accepted?: RoutineFileView;
 	readonly change?: ({ readonly kind: "added" | "changed" } & Partial<RoutineFileView>) | { readonly kind: "removed" };
 	/** How it stands. */

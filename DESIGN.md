@@ -651,6 +651,13 @@ gives it, the open asks it covers, and an ask a permission covers by the time it
   its history. Two agents' routines of one name, and a shared one of it, are separate routines; nothing resolves a
   bare name to whichever exists. Writing the same name again changes the writer's own. A shared routine is never moved
   into an agent's folder by guessing whose it is.
+- **A routine's card says what runs.** Whoever wrote the file, the card says who asks (the chat's agent) and whom it
+  runs as (its folder's agent, or a shared one's), and whether it is that agent's own or shared; allowing it allows
+  exactly that. Writing into another agent's folder is a request like any other change of a "before" file, the
+  owner's to allow: no agent gains another's by writing there. A folder that names no active agent runs nothing. An
+  agent's own routine and a shared one of its name that wake the same agent both run, and the tool, the card and the
+  panel say so. A routine's folders are folders, never links: a linked one is read as nothing and written through by
+  no tool.
 - **Each run starts fresh**: a conversation of its own, started as its agent (instructions, memory, connections,
   permissions), holding the wake and nothing of the chat's history. The chat's length never reaches a run, and a run's
   work never reaches the chat; only what it sends does. Its usage is its own, counted per routine.

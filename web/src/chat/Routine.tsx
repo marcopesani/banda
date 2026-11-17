@@ -1,6 +1,8 @@
 /**
  * A routine an agent proposes, in the chat where it asked: the same card as any approval (who asks, what, its facts,
- * one verb and a quiet no), since a routine runs on its own once allowed. A change shows what it becomes; a removal
+ * one verb and a quiet no), since a routine runs on its own once allowed. Who asks and whom it runs as are each said:
+ * a routine runs as the agent whose folder holds it (or, shared, the one it belongs to), whoever wrote it, and another
+ * routine of its name that wakes the same agent is said too, since both run. A change shows what it becomes; a removal
  * asks to stop it. When it runs and what it asks are the agent's words for the owner: they may edit them before
  * setting it up, and what runs is their version.
  */
@@ -16,7 +18,14 @@ import { EditableText } from "./EditableText.tsx";
 export type RoutineEdit = { readonly when?: string; readonly ask?: string };
 
 export type RoutineProposalView = {
+	/** The agent that asks: the one whose chat this is. */
 	readonly agent: string;
+	/** The agent it runs as, with that agent's instructions and access, waking its chat; `agent` when the same. */
+	readonly runsAs?: string | undefined;
+	/** In the shared `routines/` rather than its agent's own folder. */
+	readonly shared?: boolean | undefined;
+	/** Another routine of its name wakes the same agent: a shared one beside its own, or its own beside a shared one. */
+	readonly twin?: "own" | "shared" | undefined;
 	/** Its name, as words. */
 	readonly title: string;
 	readonly kind: "new" | "changed" | "removed";
@@ -58,7 +67,12 @@ export function RoutineProposal(props: Props) {
 
 function Proposed({ routine, onAllow, onDecline, settled }: Props) {
 	const { kind } = routine;
-	const what = kind === "new" ? "set up a routine" : kind === "changed" ? "change a routine" : "stop a routine";
+	const runsAs = routine.runsAs ?? routine.agent;
+	const elsewhere = runsAs !== routine.agent;
+	const what =
+		(kind === "new" ? "set up a routine" : kind === "changed" ? "change a routine" : "stop a routine") +
+		(elsewhere ? ` for ${runsAs}` : "");
+	const scope = routine.shared === true ? `Shared routine · runs as ${runsAs}` : `${runsAs}'s own routine`;
 	const [when, setWhen] = useState(routine.schedule ?? "");
 	const [ask, setAsk] = useState(routine.ask);
 	const editable = settled === undefined && onAllow !== undefined && kind !== "removed";
@@ -78,7 +92,17 @@ function Proposed({ routine, onAllow, onDecline, settled }: Props) {
 					{routine.agent} asks to {what}
 				</span>
 				<span className="text-body font-semibold text-ink">{routine.title}</span>
+				<span className="text-meta text-ink-2" data-routine-scope>
+					{scope}
+				</span>
 			</span>
+			{routine.twin === undefined || kind === "removed" ? null : (
+				<p className="text-meta text-ink" role="note" data-routine-twin>
+					{routine.twin === "shared"
+						? `A shared routine of this name also runs as ${runsAs}: both will run.`
+						: `${runsAs}'s own routine of this name also runs: both will run.`}
+				</p>
+			)}
 			{kind === "removed" ? null : editable && routine.schedule !== undefined ? (
 				<>
 					<EditableText
@@ -109,7 +133,9 @@ function Proposed({ routine, onAllow, onDecline, settled }: Props) {
 			<p className="text-meta text-ink-2">
 				{kind === "removed"
 					? "It stops waking; what it said stays in the chat."
-					: `It wakes ${routine.agent} on its own; what it finds lands here, and it stays quiet when nothing does.`}
+					: elsewhere
+						? `It wakes ${runsAs} on its own, with ${runsAs}'s instructions and access; what it finds lands in ${runsAs}'s chat, not here.`
+						: `It wakes ${runsAs} on its own; what it finds lands here, and it stays quiet when nothing does.`}
 			</p>
 			{settled !== undefined ? (
 				<span className="flex min-h-9 items-center gap-1.5 text-ui text-ink-2">

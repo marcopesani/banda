@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	createModels,
@@ -256,7 +256,9 @@ describe("two agents' routines of one name", () => {
 			);
 			await post(`/routines/curro/${NAME}/accept`, { sha: pendingSha(first) });
 			await until(async () => results.length === 1);
-			expect(results[0]).toContain(`The shared routines/${NAME}.md is another routine: it is unchanged.`);
+			// the shared one runs as Sancho: no twin of Curro's, so nothing to warn of
+			expect(results[0]).not.toContain("also runs as you");
+			expect((await routines()).find((each) => each.id === `curro/${NAME}`)?.twins).toBeUndefined();
 
 			await say("curro changes it", "agent:curro");
 			const changed = await until(async () =>
@@ -274,6 +276,94 @@ describe("two agents' routines of one name", () => {
 			const removed = await post<ControlView>(`/routines/curro/${NAME}/remove`);
 			expect(removed.routines.filter((each) => each.name === NAME).map((each) => each.id)).toEqual([NAME]);
 			expect(existsSync(shared)).toBe(true);
+		} finally {
+			await started.close();
+		}
+	}, 90_000);
+});
+
+describe("an agent's own routine beside a shared one that wakes it too", () => {
+	it("both run, and the tool, the card and the panel say so: a reschedule never runs twice unseen", async () => {
+		const {
+			home,
+			daemon: started,
+			post,
+			say,
+			routines,
+			results,
+		} = await daemon({
+			"sancho schedules": plan("Sancho", "30 8 * * 2"),
+		});
+		try {
+			// a shared routine of the name that runs as the lead, Sancho
+			await mkdir(join(home, "workspace", "routines"), { recursive: true });
+			await writeFile(
+				join(home, "workspace", "routines", `${NAME}.md`),
+				"---\ndescription: Old\nevery: 1d\n---\nOLD.\n",
+			);
+			const shared = await until(async () => (await routines()).find((each) => each.id === NAME && each.change));
+			await post(`/routines/${NAME}/accept`, { sha: pendingSha(shared) });
+			await say("sancho schedules", "agent:sancho");
+			const own = await until(async () =>
+				(await routines()).find((each) => each.id === `sancho/${NAME}` && each.change),
+			);
+			await until(async () => results.length === 1);
+			expect(results[0]).toContain(
+				`The shared routines/${NAME}.md also runs as you and is unchanged: once this is allowed, both run.`,
+			);
+			// each says the other, the card warns from it; the shared one is never changed for it
+			expect(own.twins).toEqual([NAME]);
+			expect((await routines()).find((each) => each.id === NAME)).toMatchObject({
+				twins: [`sancho/${NAME}`],
+				state: "active",
+			});
+		} finally {
+			await started.close();
+		}
+	}, 90_000);
+});
+
+describe("what a routine file's path and text may claim", () => {
+	it("a folder naming no agent, a forged owner, and a folder linked to another agent's run as no one", async () => {
+		const {
+			home,
+			daemon: started,
+			post,
+			say,
+			routines,
+			results,
+		} = await daemon({
+			"curro schedules": plan("Curro", "30 9 * * *"),
+		});
+		const agents = join(home, "workspace", "agents");
+		const routine = "---\ndescription: Probe\nevery: 1d\n---\nPROBE.\n";
+		try {
+			// a folder for an agent there is none of: shown, never allowed to run as anyone
+			await mkdir(join(agents, "ghost", "routines"), { recursive: true });
+			await writeFile(join(agents, "ghost", "routines", "probe.md"), routine);
+			const ghost = await until(async () =>
+				(await routines()).find((each) => each.id === "ghost/probe" && each.change),
+			);
+			await expect(post("/routines/ghost/probe/accept", { sha: pendingSha(ghost) })).rejects.toThrow(/409.*no agent/);
+			// the file's own words cannot say whose it is: an owner field is no field
+			await mkdir(join(agents, "sancho", "routines"), { recursive: true });
+			const forged = "---\ndescription: Forged\nagent: curro\nevery: 1d\n---\nFORGED.\n";
+			await writeFile(join(agents, "sancho", "routines", "forged.md"), forged);
+			const claimed = await until(async () => (await routines()).find((each) => each.id === "sancho/forged"));
+			expect(claimed.agent).toBe("sancho");
+			expect(claimed.change && "errors" in claimed.change ? claimed.change.errors?.join() : "").toMatch(
+				/"agent" is not a field/,
+			);
+			await expect(post("/routines/sancho/forged/accept", { sha: pendingSha(claimed) })).rejects.toThrow(/400/);
+			// Curro's folder linked to Sancho's: none of it is read as Curro's, and Curro's tool writes nothing through it
+			await mkdir(join(agents, "curro"), { recursive: true });
+			await symlink(join(agents, "sancho", "routines"), join(agents, "curro", "routines"));
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			expect((await routines()).filter((each) => each.id.startsWith("curro/"))).toEqual([]);
+			await say("curro schedules", "agent:curro");
+			await until(async () => results.length === 1);
+			expect(results[0]).toContain("Not written: agents/curro/routines is not a folder");
+			expect(existsSync(join(agents, "sancho", "routines", `${NAME}.md`))).toBe(false);
 		} finally {
 			await started.close();
 		}

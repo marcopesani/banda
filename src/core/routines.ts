@@ -82,6 +82,11 @@ export const routineFolder = (id: string): string => {
 	const { agent } = refOf(id);
 	return agent === undefined ? "routines" : `agents/${agent}/routines`;
 };
+/** The folders routine `id`'s file is in, outermost first: each must be a folder, never a link. */
+export const folderChain = (id: string): string[] => {
+	const { agent } = refOf(id);
+	return agent === undefined ? ["routines"] : ["agents", `agents/${agent}`, `agents/${agent}/routines`];
+};
 /** Routine `id`'s file, relative to the workspace. */
 export const routinePath = (id: string): string => `${routineFolder(id)}/${routineName(id)}.md`;
 /** The routine id of the workspace file `path`; undefined when it holds no routine. */
@@ -700,25 +705,35 @@ export function defineRoutines(options: RoutinesOptions) {
 			const agent = await agentOf(tx, Number(api.conversationId));
 			if (agent === undefined) return undefined;
 			const id = routineId({ agent, name });
-			const known = (await tx.doc(Accepted)).files[routinePath(id)]?.sha;
-			const shared = (await tx.doc(Accepted)).files[routinePath(name)] !== undefined;
+			const files = (await tx.doc(Accepted)).files;
+			const known = files[routinePath(id)]?.sha;
 			const { routines } = await tx.doc(Routines);
+			// a shared routine of the same name that also wakes this agent: both run once this one is allowed
+			const twin = files[routinePath(name)] !== undefined && routineAgent(name, routines[name] ?? {}) === agent;
 			routines[id] ??= {};
 			// its folder says whose it is; the record says it too, for whoever reads only the record
 			(routines[id] as RoutineRecord).agent = agent;
-			return { id, known, shared };
+			return { id, known, twin };
 		}, ctx);
 		if (found === undefined) throw new Refused("Not written: this chat runs no agent a routine could belong to.");
-		const { id, known, shared } = found;
+		const { id, known, twin } = found;
 		const change = known === sha ? "same" : known === undefined ? "added" : "changed";
 		const path = routinePath(id);
 		const made = await api.env.createDir(`${root}/${routineFolder(id)}`, { recursive: true }, ctx);
 		if (!made.ok) throw new Refused(`Not written: ${made.error.message}`);
+		// its folder is a folder, never a link elsewhere: what is written there is read back as this agent's alone
+		for (const folder of folderChain(id)) {
+			const info = await api.env.fileInfo(`${root}/${folder}`, ctx);
+			if (!info.ok || info.value.kind !== "directory")
+				throw new Refused(`Not written: ${folder} is not a folder (a link, or a file); the owner can fix it.`);
+		}
 		const written = await api.env.writeFile(`${root}/${path}`, text, ctx);
 		if (!written.ok) throw new Refused(`Not written: ${written.error.message}`);
-		// a shared routine of the same name goes on as it is, beside this one
-		const beside =
-			shared && change === "added" ? ` The shared ${routinePath(name)} is another routine: it is unchanged.` : "";
+		// the shared routine goes on as it is, and runs too: said, so a reschedule never runs twice unseen
+		const beside = twin
+			? ` The shared ${routinePath(name)} also runs as you and is unchanged: once this is allowed, both run. ` +
+				"If this one replaces it, tell the owner; only they can remove the shared one."
+			: "";
 		return {
 			text:
 				(change === "same"
