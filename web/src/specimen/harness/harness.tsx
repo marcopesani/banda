@@ -140,6 +140,7 @@ function StreamingSheet() {
 const midwork = (steps: readonly HarnessStep[], state: HarnessState, elapsed = "0:12"): HarnessSessionView => ({
 	harness: HARNESS,
 	provider: "anthropic",
+	logo: "claude-code",
 	folder: FOLDER,
 	state,
 	steps,
@@ -184,6 +185,7 @@ export const askSession = (asks: SessionApiView["asks"]): SessionApiView => ({
 	harness: "claude-code",
 	service: HARNESS,
 	provider: "anthropic",
+	logo: "claude-code",
 	folder: FOLDER,
 	state: "waiting",
 	at: 0,
@@ -234,6 +236,7 @@ export function sessionAt(step: Step, notes: readonly HarnessStep[]): HarnessSes
 	return {
 		harness: HARNESS,
 		provider: "anthropic",
+		logo: "claude-code",
 		folder: FOLDER,
 		state,
 		steps: [...steps, ...taken],
@@ -281,6 +284,7 @@ function Flow() {
 							agent="Mara"
 							harness={HARNESS}
 							provider="anthropic"
+							logo="claude-code"
 							about="Anthropic's coding agent, with your Claude sign-in on this computer."
 							connected={at > 0 ? FOLDER : undefined}
 							on={at > 0}
@@ -454,6 +458,7 @@ export function HarnessSection() {
 					<HarnessTile
 						harness={HARNESS}
 						provider="anthropic"
+						logo="claude-code"
 						connected="~/code"
 						agents={["Mara", "Sancho"]}
 						onEdit={() => {}}
@@ -463,6 +468,13 @@ export function HarnessSection() {
 						harness="pi"
 						logo="pi"
 						about="The minimal coding agent, through banda's own adapter."
+						onConnect={() => {}}
+					/>
+					<HarnessTile
+						harness="Claude Code"
+						provider="anthropic"
+						logo="not-in-this-build"
+						about="Its mark is one this app's files lack: its provider's stands in."
 						onConnect={() => {}}
 					/>
 					<HarnessTile
@@ -477,6 +489,7 @@ export function HarnessSection() {
 						agent="Mara"
 						harness={HARNESS}
 						provider="anthropic"
+						logo="claude-code"
 						connected="~/code"
 						on
 						onSwitch={() => {}}

@@ -58,7 +58,7 @@ export async function pauseRoutine(
 		const record = (await tx.doc(Routines)).routines[name];
 		if (record === undefined) return false;
 		// an archived agent's routines stay paused: restoring it is the owner's first step
-		const agent = routineAgent(record);
+		const agent = routineAgent(name, record);
 		if (!paused && (await isArchived(tx, agent)))
 			throw new RoutineRefused(`${await agentWords(tx, agent)} is archived: restore it from Settings first`, 409);
 		if (paused) record.paused = "owner";

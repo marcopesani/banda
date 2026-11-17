@@ -1,17 +1,19 @@
 /**
- * Routines in full: the owner makes one (`POST /api/routines`), changes one (`POST /api/routines/:name/edit`, or its
- * schedule alone with `/when`) and runs one now (`POST /api/routines/:name/run`), each in effect at once and answered
+ * Routines in full: the owner makes one (`POST /api/routines`), changes one (`POST /api/routines/:id/edit`, or its
+ * schedule alone with `/when`) and runs one now (`POST /api/routines/:id/run`), each in effect at once and answered
  * with the control view. On start it finishes an owner's edit a restart cut short, so the box holds what the store
- * accepted. Its history (`GET /api/routines/:name/runs?before=`) reads the runs its record keeps, a page at a time.
+ * accepted. Its history (`GET /api/routines/:id/runs?before=`) reads the runs its record keeps, a page at a time. A
+ * routine's id is `<agent>/<name>` for one in its agent's folder, `<name>` for a shared one.
  */
 
+import { routineName } from "../../core/routines.ts";
 import { BadRequest } from "../http.ts";
 import { routineRuns } from "../routine-runs.ts";
 import { changeRoutine, createRoutine, finishEdits, runNow } from "../routines.ts";
 import type { AreaModule } from "./area.ts";
 
-const PATH = /^\/routines\/([a-z0-9-]+)\/(when|edit|run)$/;
-const RUNS = /^\/routines\/([a-z0-9-]+)\/runs$/;
+const PATH = /^\/routines\/((?:[a-z0-9-]+\/)?[a-z0-9-]+)\/(when|edit|run)$/;
+const RUNS = /^\/routines\/((?:[a-z0-9-]+\/)?[a-z0-9-]+)\/runs$/;
 
 const SHA = /^[0-9a-f]{64}$/;
 
@@ -41,7 +43,7 @@ export const routines: AreaModule = {
 					const zone = optional(body, "zone", 64);
 					if (agent === undefined || description === undefined || when === undefined || ask === undefined)
 						throw new BadRequest("a routine names its agent, what it is for, when it runs and what it does");
-					const name = await createRoutine(
+					const id = await createRoutine(
 						deps.harness,
 						deps.workspace,
 						reconcile,
@@ -49,7 +51,7 @@ export const routines: AreaModule = {
 						Date.now(),
 					);
 					deps.changed();
-					return { body: { name, control: await deps.control() } };
+					return { body: { id, name: routineName(id), control: await deps.control() } };
 				}
 				const history = RUNS.exec(request.path);
 				if (history !== null) {
@@ -63,7 +65,7 @@ export const routines: AreaModule = {
 				const match = PATH.exec(request.path);
 				if (match === null) return undefined;
 				if (request.method !== "POST") return { status: 405, body: { error: "method not allowed" } };
-				const [, name = "", action] = match;
+				const [, id = "", action] = match;
 				const body = await request.json();
 				if (action === "when" || action === "edit") {
 					const { sha } = body;
@@ -76,7 +78,7 @@ export const routines: AreaModule = {
 						deps.harness,
 						deps.workspace,
 						reconcile,
-						name,
+						id,
 						{
 							...(when === undefined ? {} : { when }),
 							...(description === undefined ? {} : { description }),
@@ -88,7 +90,7 @@ export const routines: AreaModule = {
 				} else {
 					const { key } = body;
 					if (typeof key !== "string") throw new BadRequest("key names the click");
-					await runNow((routine, click) => deps.core.runRoutine(deps.harness, routine, click), name, key);
+					await runNow((routine, click) => deps.core.runRoutine(deps.harness, routine, click), id, key);
 				}
 				deps.changed();
 				return { body: await deps.control() };

@@ -92,7 +92,9 @@ export type HarnessSessionView = {
 
 /**
  * A harness's mark: its own logo in its own colours (pi's), else its provider's (Claude Code: Anthropic's), else the
- * terminal for one with none (the owner's own).
+ * terminal for one with none (the owner's own). The daemon names the mark and the app's own files carry it, and the two
+ * need not be the same build (the phone's app is installed apart from the daemon), so a mark that does not load gives
+ * way to the next one rather than leaving a blank.
  */
 export function HarnessMark({
 	provider,
@@ -103,12 +105,20 @@ export function HarnessMark({
 	logo?: string | undefined;
 	className?: string;
 }) {
-	if (logo !== undefined) return <img src={`/harnesses/${logo}.svg`} alt="" className={cn("size-6", className)} />;
-	return provider === undefined ? (
-		<TerminalIcon aria-hidden="true" className={cn("size-4.5 text-ink-2", className)} />
-	) : (
-		// the logos are padded inside their box: a size up reads as large as GitHub's mark beside them
-		<img src={`/providers/${provider}.svg`} alt="" className={cn("size-6 dark:invert", className)} />
+	const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+	const own = logo === undefined ? undefined : `/harnesses/${logo}.svg`;
+	const providers = provider === undefined ? undefined : `/providers/${provider}.svg`;
+	const src = [own, providers].find((one) => one !== undefined && !failed.has(one));
+	if (src === undefined) return <TerminalIcon aria-hidden="true" className={cn("size-4.5 text-ink-2", className)} />;
+	return (
+		<img
+			key={src}
+			src={src}
+			alt=""
+			onError={() => setFailed((before) => new Set(before).add(src))}
+			// the provider logos are monochrome and padded inside their box: a size up reads as large as GitHub's mark
+			className={cn("size-6", src === providers && "dark:invert", className)}
+		/>
 	);
 }
 

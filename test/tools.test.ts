@@ -224,7 +224,14 @@ describe("the box's tools run freely", () => {
 			{ busy: false, running: [], thinking: false },
 			{
 				routines: [
-					{ agent: "sancho", name: "tea", state: "allow", change: { kind: "added", sha: "a", routine: summary } },
+					{
+						agent: "sancho",
+						id: "tea",
+						name: "tea",
+						shared: true,
+						state: "allow",
+						change: { kind: "added", sha: "a", routine: summary },
+					},
 				],
 				agents: [],
 			},
@@ -233,6 +240,43 @@ describe("the box's tools run freely", () => {
 			[expect.stringMatching(/:b1$/), "pending", "Allow this change? The routine Tea"],
 			[expect.stringMatching(/:b3$/), "declined", "Not allowed: the agent reader"],
 		]);
+		await s.harness.close(context);
+	});
+
+	it("a command that writes an agent's own routine says so, and its line is that agent's routine, not a shared one", async () => {
+		const s = await open(hostBox);
+		mkdirSync(join(s.home, "workspace", "agents"), { recursive: true });
+		const bash = (id: string, command: string) =>
+			fauxAssistantMessage([fauxToolCall("bash", { command }, { id })], { stopReason: "toolUse" });
+		s.script(
+			bash(
+				"b1",
+				"mkdir -p agents/curro/routines && printf -- '---\\ndescription: Tea\\nevery: 1d\\n---\\nTea.\\n' > agents/curro/routines/tea.md && echo y > agents/curro/notes.md",
+			),
+			fauxAssistantMessage("Done."),
+		);
+		const { turn, chat } = await s.receive("set up curro's tea");
+		await finished(s.harness, turn);
+		const [made] = await results(s.harness, chat);
+		expect(made?.text).toContain("agents/curro/routines/tea.md takes effect only once the owner accepts it in the app");
+		// an agent's folder holds its routines; anything else in it is no before file
+		expect(made?.text).not.toContain("agents/curro/notes.md takes effect");
+		const page = (await items(s.harness, chat, {}))?.items ?? [];
+		const summary = { description: "Tea", when: "Every day", schedule: "every 1d", runsADay: 24, ask: "Tea." };
+		const change = { kind: "added" as const, sha: "a", routine: summary };
+		const lines = view(
+			page,
+			[],
+			{ busy: false, running: [], thinking: false },
+			{
+				routines: [
+					{ agent: "sancho", id: "tea", name: "tea", shared: true, state: "active" },
+					{ agent: "curro", id: "curro/tea", name: "tea", state: "allow", change },
+				],
+				agents: [],
+			},
+		).flatMap((segment) => (segment.kind === "change" ? [[segment.name, segment.state]] : []));
+		expect(lines).toEqual([["curro/tea", "pending"]]);
 		await s.harness.close(context);
 	});
 

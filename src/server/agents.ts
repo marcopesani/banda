@@ -155,7 +155,7 @@ export async function agents(harness: Harness, workspace: Workspace, ctx: Contex
 		return { files: new Map<string, Read>() };
 	});
 	const names = new Set([
-		...Object.keys(accepted).flatMap((path) => /^agents\/(.+)\.md$/.exec(path)?.slice(1) ?? []),
+		...Object.keys(accepted).flatMap((path) => /^agents\/([^/]+)\.md$/.exec(path)?.slice(1) ?? []),
 		...boxed.keys(),
 	]);
 	const rows = await Promise.all(
@@ -360,7 +360,7 @@ export async function seed(harness: Harness, workspace: Workspace, ctx: Context 
 	};
 	const unwritten: string[] = [];
 	for (const [path, file] of Object.entries(doc?.files ?? {})) {
-		const name = /^agents\/(.+)\.md$/.exec(path)?.[1];
+		const name = /^agents\/([^/]+)\.md$/.exec(path)?.[1];
 		if (name === undefined || boxed.has(name)) continue;
 		// a write the box refused is still this one, tried again above: never one more operation for each attempt
 		if ((await pending(name))?.file?.sha !== file.sha) {

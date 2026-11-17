@@ -1,5 +1,6 @@
 /**
- * Routines (DESIGN.md "Routines"): `routines/<name>.md` in the workspace, a "before" file: when it is due (every so
+ * Routines (DESIGN.md "Routines"): `agents/<agent>/routines/<name>.md` in the workspace, in the folder of the agent it
+ * belongs to, or `routines/<name>.md`, shared by no agent's folder; a "before" file: when it is due (every so
  * long, once, or on a cron-like schedule, its times on the wall of its `zone`, else the daemon's computer's), how many
  * runs a day it may have, and what to ask. The accepted file is what
  * runs. A routine belongs to one agent and wakes in that agent's chat, never a chat of its own. Each routine has one
@@ -50,7 +51,53 @@ import { context } from "./store.ts";
 export const ROUTINE_NAME = AGENT_NAME;
 /** The kind of a routine's task: a timer over its record, whose waking and sleeping is no news to anyone. */
 export const ROUTINE_TASK = "banda.routine";
-export const routinePath = (name: string) => `routines/${name}.md`;
+
+/**
+ * Which routine: its name, and the agent whose folder holds it; none for one in the shared `routines/`. Two agents'
+ * routines of one name, and a shared one of it, are three routines.
+ */
+export type RoutineRef = { readonly agent?: string; readonly name: string };
+/**
+ * A routine's id, which the store, the API and its wakes name it by: `<agent>/<name>` for one in its agent's folder,
+ * `<name>` for a shared one. Never only its name: that names nothing on its own.
+ */
+export const routineId = (ref: RoutineRef): string => (ref.agent === undefined ? ref.name : `${ref.agent}/${ref.name}`);
+/** The routine id `id` names; undefined when it is no id. */
+export function routineRef(id: string): RoutineRef | undefined {
+	const [first = "", second, ...rest] = id.split("/");
+	if (rest.length > 0) return undefined;
+	if (second === undefined) return ROUTINE_NAME.test(first) ? { name: first } : undefined;
+	return AGENT_NAME.test(first) && ROUTINE_NAME.test(second) ? { agent: first, name: second } : undefined;
+}
+/** Routine `id`'s parts; it must be one. */
+const refOf = (id: string): RoutineRef => {
+	const ref = routineRef(id);
+	if (ref === undefined) throw new Error(`"${id}" is not a routine id`);
+	return ref;
+};
+/** Routine `id`'s name, as its file is named. */
+export const routineName = (id: string): string => refOf(id).name;
+/** The folder routine `id` is in, relative to the workspace. */
+export const routineFolder = (id: string): string => {
+	const { agent } = refOf(id);
+	return agent === undefined ? "routines" : `agents/${agent}/routines`;
+};
+/** The folders routine `id`'s file is in, outermost first: each must be a folder, never a link. */
+export const folderChain = (id: string): string[] => {
+	const { agent } = refOf(id);
+	return agent === undefined ? ["routines"] : ["agents", `agents/${agent}`, `agents/${agent}/routines`];
+};
+/** Routine `id`'s file, relative to the workspace. */
+export const routinePath = (id: string): string => `${routineFolder(id)}/${routineName(id)}.md`;
+/** The routine id of the workspace file `path`; undefined when it holds no routine. */
+export function routineOfPath(path: string): string | undefined {
+	const shared = /^routines\/([^/]+)\.md$/.exec(path);
+	if (shared !== null) return ROUTINE_NAME.test(shared[1] ?? "") ? shared[1] : undefined;
+	const own = /^agents\/([^/]+)\/routines\/([^/]+)\.md$/.exec(path);
+	if (own === null) return undefined;
+	const ref = { agent: own[1] ?? "", name: own[2] ?? "" };
+	return routineRef(routineId(ref)) === undefined ? undefined : routineId(ref);
+}
 export const MAX_ROUTINE_BYTES = 16 * 1024;
 
 /** Wakes a day a routine may have unless its file says otherwise (`runs_a_day`). */
@@ -187,11 +234,12 @@ export function withAsk(text: string, ask: string): string | undefined {
 }
 
 /**
- * What a `schedule` call wrote, in its result's details: the routine by name, the hash of the file, and
+ * What a `schedule` call wrote, in its result's details: the routine by id and name, the hash of the file, and
  * whether it made one (`added`), changed one in effect (`changed`), or found it in effect as written (`same`).
  */
 export type RoutineReceipt = {
 	readonly kind: "routine";
+	readonly id: string;
 	readonly name: string;
 	readonly sha: string;
 	readonly change: "added" | "changed" | "same";
@@ -200,8 +248,9 @@ export type RoutineReceipt = {
 /** What the store knows of a routine beyond its file. */
 export type RoutineRecord = {
 	/**
-	 * The agent it belongs to, whose chat its wakes go to: the agent whose chat wrote it, or the one the owner made it
-	 * for; the lead when unset (a file the owner allowed that no `schedule` call wrote).
+	 * The agent a shared routine belongs to, whose chat its wakes go to: the agent whose chat wrote it, or the one the
+	 * owner made it for; the lead when unset (a file the owner allowed that no `schedule` call wrote). A routine in an
+	 * agent's folder is that agent's, whatever this says.
 	 */
 	agent?: string;
 	/** When it was first allowed: `every` counts from here. */
@@ -284,7 +333,8 @@ export function addRun(record: RoutineRecord, run: RoutineRunRecord): void {
 /** How many allowed versions a routine's record remembers: a chat's line looks back at its own write, a few at most. */
 export const ALLOWED_KEPT = 8;
 
-export const Routines = defineDoc<{ routines: { [name: string]: RoutineRecord } }>({
+/** Each routine's record, by its id (`routineId`). */
+export const Routines = defineDoc<{ routines: { [id: string]: RoutineRecord } }>({
 	kind: "banda.routines",
 	version: 1,
 	scope: "session",
@@ -304,19 +354,17 @@ export const Control = defineDoc<{ paused?: number; chat?: number }>({
 	checkpointWhen: () => true,
 });
 
-/** The routine `name` as accepted, or undefined when there is none, or what was accepted does not parse. */
-export async function acceptedRoutine(tx: Tx, name: string): Promise<(Routine & { readonly sha: string }) | undefined> {
-	const file = (await tx.doc(Accepted)).files[routinePath(name)];
+/** The routine `id` as accepted, or undefined when there is none, or what was accepted does not parse. */
+export async function acceptedRoutine(tx: Tx, id: string): Promise<(Routine & { readonly sha: string }) | undefined> {
+	const file = (await tx.doc(Accepted)).files[routinePath(id)];
 	if (file === undefined) return undefined;
-	const parsed = parseRoutine(name, file.text);
+	const parsed = parseRoutine(routineName(id), file.text);
 	return "routine" in parsed ? { ...parsed.routine, sha: file.sha } : undefined;
 }
 
-/** Every accepted routine's name. */
+/** Every accepted routine's id. */
 export async function acceptedRoutines(tx: Tx): Promise<string[]> {
-	return Object.keys((await tx.doc(Accepted)).files).flatMap(
-		(path) => /^routines\/(.+)\.md$/.exec(path)?.slice(1) ?? [],
-	);
+	return Object.keys((await tx.doc(Accepted)).files).flatMap((path) => routineOfPath(path) ?? []);
 }
 
 /** When a routine is next due, from its file and its record; undefined when it never is again. */
@@ -325,7 +373,7 @@ export function dueOf(routine: Pick<Routine, "when">, record: RoutineRecord, now
 	return nextDue(routine.when, record.fired ?? since, since);
 }
 
-/** A wake's entry: the routine, and the due time it is for; or, run by the owner, when they asked. */
+/** A wake's entry: the routine (its id), and the due time it is for; or, run by the owner, when they asked. */
 export type WakeData = {
 	readonly routine: string;
 	readonly due: number;
@@ -430,11 +478,14 @@ export type RoutinesOptions = {
 type RoutineState = { phase: "wait" } | { phase: "fire"; due: number };
 type RoutineEnd = { readonly ended: string };
 
-/** The agent a routine belongs to: the one its record names, else the lead. */
-export const routineAgent = (record: RoutineRecord): string => record.agent ?? LEAD;
+/**
+ * The agent routine `id` belongs to: the one whose folder holds it; for a shared one, the one its record names, else
+ * the lead.
+ */
+export const routineAgent = (id: string, record: RoutineRecord): string => refOf(id).agent ?? record.agent ?? LEAD;
 
-/** The agent `chat` runs. */
-const agentOf = async (tx: Tx, chat: number) => (await tx.doc(ChatAgent, chat as ConversationId)).agent?.id ?? LEAD;
+/** The agent `chat` runs; undefined when it records none, so nothing is written as an agent guessed at. */
+const agentOf = async (tx: Tx, chat: number) => (await tx.doc(ChatAgent, chat as ConversationId)).agent?.id;
 
 export function defineRoutines(options: RoutinesOptions) {
 	/** Drop `task` from its routine's record, if it is still the one there, and end it. */
@@ -444,6 +495,7 @@ export function defineRoutines(options: RoutinesOptions) {
 		return { status: "terminal" as const, outcome: { status: "completed" as const, result: { ended } } };
 	};
 
+	/** Its input's `name` is the routine's id (`routineId`): a shared one's is its name, as before agents had folders. */
 	const Routine = defineTask<{ name: string }, RoutineState, RoutineEnd>({
 		name: ROUTINE_TASK,
 		version: 1,
@@ -515,7 +567,7 @@ export function defineRoutines(options: RoutinesOptions) {
 					if (wakes.length >= routine.runsADay) {
 						record.paused = "limit";
 						await log(tx, { at: now, routine: name, what: "paused: it ran the most times a day it may" });
-						const chat = await options.agentChat(tx, routineAgent(record));
+						const chat = await options.agentChat(tx, routineAgent(name, record));
 						addRun(record, { at: now, due, ...(chat === undefined ? {} : { chat }), skipped: "limit" });
 						if (chat !== undefined)
 							await troubleIn(tx, chat, {
@@ -539,7 +591,7 @@ export function defineRoutines(options: RoutinesOptions) {
 					// every due time up to now comes in this one: those missed while it could not fire are not fired again
 					record.fired = Math.max(due, now);
 					const text = wakeText(routine, due);
-					const agent = routineAgent(record);
+					const agent = routineAgent(name, record);
 					const chat = await options.agentChat(tx, agent);
 					if (chat === undefined) {
 						await log(tx, { at: now, routine: name, what: `skipped a turn: ${agent} is not active` });
@@ -630,9 +682,10 @@ export function defineRoutines(options: RoutinesOptions) {
 	}
 
 	/**
-	 * Write a routine file into the box for the owner to allow, from a tool call, recording who wrote it. What it says, and
-	 * its receipt: the file it wrote, by name and hash, and whether that made a routine, changed one in effect, or was
-	 * already in effect as written.
+	 * Write a routine file into the box for the owner to allow, from a tool call, in the folder of the agent whose chat
+	 * calls it: `agents/<agent>/routines/<name>.md`. Its own routine of that name is changed; another agent's, or a shared
+	 * one, of the same name is another routine, never touched. What it says, and its receipt: the file it wrote, by id
+	 * and hash, and whether that made a routine, changed one in effect, or was already in effect as written.
 	 */
 	async function propose(
 		api: Parameters<ToolRegistration["execute"]>[1],
@@ -648,28 +701,46 @@ export function defineRoutines(options: RoutinesOptions) {
 		if (root === undefined || api.env === undefined)
 			throw new Refused("Not written: there is no workspace to write to.");
 		const sha = shaOf(text);
-		const known = await api.commit(async (tx) => {
+		const found = await api.commit(async (tx) => {
 			const agent = await agentOf(tx, Number(api.conversationId));
-			const known = (await tx.doc(Accepted)).files[routinePath(name)]?.sha;
+			if (agent === undefined) return undefined;
+			const id = routineId({ agent, name });
+			const files = (await tx.doc(Accepted)).files;
+			const known = files[routinePath(id)]?.sha;
 			const { routines } = await tx.doc(Routines);
-			routines[name] ??= {};
-			const record = routines[name] as RoutineRecord;
-			// a new routine is its writer's, wherever it wrote it (its chat, or a group's); a change keeps whose it is
-			if (known === undefined) record.agent = agent;
-			return known;
+			// a shared routine of the same name that also wakes this agent: both run once this one is allowed
+			const twin = files[routinePath(name)] !== undefined && routineAgent(name, routines[name] ?? {}) === agent;
+			routines[id] ??= {};
+			// its folder says whose it is; the record says it too, for whoever reads only the record
+			(routines[id] as RoutineRecord).agent = agent;
+			return { id, known, twin };
 		}, ctx);
+		if (found === undefined) throw new Refused("Not written: this chat runs no agent a routine could belong to.");
+		const { id, known, twin } = found;
 		const change = known === sha ? "same" : known === undefined ? "added" : "changed";
-		const made = await api.env.createDir(`${root}/routines`, { recursive: true }, ctx);
+		const path = routinePath(id);
+		const made = await api.env.createDir(`${root}/${routineFolder(id)}`, { recursive: true }, ctx);
 		if (!made.ok) throw new Refused(`Not written: ${made.error.message}`);
-		const written = await api.env.writeFile(`${root}/${routinePath(name)}`, text, ctx);
+		// its folder is a folder, never a link elsewhere: what is written there is read back as this agent's alone
+		for (const folder of folderChain(id)) {
+			const info = await api.env.fileInfo(`${root}/${folder}`, ctx);
+			if (!info.ok || info.value.kind !== "directory")
+				throw new Refused(`Not written: ${folder} is not a folder (a link, or a file); the owner can fix it.`);
+		}
+		const written = await api.env.writeFile(`${root}/${path}`, text, ctx);
 		if (!written.ok) throw new Refused(`Not written: ${written.error.message}`);
+		// the shared routine goes on as it is, and runs too: said, so a reschedule never runs twice unseen
+		const beside = twin
+			? ` The shared ${routinePath(name)} also runs as you and is unchanged: once this is allowed, both run. ` +
+				"If this one replaces it, tell the owner; only they can remove the shared one."
+			: "";
 		return {
 			text:
-				change === "same"
-					? `${routinePath(name)} is already in effect, as written.`
-					: `Wrote ${routinePath(name)}. It runs once the owner allows it; until then it does nothing. They see it in ` +
-						"the chat as a card to set it up: do not ask them to approve it, nor say it is set.",
-			receipt: { kind: "routine", name, sha, change },
+				(change === "same"
+					? `${path} is already in effect, as written.`
+					: `Wrote ${path}. It runs once the owner allows it; until then it does nothing. They see it in ` +
+						"the chat as a card to set it up: do not ask them to approve it, nor say it is set.") + beside,
+			receipt: { kind: "routine", id, name, sha, change },
 		};
 	}
 
@@ -692,7 +763,7 @@ export function defineRoutines(options: RoutinesOptions) {
 			const routine = await acceptedRoutine(tx, name);
 			if (routine === undefined) throw new RoutineRefused(`there is no routine named ${name}`, 404);
 			if (record?.ranNow?.includes(key)) return { already: true as const, routine };
-			const agent = routineAgent(record ?? {});
+			const agent = routineAgent(name, record ?? {});
 			if (await isArchived(tx, agent))
 				throw new RoutineRefused(`${await agentWords(tx, agent)} is archived: restore it to run its routines`, 409);
 			if (prior !== undefined && prior.state.status !== "terminal")
@@ -709,7 +780,7 @@ export function defineRoutines(options: RoutinesOptions) {
 			const { routines } = await tx.doc(Routines);
 			routines[name] ??= {};
 			const record = routines[name] as RoutineRecord;
-			const agent = routineAgent(record);
+			const agent = routineAgent(name, record);
 			const chat = await options.agentChat(tx, agent);
 			if (chat === undefined) throw new RoutineRefused(`${agent} is not active: it cannot run as anyone else`, 409);
 			const data: WakeData = { routine: name, due: at, description: routine.description, owner: true };
@@ -777,7 +848,10 @@ export function defineRoutines(options: RoutinesOptions) {
 			"`every` (30m, 2h, 1d, 1w), `at` (2026-11-02 09:00, once) or `cron` (minute hour day month weekday). " +
 			"`at` and `cron` are times on a wall clock: give `zone`, the IANA time zone of the place the owner means " +
 			"(Europe/Lisbon), whenever you know it; without it they are in the zone your status line names, which is the " +
-			"computer you run on, not where the owner is. Say the time back in the place's zone. It writes routines/<name>.md, which runs once the owner allows it; writing the same name again changes it.",
+			"computer you run on, not where the owner is. Say the time back in the place's zone. It writes your own " +
+			"agents/<your id>/routines/<name>.md, which runs once the owner allows it; writing the same name again changes " +
+			"that routine of yours. Another agent's routine, or a shared one in routines/, of the same name is a different " +
+			"routine: it never changes them.",
 		parameters: Type.Object({
 			...common,
 			every: Type.Optional(Type.String()),

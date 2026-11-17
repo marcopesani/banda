@@ -195,7 +195,7 @@ describe("routines", () => {
 	const OTHER = "b".repeat(64);
 	const summary = { description: "Tea at nine", when: "Every day", schedule: "every 1d", runsADay: 24, ask: "Tea." };
 	const wrote = (change: "added" | "changed" | "same", sha = SHA) => ({
-		receipt: { kind: "routine" as const, name: "tea", sha, change },
+		receipt: { kind: "routine" as const, id: "sancho/tea", name: "tea", sha, change },
 	});
 	const schedule = (id: number, extra: Partial<Extract<Item, { role: "tool" }>>, args = { name: "tea" }) => [
 		called(id, `s${id}`, "schedule", { ...args, description: "the model's words, never shown" }),
@@ -211,6 +211,7 @@ describe("routines", () => {
 		);
 	const routine = (extra: Partial<RoutineView>): RoutineView => ({
 		agent: "sancho",
+		id: "sancho/tea",
 		name: "tea",
 		state: "active",
 		...extra,

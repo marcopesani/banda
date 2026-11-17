@@ -6,7 +6,7 @@
 import type { Context } from "@earendil-works/chord";
 import type { ConversationId, EntryId, Harness, TaskId } from "@earendil-works/pi-durable";
 import { Accepted } from "../core/agents.ts";
-import { ROUTINE_NAME, type RoutineRunRecord, Routines, RUNS_KEPT, routinePath } from "../core/routines.ts";
+import { type RoutineRunRecord, Routines, RUNS_KEPT, routinePath, routineRef } from "../core/routines.ts";
 import { context } from "../core/store.ts";
 import { isOwnerMessage, messageArgs } from "../core/toolsets.ts";
 import type { Item, RoutineRunsPage, RoutineRunView } from "./api.ts";
@@ -29,7 +29,7 @@ const firstLine = (text: string) => {
  * watch's): the first thing it said to the owner (a speaking call that went through, read as the feed reads it), and
  * whether the chat draws its line at all: it said something, or it failed or stopped there.
  */
-export function runSaid(items: readonly Item[], name: string): { said?: string; shown: boolean } {
+export function runSaid(items: readonly Item[], id: string): { said?: string; shown: boolean } {
 	const delivered = new Set(items.flatMap((item) => (item.role === "tool" && !item.error ? [item.call] : [])));
 	let said: string | undefined;
 	for (const item of items) {
@@ -46,7 +46,7 @@ export function runSaid(items: readonly Item[], name: string): { said?: string; 
 	const trouble = items.some(
 		(item) =>
 			(item.role === "assistant" && item.error !== undefined) ||
-			(item.role === "notice" && item.routine?.routine === name),
+			(item.role === "notice" && item.routine?.routine === id),
 	);
 	return { ...(said === undefined ? {} : { said }), shown: said !== undefined || trouble };
 }
@@ -98,23 +98,23 @@ async function runView(harness: Harness, name: string, run: RoutineRunRecord, ct
 }
 
 /**
- * Routine `name`'s history, newest first, a page at a time: the runs before `before` (when it ran), from its durable
+ * Routine `id`'s history, newest first, a page at a time: the runs before `before` (when it ran), from its durable
  * record. Undefined when there is no such routine.
  */
 export async function routineRuns(
 	harness: Harness,
-	name: string,
+	id: string,
 	before: number | undefined,
 	ctx: Context = context,
 ): Promise<RoutineRunsPage | undefined> {
 	const records = (await harness.snapshot(Routines, ctx))?.routines ?? {};
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files ?? {};
-	if (!ROUTINE_NAME.test(name)) throw new BadRequest(`"${name}" is not a routine's name`);
-	const record = records[name];
-	if (record === undefined && accepted[routinePath(name)] === undefined) return undefined;
+	if (routineRef(id) === undefined) throw new BadRequest(`"${id}" is not a routine's id`);
+	const record = records[id];
+	if (record === undefined && accepted[routinePath(id)] === undefined) return undefined;
 	const older = (record?.runs ?? []).filter((run) => before === undefined || run.at < before).reverse();
 	const page = older.slice(0, RUNS_PAGE);
-	const runs = await Promise.all(page.map((run) => runView(harness, name, run, ctx)));
+	const runs = await Promise.all(page.map((run) => runView(harness, id, run, ctx)));
 	const oldest = page.at(-1);
 	return {
 		runs,

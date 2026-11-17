@@ -53,7 +53,8 @@ function check(summary: Summary) {
 	expect(summary.sent.some((text) => text.includes('asked your routine \\"tea\\" to run now'))).toBe(true);
 	expect(summary.parked).toEqual([]);
 	// the owner's own routine: made once, in the store and the box alike, the lead's, scheduled, nothing left to write
-	expect(summary.brief.names.sort(), "the routines").toEqual(["routines/brief.md", "routines/tea.md"]);
+	// once, in the lead's own folder: never again under another name after a kill, nor as a shared one
+	expect(summary.brief.names.sort(), "the routines").toEqual(["agents/sancho/routines/brief.md", "routines/tea.md"]);
 	expect(summary.brief.box, "the box's copy of the owner's routine").toBe(summary.brief.accepted);
 	expect(summary.brief.record?.agent).toBe("sancho");
 	expect(summary.brief.record?.edit, "a routine the box does not hold").toBeUndefined();

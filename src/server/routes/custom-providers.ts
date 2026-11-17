@@ -219,7 +219,7 @@ async function stillOn(deps: Deps, id: string, models?: ReadonlySet<string>): Pr
 	else if (on(deps.config.model)) reasons.push("config.json names it as the band's model");
 	const files = (await deps.harness.snapshot(Accepted, context))?.files ?? {};
 	for (const [path, file] of Object.entries(files)) {
-		const agent = /^agents\/(.+)\.md$/.exec(path)?.[1];
+		const agent = /^agents\/([^/]+)\.md$/.exec(path)?.[1];
 		if (agent === undefined) continue;
 		const parsed = parseAgent(agent, file.text);
 		if ("agent" in parsed && on(parsed.agent.model))

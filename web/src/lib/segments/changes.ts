@@ -8,6 +8,7 @@
 import type { AgentView, Item, RoutineView } from "../../../../src/server/api.ts";
 import type { Segment } from "../chat.ts";
 import type { FeedState } from "../feed.ts";
+import { routinePathOf } from "./routines.ts";
 import type { Segmenter } from "./types.ts";
 
 export type ChangeFolder = "agents" | "routines";
@@ -23,7 +24,7 @@ export type ChangeSegment = {
 	readonly key: string;
 	readonly state: FeedState;
 	readonly folder: ChangeFolder;
-	/** The file's name, without its folder or `.md`. */
+	/** The file's name, without its folder or `.md`; for a routine, its id (`<agent>/<name>` in an agent's folder). */
 	readonly name: string;
 	readonly subject?: ChangeSubject;
 	readonly at?: number;
@@ -43,9 +44,12 @@ declare module "./types.ts" {
 
 const FOLDERS: readonly ChangeFolder[] = ["agents", "routines"];
 const NOTED = /^(agents|routines)\/([a-z0-9][a-z0-9-]*)\.md takes effect only once/;
+/** An agent's own routine: `agents/<agent>/routines/<name>.md`. */
+const OWN_ROUTINE = /^agents\/([a-z0-9][a-z0-9-]*)\/routines\/([a-z0-9][a-z0-9-]*)\.md takes effect only once/;
 
 /** The path of a line's file in the workspace. */
-const pathOf = (folder: ChangeFolder, name: string) => `${folder}/${name}.md`;
+const pathOf = (folder: ChangeFolder, name: string) =>
+	folder === "routines" ? routinePathOf(name) : `${folder}/${name}.md`;
 
 /**
  * The "before" files a call's result says it changed, from the daemon's own notes. A write or edit that failed wrote
@@ -56,6 +60,8 @@ export function changedFiles(result: Extract<Item, { role: "tool" }> | undefined
 	return (result.notes ?? []).flatMap((note) => {
 		if (note.code !== "awaits-acceptance") return [];
 
+		const own = OWN_ROUTINE.exec(note.text);
+		if (own !== null) return [{ folder: "routines" as const, name: `${own[1]}/${own[2]}` }];
 		const found = NOTED.exec(note.text);
 		return found !== null && FOLDERS.includes(found[1] as ChangeFolder)
 			? [{ folder: found[1] as ChangeFolder, name: found[2] as string }]
@@ -73,7 +79,7 @@ function subjectOf(segment: ChangeSegment, context: Parameters<NonNullable<Segme
 	const { folder, name } = segment;
 	if (folder === "agents")
 		return context.agents === undefined ? undefined : { agent: context.agents.find((each) => each.name === name) };
-	return context.routines === undefined ? undefined : { routine: context.routines.find((each) => each.name === name) };
+	return context.routines === undefined ? undefined : { routine: context.routines.find((each) => each.id === name) };
 }
 
 /** How the file stands: waiting for the owner, in effect, never in effect, or taken out of effect after the call. */
