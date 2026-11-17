@@ -33,10 +33,12 @@ const run = async (schedules: readonly (readonly Fault[])[], mode?: "continue" |
  * nothing its harness started outlives the process that started it; nothing is parked.
  */
 function check(summary: Summary, finished: "closed" | "done" | "stopped" = "closed") {
-	expect([finished, "interrupted", "failed"]).toContain(summary.state);
+	// v2stop: a fault that ends the turn before its background command starts leaves nothing to stop: done is right
+	const ends = finished === "stopped" ? ["stopped", "done"] : [finished];
+	expect([...ends, "interrupted", "failed"]).toContain(summary.state);
 	expect(summary.woke).toHaveLength(1);
 	expect(summary.prompts).toBeLessThanOrEqual(1);
-	if (summary.state === finished && finished !== "stopped") expect(summary.prompts).toBe(1);
+	if (summary.state === "closed" || summary.state === "done") expect(summary.prompts).toBe(1);
 	expect(summary.orphans).toBe(0);
 	expect(summary.parked).toEqual([]);
 }
