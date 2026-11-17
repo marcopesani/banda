@@ -268,7 +268,7 @@ describe("a routine's time zone", () => {
 		const { home, daemon: started, api, post } = await daemon(asks);
 		try {
 			await post("/messages", { id: randomUUID(), thread: randomUUID(), text: "Every weekday at 8, the weather" });
-			const file = join(home, "workspace", "routines", "weather.md");
+			const file = join(home, "workspace", "agents", "sancho", "routines", "weather.md");
 			// `schedule` returned: the file is whole
 			await told.asked;
 			expect(await readFile(file, "utf8")).toContain("cron: 0 8 * * 1-5\nzone: Europe/Lisbon\n");
@@ -280,12 +280,12 @@ describe("a routine's time zone", () => {
 				routine: { when: "Weekdays at 08:00, Lisbon time", zone: "Europe/Lisbon" },
 			});
 			const sha = (waiting.change as { sha: string }).sha;
-			const allowed = await post<ControlView>("/routines/weather/accept", { sha });
+			const allowed = await post<ControlView>("/routines/sancho/weather/accept", { sha });
 			const runs = allowed.routines.find((each) => each.name === "weather")?.nextRuns ?? [];
 			expect(runs.map((at) => localTime(at, "Europe/Lisbon").slice(11))).toEqual(["08:00", "08:00", "08:00"]);
 
 			// the owner moves it: its time is still Lisbon's
-			const moved = await post<ControlView>("/routines/weather/when", { when: "cron 30 7 * * 1-5", sha });
+			const moved = await post<ControlView>("/routines/sancho/weather/when", { when: "cron 30 7 * * 1-5", sha });
 			const view = moved.routines.find((each) => each.name === "weather");
 			expect(view?.accepted?.routine).toMatchObject({ when: "Weekdays at 07:30, Lisbon time", zone: "Europe/Lisbon" });
 			expect((view?.nextRuns ?? []).map((at) => localTime(at, "Europe/Lisbon").slice(11))).toEqual([
@@ -304,16 +304,16 @@ describe("a routine's time zone", () => {
 					zone: "Lisbon",
 				}),
 			).rejects.toThrow(/400/);
-			const made = await post<{ name: string; control: ControlView }>("/routines", {
+			const made = await post<{ id: string; name: string; control: ControlView }>("/routines", {
 				agent: "sancho",
 				description: "Night owl",
 				when: "cron 0 22 * * *",
 				ask: "Say good night.",
 				zone: "America/New_York",
 			});
-			expect(await readFile(join(home, "workspace", "routines", `${made.name}.md`), "utf8")).toContain(
-				"cron: 0 22 * * *\nzone: America/New_York\n",
-			);
+			expect(
+				await readFile(join(home, "workspace", "agents", "sancho", "routines", `${made.name}.md`), "utf8"),
+			).toContain("cron: 0 22 * * *\nzone: America/New_York\n");
 			const owl = made.control.routines.find((each) => each.name === made.name);
 			expect(owl?.accepted?.routine?.when).toBe("Every day at 22:00, New York time");
 			expect(localTime(owl?.next as number, "America/New_York").slice(11)).toBe("22:00");
@@ -560,7 +560,7 @@ describe("a routine rewritten in its chat", () => {
 
 			await say("tea every day at four", "c1", "0 16 * * *");
 			const first = await waiting("0 16 * * *");
-			await post("/routines/tea/accept", { sha: first.sha });
+			await post("/routines/sancho/tea/accept", { sha: first.sha });
 			expect(await feed()).toEqual([["done", "Routine scheduled: Tea time"]]);
 
 			// rewritten under the same name: a change of the routine in effect, which waits for the owner
@@ -568,12 +568,12 @@ describe("a routine rewritten in its chat", () => {
 			const second = await waiting("0 17 * * *");
 			await until(async () => ((await receipts()).length === 2 ? true : undefined));
 			expect(await receipts()).toEqual([
-				{ kind: "routine", name: "tea", sha: first.sha, change: "added" },
-				{ kind: "routine", name: "tea", sha: second.sha, change: "changed" },
+				{ kind: "routine", id: "sancho/tea", name: "tea", sha: first.sha, change: "added" },
+				{ kind: "routine", id: "sancho/tea", name: "tea", sha: second.sha, change: "changed" },
 			]);
 			expect(await feed()).toEqual([["pending", "Routine change: Tea time · waiting for you"]]);
 			// declined: the box gets the version in effect back, and the line says the change was not made
-			await post("/routines/tea/decline", {});
+			await post("/routines/sancho/tea/decline", {});
 			await until(async () =>
 				(await api<ControlView>("/control")).routines.find(
 					(routine) => routine.name === "tea" && routine.change === undefined,
@@ -584,11 +584,11 @@ describe("a routine rewritten in its chat", () => {
 			// rewritten again and allowed: changed, and still so once the owner moves when it runs
 			await say("six, then", "c3", "0 18 * * *");
 			const third = await waiting("0 18 * * *");
-			await post("/routines/tea/accept", { sha: third.sha });
+			await post("/routines/sancho/tea/accept", { sha: third.sha });
 			expect(await feed()).toEqual([["done", "Routine changed: Tea time"]]);
 			const tea = (await api<ControlView>("/control")).routines.find((routine) => routine.name === "tea");
 			expect(tea?.allowed).toEqual([first.sha, third.sha]);
-			await post("/routines/tea/when", { when: "cron 0 19 * * *", sha: third.sha });
+			await post("/routines/sancho/tea/when", { when: "cron 0 19 * * *", sha: third.sha });
 			expect(await feed()).toEqual([["done", "Routine changed: Tea time"]]);
 		} finally {
 			await started.close();
@@ -601,7 +601,7 @@ describe("routines through the API", () => {
 		const { home, daemon: started, api, post } = await daemon();
 		try {
 			await post("/messages", { id: randomUUID(), thread: randomUUID(), text: "tea every day at four" });
-			const file = join(home, "workspace", "routines", "tea.md");
+			const file = join(home, "workspace", "agents", "sancho", "routines", "tea.md");
 			await until(async () => existsSync(file));
 			const waiting = await until(async () =>
 				(await api<ControlView>("/control")).routines.find(
@@ -610,7 +610,7 @@ describe("routines through the API", () => {
 			);
 			expect(waiting.state).toBe("allow");
 			const sha = (waiting.change as { sha: string }).sha;
-			const allowed = await post<ControlView>("/routines/tea/accept", { sha });
+			const allowed = await post<ControlView>("/routines/sancho/tea/accept", { sha });
 			const tea = allowed.routines.find((routine) => routine.name === "tea");
 			expect(tea).toMatchObject({ state: "active", accepted: { routine: { schedule: "cron 0 16 * * *" } } });
 			expect(tea?.nextRuns).toHaveLength(3);
@@ -618,12 +618,12 @@ describe("routines through the API", () => {
 			expect(tea?.week).toHaveLength(7);
 
 			// not a schedule; a version they did not see
-			await expect(post("/routines/tea/when", { when: "soon", sha })).rejects.toThrow(/400/);
-			await expect(post("/routines/tea/when", { when: "cron 0 8 * * 1-5", sha: "0".repeat(64) })).rejects.toThrow(
-				/409/,
-			);
+			await expect(post("/routines/sancho/tea/when", { when: "soon", sha })).rejects.toThrow(/400/);
+			await expect(
+				post("/routines/sancho/tea/when", { when: "cron 0 8 * * 1-5", sha: "0".repeat(64) }),
+			).rejects.toThrow(/409/);
 			const before = await readFile(file, "utf8");
-			const moved = await post<ControlView>("/routines/tea/when", { when: "cron 0 8 * * 1-5", sha });
+			const moved = await post<ControlView>("/routines/sancho/tea/when", { when: "cron 0 8 * * 1-5", sha });
 			const after = await readFile(file, "utf8");
 			expect(after).toBe(before.replace("cron: 0 16 * * *", "cron: 0 8 * * 1-5"));
 			const edited = moved.routines.find((routine) => routine.name === "tea");
@@ -641,7 +641,7 @@ describe("routines through the API", () => {
 				expect([1, 2, 3, 4, 5]).toContain(new Date(at).getDay());
 			}
 			expect(
-				moved.activity.some((event) => event.routine === "tea" && /You changed when it runs/.test(event.what)),
+				moved.activity.some((event) => event.routine === "sancho/tea" && /You changed when it runs/.test(event.what)),
 			).toBe(true);
 
 			// the box changes it: that waits for the owner, and their edit over it is refused
@@ -649,13 +649,13 @@ describe("routines through the API", () => {
 			await until(async () =>
 				(await api<ControlView>("/control")).routines.find((routine) => routine.change !== undefined),
 			);
-			await expect(post("/routines/tea/when", { when: "every 2h", sha: shaOf(after) })).rejects.toThrow(/409/);
+			await expect(post("/routines/sancho/tea/when", { when: "every 2h", sha: shaOf(after) })).rejects.toThrow(/409/);
 			await writeFile(file, after);
 
 			// run now: once per click
-			await post("/routines/tea/run", { key: "click-1" });
-			await post("/routines/tea/run", { key: "click-1" });
-			await expect(post("/routines/tea/run", { key: "no spaces" })).rejects.toThrow(/400/);
+			await post("/routines/sancho/tea/run", { key: "click-1" });
+			await post("/routines/sancho/tea/run", { key: "click-1" });
+			await expect(post("/routines/sancho/tea/run", { key: "no spaces" })).rejects.toThrow(/400/);
 			await expect(post("/routines/nope/run", { key: "click-2" })).rejects.toThrow(/404/);
 			const ran = await until(async () => {
 				const view = (await api<ControlView>("/control")).routines.find((routine) => routine.name === "tea");
@@ -682,13 +682,13 @@ describe("the owner's own routine, from the panel", () => {
 			await expect(
 				post("/routines", { agent: "sancho", description: "Brief", when: "soon", ask: "Go." }),
 			).rejects.toThrow(/400/);
-			const made = await post<{ name: string; control: ControlView }>("/routines", {
+			const made = await post<{ id: string; name: string; control: ControlView }>("/routines", {
 				agent: "sancho",
 				description: "Morning brief",
 				when: "cron 0 8 * * 1-5",
 				ask: "Tell me what is on my plate today.",
 			});
-			expect(made.name).toBe("morning-brief");
+			expect(made).toMatchObject({ id: "sancho/morning-brief", name: "morning-brief" });
 			const brief = made.control.routines.find((routine) => routine.name === "morning-brief");
 			// in effect at once, never waiting for anyone to allow it, and the agent's
 			expect(brief).toMatchObject({
@@ -698,7 +698,7 @@ describe("the owner's own routine, from the panel", () => {
 			});
 			expect(brief?.change).toBeUndefined();
 			expect(brief?.next).toBeGreaterThan(Date.now());
-			const file = join(home, "workspace", "routines", "morning-brief.md");
+			const file = join(home, "workspace", "agents", "sancho", "routines", "morning-brief.md");
 			const text = await readFile(file, "utf8");
 			expect(shaOf(text)).toBe(brief?.accepted?.sha);
 			// the same words again make another, never over the first
@@ -712,7 +712,7 @@ describe("the owner's own routine, from the panel", () => {
 
 			// an edit rewrites only its lines, bound to the version seen
 			const sha = brief?.accepted?.sha as string;
-			const edited = await post<ControlView>("/routines/morning-brief/edit", {
+			const edited = await post<ControlView>("/routines/sancho/morning-brief/edit", {
 				sha,
 				description: "Morning plate",
 				ask: "What needs me first?",
@@ -724,12 +724,12 @@ describe("the owner's own routine, from the panel", () => {
 					.replace("Tell me what is on my plate today.", "What needs me first?"),
 			);
 			expect(edited.routines.find((routine) => routine.name === "morning-brief")?.accepted?.sha).toBe(shaOf(after));
-			await expect(post("/routines/morning-brief/edit", { sha, ask: "Stale." })).rejects.toThrow(/409/);
+			await expect(post("/routines/sancho/morning-brief/edit", { sha, ask: "Stale." })).rejects.toThrow(/409/);
 
 			// paused and resumed, then deleted
-			const paused = await post<ControlView>("/routines/morning-brief/pause", {});
+			const paused = await post<ControlView>("/routines/sancho/morning-brief/pause", {});
 			expect(paused.routines.find((routine) => routine.name === "morning-brief")).toMatchObject({ state: "paused" });
-			const removed = await post<ControlView>("/routines/morning-brief/remove", {});
+			const removed = await post<ControlView>("/routines/sancho/morning-brief/remove", {});
 			expect(removed.routines.map((routine) => routine.name)).toEqual(["morning-brief-2"]);
 			expect(existsSync(file)).toBe(false);
 		} finally {
@@ -743,7 +743,7 @@ describe("the owner edits a routine an agent proposed, before allowing it", () =
 		const { home, daemon: started, api, post } = await daemon();
 		try {
 			await post("/messages", { id: randomUUID(), thread: randomUUID(), text: "tea every day at four" });
-			const file = join(home, "workspace", "routines", "tea.md");
+			const file = join(home, "workspace", "agents", "sancho", "routines", "tea.md");
 			await until(async () => existsSync(file));
 			const waiting = await until(async () =>
 				(await api<ControlView>("/control")).routines.find(
@@ -763,14 +763,14 @@ describe("the owner edits a routine an agent proposed, before allowing it", () =
 				[{ sha: null, ask: "Something else." }, /400/],
 				[{ sha: "0".repeat(64), ask: "Something else." }, /409/],
 			] as const)
-				await expect(post("/routines/tea/accept", body), JSON.stringify(body)).rejects.toThrow(why);
+				await expect(post("/routines/sancho/tea/accept", body), JSON.stringify(body)).rejects.toThrow(why);
 			expect((await api<ControlView>("/control")).routines.find((each) => each.name === "tea")?.accepted).toBe(
 				undefined,
 			);
 			expect(await readFile(file, "utf8")).toBe(written);
 
 			// what it is for, given back as the agent wrote it, is no edit: the notice names only what changed
-			const allowed = await post<ControlView>("/routines/tea/accept", {
+			const allowed = await post<ControlView>("/routines/sancho/tea/accept", {
 				sha,
 				description: "Tea time",
 				when: "cron 0 9 * * *",
@@ -804,7 +804,7 @@ describe("the owner edits a routine an agent proposed, before allowing it", () =
 					if (item.role === "instruction" && item.text.includes("routine")) told.push(item);
 			expect(told).toMatchObject([
 				{
-					text: 'The owner allowed your routine "tea" after editing its schedule and ask: routines/tea.md holds what runs. This notice is automatic, not from the owner.',
+					text: 'The owner allowed your routine "tea" after editing its schedule and ask: agents/sancho/routines/tea.md holds what runs. This notice is automatic, not from the owner.',
 				},
 			]);
 			expect(tea?.nextRuns?.every((at) => new Date(at).getHours() === 9)).toBe(true);

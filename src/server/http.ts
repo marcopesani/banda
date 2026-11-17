@@ -684,7 +684,7 @@ export function handler(
 		}
 		if (route === "POST /control/pause") return reply(res, 200, await routes.pause(true));
 		if (route === "POST /control/resume") return reply(res, 200, await routes.pause(false));
-		const routine = /^\/routines\/([a-z0-9-]+)\/(accept|decline|pause|resume|remove)$/.exec(path);
+		const routine = /^\/routines\/((?:[a-z0-9-]+\/)?[a-z0-9-]+)\/(accept|decline|pause|resume|remove)$/.exec(path);
 		if (routine !== null && req.method === "POST") {
 			const [, name = "", action] = routine;
 			if (action === "accept") {

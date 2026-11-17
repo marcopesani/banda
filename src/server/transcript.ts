@@ -59,6 +59,7 @@ import {
 	RoutineRuns,
 	type RoutineSaidData,
 	Routines,
+	routineRef,
 	TROUBLE,
 	type TroubleData,
 	WAKE,
@@ -232,8 +233,13 @@ export function receiptOf(tool: string, isError: boolean, details: unknown): Rec
 		typeof receipt.name === "string" &&
 		typeof receipt.sha === "string" &&
 		(receipt.change === "added" || receipt.change === "changed" || receipt.change === "same")
-	)
-		return { kind, name: receipt.name, sha: receipt.sha, change: receipt.change };
+	) {
+		const { name, sha, change } = receipt;
+		if (kind === "watch") return { kind, name, sha, change };
+		// a receipt with no id is from before agents had folders, when every routine a call wrote was a shared one
+		const id = typeof receipt.id === "string" ? receipt.id : name;
+		return routineRef(id) === undefined ? undefined : { kind, id, name, sha, change };
+	}
 	return undefined;
 }
 

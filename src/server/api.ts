@@ -77,6 +77,8 @@ export type Receipt =
 	/** A `schedule` call's file: the routine, its hash, and whether it made, changed or kept one. */
 	| {
 			readonly kind: "routine";
+			/** The routine's id (`RoutineView.id`); `name` is its file's name. */
+			readonly id: string;
 			readonly name: string;
 			readonly sha: string;
 			readonly change: "added" | "changed" | "same";
@@ -596,7 +598,17 @@ export type RoutineFileView = {
  * /api/routines/:name/accept` and the `sha` shown, or null for a removal), and its state from the store.
  */
 export type RoutineView = {
+	/**
+	 * Which routine: `<agent>/<name>` for one in its agent's folder (`agents/<agent>/routines/<name>.md`), `<name>` for
+	 * a shared one (`routines/<name>.md`). Every action on it, and its wakes, name it by this, never by its name alone.
+	 */
+	readonly id: string;
+	/** Its file's name, which two agents' routines, or an agent's and a shared one, may share. */
 	readonly name: string;
+	/** It is in the shared `routines/`, in no agent's folder; it runs as `agent` all the same. */
+	readonly shared?: true;
+	/** The other routines of its name that wake the same agent (its own and a shared one): each runs on its own. */
+	readonly twins?: readonly string[];
 	readonly accepted?: RoutineFileView;
 	readonly change?: ({ readonly kind: "added" | "changed" } & Partial<RoutineFileView>) | { readonly kind: "removed" };
 	/** How it stands. */
@@ -627,6 +639,7 @@ export type RoutineView = {
 /** One thing a routine, an effect within a permission, or the owner in the control room, did; where, to open it. */
 export type ActivityView = {
 	readonly at: number;
+	/** The routine's id. */
 	readonly routine?: string;
 	readonly watch?: string;
 	readonly what: string;

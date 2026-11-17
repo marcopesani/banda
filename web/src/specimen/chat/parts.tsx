@@ -761,6 +761,34 @@ export function Parts() {
 					<RoutineProposal
 						routine={{ agent: "Sancho", title: "Portugal fun fact", kind: "removed", when: "", next: [], ask: "" }}
 					/>
+					{/* written in one agent's chat into another's folder: it runs as that other agent, and says so */}
+					<RoutineProposal
+						routine={{
+							agent: "Curro",
+							runsAs: "Sancho",
+							title: "Probe",
+							kind: "new",
+							when: "Mondays at 06:00",
+							next: ["Mon 06:00"],
+							ask: "Check the inbox and say what needs the owner.",
+						}}
+						onAllow={() => {}}
+						onDecline={() => {}}
+					/>
+					{/* its own routine beside a shared one of the same name that also wakes it: both run */}
+					<RoutineProposal
+						routine={{
+							agent: "Curro",
+							twin: "shared",
+							title: "Weekly summary draft",
+							kind: "new",
+							when: "Every day at 09:30, Madrid time",
+							next: ["Tomorrow 09:30"],
+							ask: "Draft the weekly summary.",
+						}}
+						onAllow={() => {}}
+						onDecline={() => {}}
+					/>
 					<Line icon={CalendarClockIcon}>Setting up Morning brief…</Line>
 					<Line icon={CalendarClockIcon}>Morning brief set up · weekdays at 08:00</Line>
 					<Line icon={CalendarXIcon}>Lisbon weekday weather not set up</Line>

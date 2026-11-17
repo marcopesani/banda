@@ -97,6 +97,7 @@ import {
 	type RoutineSaidData,
 	Routines,
 	routinePath,
+	routineRef,
 	troubleIn,
 	WAKE,
 	type WakeData,
@@ -941,7 +942,7 @@ export function defineCore(options: CoreOptions) {
 			...(names.length === 0 ? {} : { files: names }),
 			at,
 		};
-		const words = `Your routine ${JSON.stringify(run.routine)} ran apart from this chat and sent the owner:\n\n${text}`;
+		const words = `Your routine ${JSON.stringify(routineRef(run.routine)?.name ?? run.routine)} ran apart from this chat and sent the owner:\n\n${text}`;
 		await tx.appendEntry(into, {
 			kind: ROUTINE_SAID,
 			data: said as unknown as JsonObject,
@@ -1445,7 +1446,7 @@ export function defineCore(options: CoreOptions) {
 	}
 
 	/**
-	 * Tell agent `agent`, in its chat, that the owner edited routine `name` it wrote before allowing it: which of its text
+	 * Tell agent `agent`, in its chat, that the owner edited routine `name` (its id) it wrote before allowing it: which of its text
 	 * they changed, never the text, which its file holds. A `PROPOSAL_DECIDED` entry, as a proposal's decision is: in the
 	 * caller's commit, read at the agent's next model request, starting no turn and nobody's input.
 	 */
@@ -1453,7 +1454,7 @@ export function defineCore(options: CoreOptions) {
 		const chat = await agentChat(tx, agent);
 		if (chat === undefined) return;
 		const words =
-			`The owner allowed your routine ${JSON.stringify(name)} after editing its ${fields.join(" and ")}: ` +
+			`The owner allowed your routine ${JSON.stringify(routineRef(name)?.name ?? name)} after editing its ${fields.join(" and ")}: ` +
 			`${routinePath(name)} holds what runs. This notice is automatic, not from the owner.`;
 		await tx.appendEntry(chat as ConversationId, {
 			kind: PROPOSAL_DECIDED,

@@ -28,5 +28,10 @@ by asking and from the panel, leave, return to its event and reply, inspect its 
 
 ## Open work
 
+- [ ] Agents' own routines (`agents/<agent>/routines/`) through the app against a daemon at desktop and phone width:
+  two agents' routines of one name, each card allowed or declined alone, the panel's rows and a shared twin marked
+- [ ] A shared routine an agent owns stays in `routines/`: moving one into its agent's folder is the owner's decision,
+  never a guess from the store's record (which an overwrite by another agent does not update)
+
 - [ ] The row says what the last run said ("Said: 2 PRs need you", "Said nothing"): the record now keeps each run, so
   the control view can say it; reading the chat on every push is the cost to weigh

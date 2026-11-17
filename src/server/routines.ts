@@ -7,7 +7,17 @@
 import type { Context } from "@earendil-works/chord";
 import type { Harness, TaskId, Tx } from "@earendil-works/pi-durable";
 import { ActivityLog, log } from "../core/activity.ts";
-import { Accepted, activeAgents, agentWords, isArchived, shaOf, unaccept } from "../core/agents.ts";
+import {
+	Accepted,
+	AGENT_NAME,
+	acceptedAgent,
+	activeAgents,
+	agentPath,
+	agentWords,
+	isArchived,
+	shaOf,
+	unaccept,
+} from "../core/agents.ts";
 import { fileNameFor } from "../core/names.ts";
 import { openPermissions } from "../core/permissions.ts";
 import {
@@ -15,15 +25,20 @@ import {
 	Control,
 	DEFAULT_RUNS_A_DAY,
 	dueOf,
+	folderChain,
 	MAX_ROUTINE_BYTES,
 	parseRoutine,
-	ROUTINE_NAME,
 	type Routine,
 	type RoutineRecord,
 	RoutineRefused,
 	Routines,
 	routineAgent,
+	routineFolder,
+	routineId,
+	routineName,
+	routineOfPath,
 	routinePath,
+	routineRef,
 	routineText,
 	withAsk,
 	withDescription,
@@ -56,12 +71,57 @@ const summary = (routine: Routine): RoutineSummary => ({
 	ask: routine.ask,
 });
 
-const fileView = (name: string, sha: string, text: string): RoutineFileView => {
-	const parsed = parseRoutine(name, text);
+const fileView = (id: string, sha: string, text: string): RoutineFileView => {
+	const parsed = parseRoutine(routineName(id), text);
 	return { sha, ...("routine" in parsed ? { routine: summary(parsed.routine) } : { errors: parsed.errors }) };
 };
 
-const routineFiles = (workspace: Workspace, ctx: Context) => boxFiles(workspace, ctx, "routines", MAX_ROUTINE_BYTES);
+type BoxFile = { readonly text: string } | { readonly unreadable: string };
+
+/**
+ * Every routine file in the box, by id: the shared ones in `routines/`, and each agent's own in its folder,
+ * `agents/<agent>/routines/`; each folder a real one, never one reached through a link.
+ */
+async function routineFiles(workspace: Workspace, ctx: Context): Promise<{ files: Map<string, BoxFile> }> {
+	const files = new Map<string, BoxFile>(
+		(await realFolder(workspace, "routines", ctx))
+			? (await boxFiles(workspace, ctx, "routines", MAX_ROUTINE_BYTES)).files
+			: [],
+	);
+	if (!(await realFolder(workspace, "agents", ctx))) return { files };
+	const listed = await workspace.env().listDir(`${workspace.root}/agents`, ctx);
+	if (!listed.ok) {
+		if (listed.error.code === "not_found") return { files };
+		throw listed.error;
+	}
+	for (const entry of listed.value) {
+		if (entry.kind !== "directory" || !AGENT_NAME.test(entry.name)) continue;
+		const folder = `agents/${entry.name}/routines`;
+		if (!(await realFolder(workspace, folder, ctx))) continue;
+		const own = await boxFiles(workspace, ctx, folder, MAX_ROUTINE_BYTES);
+		for (const [name, file] of own.files) files.set(routineId({ agent: entry.name, name }), file);
+	}
+	return { files };
+}
+
+/**
+ * Whether `folder` (relative to the workspace) is a folder itself, never a link: an agent's routines folder linked to
+ * another's would show one file as two agents' routines.
+ */
+async function realFolder(workspace: Workspace, folder: string, ctx: Context): Promise<boolean> {
+	const info = await workspace.env().fileInfo(`${workspace.root}/${folder}`, ctx);
+	if (!info.ok) {
+		if (info.error.code === "not_found") return false;
+		throw info.error;
+	}
+	return info.value.kind === "directory";
+}
+
+/** Routine `id`'s file in the box, read from its own folder alone; none while that folder is no real folder. */
+async function routineFile(workspace: Workspace, id: string, ctx: Context): Promise<BoxFile | undefined> {
+	for (const folder of folderChain(id)) if (!(await realFolder(workspace, folder, ctx))) return undefined;
+	return (await boxFiles(workspace, ctx, routineFolder(id), MAX_ROUTINE_BYTES)).files.get(routineName(id));
+}
 
 const DAY = 24 * 60 * 60_000;
 const lowerFirst = (words: string) => (words[0] ?? "").toLowerCase() + words.slice(1);
@@ -83,7 +143,10 @@ function stateOf(view: Omit<RoutineView, "state">, record: RoutineRecord): Routi
 	return "active";
 }
 
-/** Every routine, accepted or only in the box, with the change the box holds and its state; by name. */
+/**
+ * Every routine, accepted or only in the box, with the change the box holds and its state: each agent's own and the
+ * shared ones, by id, a name shared by several being several routines.
+ */
 export async function routines(
 	harness: Harness,
 	workspace: Workspace,
@@ -99,15 +162,16 @@ export async function routines(
 	} catch {
 		// the box is down: what is in effect still shows
 	}
-	const names = new Set([
-		...Object.keys(accepted).flatMap((path) => /^routines\/(.+)\.md$/.exec(path)?.slice(1) ?? []),
+	const ids = new Set([
+		...Object.keys(accepted).flatMap((path) => routineOfPath(path) ?? []),
 		...(boxed?.keys() ?? []),
 	]);
 	const views = await Promise.all(
-		[...names].map(async (name): Promise<RoutineView> => {
-			const file = accepted[routinePath(name)];
-			const box = boxed?.get(name);
-			const record: RoutineRecord = records[name] ?? {};
+		[...ids].map(async (id): Promise<RoutineView> => {
+			const name = routineName(id);
+			const file = accepted[routinePath(id)];
+			const box = boxed?.get(id);
+			const record: RoutineRecord = records[id] ?? {};
 			const change: RoutineView["change"] =
 				boxed === undefined
 					? undefined
@@ -117,11 +181,11 @@ export async function routines(
 							? undefined
 							: { kind: "removed" }
 						: "unreadable" in box
-							? { kind: file === undefined ? "added" : "changed", errors: [`${routinePath(name)}: ${box.unreadable}`] }
+							? { kind: file === undefined ? "added" : "changed", errors: [`${routinePath(id)}: ${box.unreadable}`] }
 							: // the owner's own edit the box does not hold yet is no change of the box's
 								shaOf(box.text) === file?.sha || shaOf(box.text) === record.edit?.base
 								? undefined
-								: { kind: file === undefined ? "added" : "changed", ...fileView(name, shaOf(box.text), box.text) };
+								: { kind: file === undefined ? "added" : "changed", ...fileView(id, shaOf(box.text), box.text) };
 			const parsed = file === undefined ? undefined : parseRoutine(name, file.text);
 			const routine = parsed !== undefined && "routine" in parsed ? parsed.routine : undefined;
 			const scheduled = routine !== undefined && !paused && record.paused === undefined && record.done === undefined;
@@ -133,8 +197,9 @@ export async function routines(
 			const turn = record.turn === undefined ? undefined : await harness.getTask(record.turn as TaskId, ctx);
 			const last = lastRun(record.last ?? record.wakes?.at(-1), record.failed);
 			const view = {
+				id,
 				name,
-				...(file === undefined ? {} : { accepted: fileView(name, file.sha, file.text) }),
+				...(file === undefined ? {} : { accepted: fileView(id, file.sha, file.text) }),
 				...(change === undefined ? {} : { change }),
 				...(next === undefined ? {} : { next }),
 				...(runs.length === 0 ? {} : { nextRuns: runs }),
@@ -145,23 +210,32 @@ export async function routines(
 				...(record.wakes?.length ? { lastRun: record.wakes.at(-1) } : {}),
 				...(turn !== undefined && turn.state.status !== "terminal" ? { running: true } : {}),
 
-				agent: routineAgent(record),
+				agent: routineAgent(id, record),
+				...(routineRef(id)?.agent === undefined ? { shared: true as const } : {}),
 				...(record.allowed?.length ? { allowed: [...record.allowed] } : {}),
 				...(record.edited?.length ? { edited: [...record.edited] } : {}),
 			};
 			return { ...view, state: stateOf(view, record) };
 		}),
 	);
-	return views.sort((a, b) => a.name.localeCompare(b.name));
+	// routines of one name that wake the same agent: each says the others, so neither runs beside the other unseen
+	const twinned = views.map((view) => {
+		const twins = views
+			.filter((each) => each.id !== view.id && each.name === view.name && each.agent === view.agent)
+			.map((each) => each.id);
+		return twins.length === 0 ? view : { ...view, twins };
+	});
+	return twinned.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
-const named = (name: string) => {
-	if (!ROUTINE_NAME.test(name)) throw new BadRequest(`"${name}" is not a routine's name`);
-	return name;
+/** `id`, when it is a routine's id: `<agent>/<name>`, or a shared routine's `<name>`. */
+const identified = (id: string) => {
+	if (routineRef(id) === undefined) throw new BadRequest(`"${id}" is not a routine's id`);
+	return id;
 };
 
 /**
- * Allow the box's change to routine `name`, as the owner saw it: `sha` is the hash of the text shown, or null for a
+ * Allow the box's change to routine `id`, as the owner saw it: `sha` is the hash of the text shown, or null for a
  * removal. A file changed since is refused, as is one that does not parse. Its task follows at once.
  *
  * `change` is the owner's edit of what the agent wrote, made before allowing it (what it is for, when it runs, what it
@@ -173,7 +247,7 @@ export async function accept(
 	harness: Harness,
 	workspace: Workspace,
 	reconcile: Reconcile,
-	name: string,
+	id: string,
 	sha: string | null,
 	now: number,
 	ctx: Context = context,
@@ -181,39 +255,45 @@ export async function accept(
 	/** Tell the routine's agent, in the commit that allows it, which of its text the owner edited. */
 	told?: (tx: Tx, agent: string, fields: readonly string[]) => Promise<void>,
 ): Promise<void> {
-	const box = (await routineFiles(workspace, ctx)).files.get(named(name));
+	const box = await routineFile(workspace, identified(id), ctx);
 	if (sha === null) {
 		if (Object.keys(change).length > 0) throw new BadRequest("a removal has nothing to edit");
-		if (box !== undefined) throw new BadRequest(`${routinePath(name)} is back in the box: look again`, 409);
+		if (box !== undefined) throw new BadRequest(`${routinePath(id)} is back in the box: look again`, 409);
 		await harness.commit(async (tx) => {
-			await unaccept(tx, routinePath(name), now);
-			await log(tx, { at: now, routine: name, what: "You removed it" });
+			await unaccept(tx, routinePath(id), now);
+			await log(tx, { at: now, routine: id, what: "You removed it" });
 		}, ctx);
 	} else {
 		if (box === undefined || "unreadable" in box || shaOf(box.text) !== sha)
-			throw new BadRequest(`${routinePath(name)} changed since you saw it: look again`, 409);
-		const parsed = parseRoutine(name, box.text);
+			throw new BadRequest(`${routinePath(id)} changed since you saw it: look again`, 409);
+		const parsed = parseRoutine(routineName(id), box.text);
 		if ("errors" in parsed) throw new BadRequest(parsed.errors.join("\n"));
-		const { text, fields } = editedText(name, box.text, parsed.routine, change, now);
+		const { text, fields } = editedText(id, box.text, parsed.routine, change, now);
 		const runs = shaOf(text);
 		await harness.commit(async (tx) => {
+			// a routine in an agent's folder runs as that agent: allowed only for one that is there to run it
+			const owner = routineRef(id)?.agent;
+			if (owner !== undefined && (await acceptedAgent(tx, owner)) === undefined)
+				throw new BadRequest(`${agentPath(owner)} is no agent: a routine in its folder has no one to run as`, 409);
+			if (owner !== undefined && (await isArchived(tx, owner)))
+				throw new BadRequest(`${await agentWords(tx, owner)} is archived: restore it first`, 409);
 			const files = (await tx.doc(Accepted)).files;
-			const known = files[routinePath(name)] !== undefined;
-			files[routinePath(name)] = { sha: runs, text, at: now };
+			const known = files[routinePath(id)] !== undefined;
+			files[routinePath(id)] = { sha: runs, text, at: now };
 			const { routines } = await tx.doc(Routines);
-			routines[name] ??= {};
-			const record = routines[name] as RoutineRecord;
+			routines[id] ??= {};
+			const record = routines[id] as RoutineRecord;
 			record.allowed = [...(record.allowed ?? []).filter((each) => each !== sha), sha].slice(-ALLOWED_KEPT);
 			if (runs !== sha) {
 				record.edited = [...(record.edited ?? []).filter((each) => each !== sha), sha].slice(-ALLOWED_KEPT);
 				// the box holds the agent's version: it gets the owner's, as after any edit of theirs
 				record.edit = { sha: runs, base: sha };
 			}
-			if (runs !== sha) await told?.(tx, routineAgent(record), fields);
+			if (runs !== sha) await told?.(tx, routineAgent(id, record), fields);
 			const how = runs === sha ? "" : ", edited";
-			await log(tx, { at: now, routine: name, what: known ? `You allowed its change${how}` : `You allowed it${how}` });
+			await log(tx, { at: now, routine: id, what: known ? `You allowed its change${how}` : `You allowed it${how}` });
 		}, ctx);
-		if (runs !== sha) await finishEdit(harness, workspace, name, ctx);
+		if (runs !== sha) await finishEdit(harness, workspace, id, ctx);
 	}
 	await reconcile(harness, ctx);
 }
@@ -224,7 +304,7 @@ export async function accept(
  * `text` itself when they changed nothing.
  */
 function editedText(
-	name: string,
+	id: string,
 	text: string,
 	routine: Routine,
 	change: RoutineChange,
@@ -241,7 +321,7 @@ function editedText(
 	if (schedule !== undefined) next = withWhen(next, scheduleText(schedule));
 	if (description !== undefined && next !== undefined) next = withDescription(next, description);
 	if (ask !== undefined && next !== undefined) next = withAsk(next, ask);
-	const parsed = next === undefined ? undefined : parseRoutine(name, next);
+	const parsed = next === undefined ? undefined : parseRoutine(routineName(id), next);
 	if (next === undefined || parsed === undefined || "errors" in parsed)
 		throw new BadRequest(
 			parsed !== undefined && "errors" in parsed ? parsed.errors.join("; ") : "it has no frontmatter",
@@ -256,39 +336,41 @@ function editedText(
 	return fields.length === 0 ? { text, fields } : { text: next, fields };
 }
 
-/** Decline the box's change to routine `name`: the accepted file is written back, or a new one removed. */
-export async function decline(harness: Harness, workspace: Workspace, name: string, ctx: Context = context) {
-	const file = (await harness.snapshot(Accepted, ctx))?.files[routinePath(named(name))];
+/** Decline the box's change to routine `id`: the accepted file is written back, or a new one removed. */
+export async function decline(harness: Harness, workspace: Workspace, id: string, ctx: Context = context) {
+	const file = (await harness.snapshot(Accepted, ctx))?.files[routinePath(identified(id))];
 	const env = workspace.env();
-	const path = `${workspace.root}/${routinePath(name)}`;
+	const path = `${workspace.root}/${routinePath(id)}`;
 	if (file !== undefined) return write(env, workspace, path, file.text, ctx);
 	const removed = await env.remove(path, { force: true }, ctx);
 	if (!removed.ok) throw removed.error;
 }
 
-/** Remove routine `name`, as the owner: its file goes from the box and the store, and it never runs again. */
+/** Remove routine `id`, as the owner: its file goes from the box and the store, and it never runs again. */
 export async function remove(
 	harness: Harness,
 	workspace: Workspace,
 	reconcile: Reconcile,
-	name: string,
+	id: string,
 	now: number,
 	ctx: Context = context,
 ): Promise<void> {
-	const removed = await workspace.env().remove(`${workspace.root}/${routinePath(named(name))}`, { force: true }, ctx);
+	const removed = await workspace
+		.env()
+		.remove(`${workspace.root}/${routinePath(identified(id))}`, { force: true }, ctx);
 	if (!removed.ok) throw removed.error;
 	await harness.commit(async (tx) => {
 		const files = (await tx.doc(Accepted)).files;
-		if (files[routinePath(name)] === undefined) return;
-		delete files[routinePath(name)];
-		await log(tx, { at: now, routine: name, what: "You removed it" });
+		if (files[routinePath(id)] === undefined) return;
+		delete files[routinePath(id)];
+		await log(tx, { at: now, routine: id, what: "You removed it" });
 	}, ctx);
 	await reconcile(harness, ctx);
 }
 
-/** The box's routine file `name` as it is now: its text, none, or unreadable. */
-async function boxText(workspace: Workspace, name: string, ctx: Context): Promise<string | undefined | null> {
-	const box = (await routineFiles(workspace, ctx)).files.get(name);
+/** The box's routine file `id` as it is now: its text, none, or unreadable. */
+async function boxText(workspace: Workspace, id: string, ctx: Context): Promise<string | undefined | null> {
+	const box = await routineFile(workspace, id, ctx);
 	if (box === undefined) return undefined;
 	return "unreadable" in box ? null : box.text;
 }
@@ -333,7 +415,7 @@ export async function changeRoutine(
 	harness: Harness,
 	workspace: Workspace,
 	reconcile: Reconcile,
-	name: string,
+	id: string,
 	change: RoutineChange,
 	sha: string,
 	now: number,
@@ -341,16 +423,16 @@ export async function changeRoutine(
 ): Promise<void> {
 	const description = change.description === undefined ? undefined : descriptionOf(change.description);
 	const ask = change.ask === undefined ? undefined : askOf(change.ask);
-	const file = (await harness.snapshot(Accepted, ctx))?.files[routinePath(named(name))];
-	if (file === undefined) throw new BadRequest(`there is no routine named ${name}`, 404);
+	const file = (await harness.snapshot(Accepted, ctx))?.files[routinePath(identified(id))];
+	if (file === undefined) throw new BadRequest(`there is no routine ${id}`, 404);
 	// the owner's times are on the wall the routine keeps: its zone stays as it was
-	const was = parseRoutine(name, file.text);
+	const was = parseRoutine(routineName(id), file.text);
 	const zone = "routine" in was && !("every" in was.routine.when) ? was.routine.when.zone : undefined;
 	const schedule = change.when === undefined ? undefined : scheduleOf(change.when, now, zone);
 	if (file.sha !== sha) throw new BadRequest("it changed since you saw it: look again", 409);
-	const box = await boxText(workspace, name, ctx);
+	const box = await boxText(workspace, id, ctx);
 	if (box === null) throw new BadRequest("it has a change waiting for you to allow it: answer that first", 409);
-	const pending = (await harness.snapshot(Routines, ctx))?.routines[name]?.edit;
+	const pending = (await harness.snapshot(Routines, ctx))?.routines[id]?.edit;
 	// the box holds what is in effect, or what was before an edit of the owner's it does not hold yet
 	const base = box === undefined ? null : shaOf(box);
 	if (base !== sha && !(pending?.sha === sha && pending.base === base))
@@ -359,7 +441,7 @@ export async function changeRoutine(
 	if (schedule !== undefined) text = withWhen(text, scheduleText(schedule));
 	if (description !== undefined && text !== undefined) text = withDescription(text, description);
 	if (ask !== undefined && text !== undefined) text = withAsk(text, ask);
-	const parsed = text === undefined ? undefined : parseRoutine(name, text);
+	const parsed = text === undefined ? undefined : parseRoutine(routineName(id), text);
 	if (text === undefined || parsed === undefined || "errors" in parsed)
 		throw new BadRequest(
 			parsed !== undefined && "errors" in parsed ? parsed.errors.join("; ") : "it has no frontmatter",
@@ -373,28 +455,28 @@ export async function changeRoutine(
 	const edited = text;
 	await harness.commit(async (tx) => {
 		const files = (await tx.doc(Accepted)).files;
-		if (files[routinePath(name)]?.sha !== sha) throw new BadRequest("it changed since you saw it: look again", 409);
-		files[routinePath(name)] = { sha: changed, text: edited, at: now };
+		if (files[routinePath(id)]?.sha !== sha) throw new BadRequest("it changed since you saw it: look again", 409);
+		files[routinePath(id)] = { sha: changed, text: edited, at: now };
 		const { routines } = await tx.doc(Routines);
-		routines[name] ??= {};
-		(routines[name] as RoutineRecord).edit = { sha: changed, base };
-		await log(tx, { at: now, routine: name, what });
+		routines[id] ??= {};
+		(routines[id] as RoutineRecord).edit = { sha: changed, base };
+		await log(tx, { at: now, routine: id, what });
 	}, ctx);
-	await finishEdit(harness, workspace, name, ctx);
+	await finishEdit(harness, workspace, id, ctx);
 	await reconcile(harness, ctx);
 }
 
-/** Change when routine `name` runs, as the owner: `changeRoutine` with the schedule alone. */
+/** Change when routine `id` runs, as the owner: `changeRoutine` with the schedule alone. */
 export const changeWhen = (
 	harness: Harness,
 	workspace: Workspace,
 	reconcile: Reconcile,
-	name: string,
+	id: string,
 	when: string,
 	sha: string,
 	now: number,
 	ctx: Context = context,
-): Promise<void> => changeRoutine(harness, workspace, reconcile, name, { when }, sha, now, ctx);
+): Promise<void> => changeRoutine(harness, workspace, reconcile, id, { when }, sha, now, ctx);
 
 /** A routine's name from what it is for: its words, lowercase, joined by `-` ("Morning brief" is morning-brief). */
 export const nameFor = (description: string): string => fileNameFor(description, "routine");
@@ -410,10 +492,11 @@ export type NewRoutine = {
 };
 
 /**
- * Make a routine as the owner, from the panel: a file the daemon writes as the owner's own, in effect at once, for
- * agent `agent`, whose chat it wakes. Named after what it is for, a number added when that name is taken (in effect or
- * in the box). The store accepts it first and notes the box still needs it (`base` null: the box has no such file),
- * so a restart between the two finishes the box's copy. Its name.
+ * Make a routine as the owner, from the panel: a file the daemon writes as the owner's own, in effect at once, in the
+ * folder of agent `agent`, whose chat it wakes. Named after what it is for, a number added when that agent has a routine
+ * of that name (in effect or in the box): another agent's, or a shared one, takes no name from it. The store accepts it
+ * first and notes the box still needs it (`base` null: the box has no such file), so a restart between the two
+ * finishes the box's copy. Its id.
  */
 export async function createRoutine(
 	harness: Harness,
@@ -430,10 +513,12 @@ export async function createRoutine(
 	const ask = askOf(made.ask);
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files ?? {};
 	if (!activeAgents(accepted).includes(made.agent)) throw new BadRequest(`there is no agent named ${made.agent}`, 404);
-	const boxed = (await routineFiles(workspace, ctx)).files;
+	const own = (each: string) => routineId({ agent: made.agent, name: each });
+	const boxed = (await boxFiles(workspace, ctx, routineFolder(own(nameFor(description))), MAX_ROUTINE_BYTES)).files;
 	const base = nameFor(description);
 	let name = base;
-	for (let n = 2; accepted[routinePath(name)] !== undefined || boxed.has(name); n++) name = `${base}-${n}`;
+	for (let n = 2; accepted[routinePath(own(name))] !== undefined || boxed.has(name); n++) name = `${base}-${n}`;
+	const id = own(name);
 	const field = scheduleField(scheduleText(schedule));
 	if (field === undefined) throw new BadRequest("that is not a schedule");
 	const text = routineText({
@@ -452,37 +537,40 @@ export async function createRoutine(
 		if (await isArchived(tx, made.agent))
 			throw new BadRequest(`${await agentWords(tx, made.agent)} is archived: restore it first`, 409);
 		const files = (await tx.doc(Accepted)).files;
-		if (files[routinePath(name)] !== undefined) throw new BadRequest(`${name} was just made: look again`, 409);
-		files[routinePath(name)] = { sha, text, at: now };
+		if (files[routinePath(id)] !== undefined) throw new BadRequest(`${name} was just made: look again`, 409);
+		files[routinePath(id)] = { sha, text, at: now };
 		const { routines } = await tx.doc(Routines);
-		routines[name] = { agent: made.agent, edit: { sha, base: null } };
-		await log(tx, { at: now, routine: name, what: "You made it" });
+		routines[id] = { agent: made.agent, edit: { sha, base: null } };
+		await log(tx, { at: now, routine: id, what: "You made it" });
 	}, ctx);
-	await finishEdit(harness, workspace, name, ctx);
+	await finishEdit(harness, workspace, id, ctx);
 	await reconcile(harness, ctx);
-	return name;
+	return id;
 }
 
 /**
- * Write an owner's edit of routine `name` into the box, if one waits: the box gets the accepted text unless it changed
+ * Write an owner's edit of routine `id` into the box, if one waits: the box gets the accepted text unless it changed
  * to something else since (then that is a change of the box's own, which waits to be allowed), and the note goes.
  */
-async function finishEdit(harness: Harness, workspace: Workspace, name: string, ctx: Context): Promise<void> {
+async function finishEdit(harness: Harness, workspace: Workspace, id: string, ctx: Context): Promise<void> {
 	const records = (await harness.snapshot(Routines, ctx))?.routines ?? {};
-	const edit = records[name]?.edit;
+	const edit = records[id]?.edit;
 	if (edit === undefined) return;
-	const file = (await harness.snapshot(Accepted, ctx))?.files[routinePath(name)];
-	const box = await boxText(workspace, name, ctx);
+	const file = (await harness.snapshot(Accepted, ctx))?.files[routinePath(id)];
+	const box = await boxText(workspace, id, ctx);
 	const held = edit.base === null ? box === undefined : box !== undefined && box !== null && shaOf(box) === edit.base;
 	if (file?.sha === edit.sha && held) {
 		if (edit.base === null) {
-			const made = await workspace.env().createDir(`${workspace.root}/routines`, { recursive: true }, ctx);
+			const made = await workspace.env().createDir(`${workspace.root}/${routineFolder(id)}`, { recursive: true }, ctx);
 			if (!made.ok) throw made.error;
 		}
-		await write(workspace.env(), workspace, `${workspace.root}/${routinePath(name)}`, file.text, ctx);
+		for (const folder of folderChain(id))
+			if (!(await realFolder(workspace, folder, ctx)))
+				throw new Error(`${folder} is not a folder: the box keeps no copy`);
+		await write(workspace.env(), workspace, `${workspace.root}/${routinePath(id)}`, file.text, ctx);
 	}
 	await harness.commit(async (tx) => {
-		const record = (await tx.doc(Routines)).routines[name];
+		const record = (await tx.doc(Routines)).routines[id];
 		if (record?.edit?.sha === edit.sha) delete record.edit;
 	}, ctx);
 }
@@ -490,19 +578,19 @@ async function finishEdit(harness: Harness, workspace: Workspace, name: string, 
 /** Finish every owner's edit the box does not hold yet: on start, after a restart cut one short. */
 export async function finishEdits(harness: Harness, workspace: Workspace, ctx: Context = context): Promise<void> {
 	const records = (await harness.snapshot(Routines, ctx))?.routines ?? {};
-	for (const [name, record] of Object.entries(records))
-		if (record.edit !== undefined) await finishEdit(harness, workspace, name, ctx);
+	for (const [id, record] of Object.entries(records))
+		if (record.edit !== undefined && routineRef(id) !== undefined) await finishEdit(harness, workspace, id, ctx);
 }
 
-/** Run routine `name` once now, as the owner; once per click `key`. */
+/** Run routine `id` once now, as the owner; once per click `key`. */
 export async function runNow(
-	run: (name: string, key: string) => Promise<"ran" | "already">,
-	name: string,
+	run: (id: string, key: string) => Promise<"ran" | "already">,
+	id: string,
 	key: string,
 ): Promise<void> {
 	if (!/^[A-Za-z0-9-]{1,64}$/.test(key)) throw new BadRequest("key names the click: letters, digits and dashes");
 	try {
-		await run(named(name), key);
+		await run(identified(id), key);
 	} catch (error) {
 		if (error instanceof RoutineRefused) throw new BadRequest(error.message, error.status);
 		throw error;

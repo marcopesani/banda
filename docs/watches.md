@@ -47,6 +47,11 @@ returned to and merged, at desktop and phone width.
 
 ## Open work
 
+- [ ] A watch's file name comes from its object's words (`watchNameFor`), and `watch` steps the number only past
+  another agent's accepted file: one agent following two objects of the same words (three Slack channels, each
+  `a-channel-in-slack`) writes each over the last, and the chat folds their cards into one. Name it by what it follows
+  (connection, object and account), the same object again changing it
+
 - [ ] Slice 3 through the app against a daemon: a burst, a limit and an issue against real GitHub (the pass followed
   a pull request alone) (#35)
 - [ ] Those kinds through the app against a daemon and real GitHub, at desktop and phone width (#35)

@@ -103,8 +103,8 @@ describe("a permanent agent's routines", () => {
 				(await api<ControlView>("/control")).routines.find((each) => each.name === name),
 			);
 			const sha = routine.change !== undefined && "sha" in routine.change ? routine.change.sha : null;
-			await api(`/routines/${name}/accept`, { method: "POST", body: JSON.stringify({ sha }) });
-			await api(`/routines/${name}/run`, { method: "POST", body: JSON.stringify({ key: `run-${name}` }) });
+			await api(`/routines/${routine.id}/accept`, { method: "POST", body: JSON.stringify({ sha }) });
+			await api(`/routines/${routine.id}/run`, { method: "POST", body: JSON.stringify({ key: `run-${name}` }) });
 		};
 		const wakeOf = (marker: string) => until(async () => requests.find((request) => request.text.includes(marker)));
 		try {
@@ -189,14 +189,16 @@ describe("a permanent agent's routines", () => {
 				(await api<ControlView>("/control")).routines.find((each) => each.name === "tea"),
 			);
 			const sha = routine.change !== undefined && "sha" in routine.change ? routine.change.sha : null;
-			await api("/routines/tea/accept", { method: "POST", body: JSON.stringify({ sha }) });
-			await api("/routines/tea/run", { method: "POST", body: JSON.stringify({ key: "run-tea" }) });
+			expect(routine.id).toBe("sancho/tea");
+			await api("/routines/sancho/tea/accept", { method: "POST", body: JSON.stringify({ sha }) });
+			await api("/routines/sancho/tea/run", { method: "POST", body: JSON.stringify({ key: "run-tea" }) });
 			const run = await until(async () => requests.find((request) => request.text.includes("TEA ASK")));
 			// the run read its wake, and nothing the chat holds
 			expect(run.all).not.toContain("CHAT HISTORY");
 			// what it sent is the agent's message in its agent's chat, after the routine's line, which its history opens
 			const { line } = await until(
-				async () => (await api<RoutineRunsPage>("/routines/tea/runs")).runs.find((each) => each.line !== undefined)!,
+				async () =>
+					(await api<RoutineRunsPage>("/routines/sancho/tea/runs")).runs.find((each) => each.line !== undefined)!,
 			);
 			const items = await until(async () => {
 				const page = await api<{ items: Item[] }>(`/chats/${line!.chat}/items?after=0`);
@@ -206,7 +208,7 @@ describe("a permanent agent's routines", () => {
 					? page.items
 					: undefined;
 			});
-			const drawn = items.findIndex((item) => item.role === "wake" && item.routine === "tea");
+			const drawn = items.findIndex((item) => item.role === "wake" && item.routine === "sancho/tea");
 			const said = items.findIndex(
 				(item) => item.role === "assistant" && JSON.stringify(item.calls ?? []).includes("TEA SAID"),
 			);
