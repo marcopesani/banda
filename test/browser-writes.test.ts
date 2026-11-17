@@ -4,6 +4,9 @@
  * page's own news (`Page.frameNavigated`, `Network.requestWillBeSent`) comes from its renderer, so a new page's write
  * can be paused before the browser says the page changed: it is that new page's, held and listed, never dropped as the
  * page left behind. A write of a page that is left behind goes with it: failed in Chromium, never kept paused there.
+ * Whose a write is comes from the request's own word of its document (its frame, loader and address), never from when
+ * that word arrives: one a signed-in page made is never kept as another page's, however late the word comes, if it
+ * never comes, across a navigation, a reload or a redirect; one whose maker is not known fails.
  */
 import { describe, expect, it } from "vitest";
 import { type Browser, openBrowser } from "../src/box/browser.ts";
@@ -45,7 +48,11 @@ class ScriptedCdp {
 /** Every event and decision run to its end: a guard's awaits, the browser's own commands. */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 30));
 
-async function setup() {
+/**
+ * `signed`: a host the owner signed in to, allowed for the task; elsewhere every write acts as nobody. `settleMs`: how
+ * long a page is waited on after a write is let go.
+ */
+async function setup(signed?: string, settleMs?: number) {
 	const cdp = new ScriptedCdp();
 	const browser: Browser = openBrowser({
 		setup: { command: async () => [], login: { username: "u", password: "p" } },
@@ -53,8 +60,9 @@ async function setup() {
 		tell: async () => {},
 		log: () => {},
 		process: async () => ({ cdp: cdp as unknown as Cdp, release() {} }),
-		// the owner signed in nowhere: every write acts as nobody
-		sessionAt: async () => undefined,
+		sessionAt: async (_chat, url) =>
+			signed !== undefined && new URL(url).hostname === signed ? { site: signed, allowed: true } : undefined,
+		...(settleMs === undefined ? {} : { settleMs }),
 	});
 	// a sign-out of nothing starts the tab without driving it
 	await browser.forget("nothing.example");
@@ -71,12 +79,12 @@ async function setup() {
 			type,
 			request: { url, method, headers: {} },
 		});
-	const paused = (id: string, network: string, url: string, method: string, type: string) =>
+	const paused = (id: string, network: string, url: string, method: string, type: string, frame = "top") =>
 		cdp.emit("Fetch.requestPaused", {
 			requestId: id,
 			networkId: network,
 			resourceType: type,
-			frameId: "top",
+			frameId: frame,
 			request: { method, url, headers: { "Content-Type": "text/plain" }, postDataEntries: [] },
 		});
 	return { cdp, browser, committed, willSend, paused };
@@ -138,14 +146,15 @@ describe("a page's write, as DevTools reports it", () => {
 		expect(s.cdp.answers("w0")).toEqual(["Fetch.failRequest"]);
 	});
 
-	it("the renderer never tells of is decided all the same, as the page that stands: no request waits for ever", async () => {
+	it("the renderer never tells of fails in the browser: no request waits for ever, none goes as the page that stands", async () => {
 		const s = await setup();
 		s.committed(`${BLOG}/challenge`, "L1");
 		s.paused("w0", "N1", `${BLOG}/bootstrap`, "POST", "XHR");
 		await flush();
-		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w0")).toEqual([]);
 		await new Promise((resolve) => setTimeout(resolve, 2_200));
-		expect((await s.browser.writes(0)).map((write) => write.page)).toEqual([`${BLOG}/challenge`]);
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w0")).toEqual(["Fetch.failRequest"]);
 	});
 
 	it("an action is not over while a write its page made is still being decided: what it says lists the write", async () => {
@@ -163,5 +172,119 @@ describe("a page's write, as DevTools reports it", () => {
 		await new Promise((resolve) => setTimeout(resolve, 800));
 		s.willSend("N1", `${BLOG}/bootstrap`, "POST", "Fetch", "L2", `${BLOG}/challenge`);
 		expect(await said).toContain(`[banda] The page tried to send POST ${BLOG}/bootstrap (write w1)`);
+	});
+});
+
+const BANK = "http://bank.example";
+const EVIL = "http://evil.example";
+/** Writes that would go as nobody: neither their page nor their frame is the signed-in bank's (`ownersOf`). */
+const asNobody = (writes: readonly { readonly page: string; readonly origin: string }[]) =>
+	writes.filter((write) => ![write.page, write.origin].some((address) => address.startsWith(BANK)));
+/** Longer than a paused request waits to hear of its document. */
+const unheard = () => new Promise((resolve) => setTimeout(resolve, 2_300));
+
+describe("a signed-in page's write, whatever DevTools tells late or never, is never another page's", () => {
+	it("its renderer's word comes after another site's page opened: failed, never kept as that page's", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BANK}/inbox`, "LA");
+		s.paused("w0", "N1", `${EVIL}/beacon`, "POST", "XHR");
+		await flush();
+		s.committed(`${EVIL}/landing`, "LB");
+		// the old renderer's word of its own request, after the new renderer's page
+		s.willSend("N1", `${EVIL}/beacon`, "POST", "Fetch", "LA", `${BANK}/inbox`);
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w0")).toEqual(["Fetch.failRequest"]);
+	});
+
+	it("its renderer never tells of it, and another site's page opens meanwhile: failed, never kept as that page's", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BANK}/inbox`, "LA");
+		s.paused("w0", "N1", `${EVIL}/beacon`, "POST", "XHR");
+		await flush();
+		s.committed(`${EVIL}/landing`, "LB");
+		await unheard();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w0")).toEqual(["Fetch.failRequest"]);
+	});
+
+	it("a navigation that writes, paused before its page is said to have opened: never the page before's", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BLOG}/`, "L1");
+		// the agent opens the bank's form (a navigation's network id is its loader's)
+		s.paused("d0", "LB", `${BANK}/form`, "GET", "Document");
+		await flush();
+		expect(s.cdp.answers("d0")).toEqual(["Fetch.continueRequest"]);
+		// its form sends itself elsewhere, paused by the browser before the bank's renderer says its page opened
+		s.paused("f0", "LF", `${EVIL}/collect`, "POST", "Document");
+		await flush();
+		expect(asNobody(await s.browser.writes(0))).toEqual([]);
+		s.committed(`${BANK}/form`, "LB");
+		await flush();
+		expect((await s.browser.writes(0)).map((write) => [write.url, write.page, write.origin])).toEqual([
+			[`${EVIL}/collect`, `${BANK}/form`, `${BANK}/form`],
+		]);
+	});
+
+	it("reloaded at the same address, its page's writes go with the document left behind, early or late", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BANK}/form`, "L1");
+		s.willSend("N1", `${EVIL}/save`, "POST", "Fetch", "L1", `${BANK}/form`);
+		s.paused("w0", "N1", `${EVIL}/save`, "POST", "XHR");
+		await flush();
+		expect((await s.browser.writes(0)).map((write) => write.page)).toEqual([`${BANK}/form`]);
+		s.committed(`${BANK}/form`, "L2");
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w0")).toEqual(["Fetch.failRequest"]);
+		// the old document's next write, told of after the reload
+		s.paused("w1", "N2", `${EVIL}/save`, "POST", "XHR");
+		s.willSend("N2", `${EVIL}/save`, "POST", "Fetch", "L1", `${BANK}/form`);
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w1")).toEqual(["Fetch.failRequest"]);
+	});
+
+	it("a hop of its redirect is its own: held as its page's, or failed once that page is left", async () => {
+		const s = await setup("bank.example", 300);
+		s.committed(`${BANK}/inbox`, "LA");
+		s.willSend("N1", `${BANK}/api`, "POST", "Fetch", "LA", `${BANK}/inbox`);
+		s.paused("w0", "N1", `${BANK}/api`, "POST", "XHR");
+		await flush();
+		const [first] = await s.browser.writes(0);
+		expect([first?.page, first?.origin]).toEqual([`${BANK}/inbox`, `${BANK}/inbox`]);
+		await s.browser.release(0, first?.id ?? "", async () => {});
+		expect(s.cdp.answers("w0")).toEqual(["Fetch.continueRequest"]);
+		// it is redirected; the hop is paused before the renderer's word of it: still the bank's
+		s.paused("w1", "N1", `${EVIL}/collect`, "POST", "XHR");
+		await flush();
+		expect((await s.browser.writes(0)).map((write) => [write.url, write.page])).toEqual([
+			[`${EVIL}/collect`, `${BANK}/inbox`],
+		]);
+		// another site's page opens, and the next hop's word comes late: failed, never that page's
+		s.committed(`${EVIL}/landing`, "LB");
+		s.paused("w2", "N1", `${EVIL}/again`, "POST", "XHR");
+		s.willSend("N1", `${EVIL}/again`, "POST", "Fetch", "LA", `${BANK}/inbox`);
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w2")).toEqual(["Fetch.failRequest"]);
+	});
+
+	it("made in a frame inside the page, whose page no request names: failed, never held", async () => {
+		const s = await setup("bank.example");
+		s.committed(`${BANK}/inbox`, "LA");
+		s.cdp.emit("Page.frameNavigated", { frame: { id: "child", parentId: "top", loaderId: "LC", url: "about:blank" } });
+		s.cdp.emit("Network.requestWillBeSent", {
+			requestId: "N1",
+			loaderId: "LC",
+			documentURL: "about:blank",
+			frameId: "child",
+			type: "Fetch",
+			request: { url: `${EVIL}/beacon`, method: "POST", headers: {} },
+		});
+		s.paused("w0", "N1", `${EVIL}/beacon`, "POST", "XHR", "child");
+		await flush();
+		expect(await s.browser.writes(0)).toEqual([]);
+		expect(s.cdp.answers("w0")).toEqual(["Fetch.failRequest"]);
 	});
 });
