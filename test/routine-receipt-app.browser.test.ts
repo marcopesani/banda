@@ -95,10 +95,10 @@ for (const { width, action } of [390, 1440].flatMap((width) =>
 					when: "every 24h",
 					ask: "Check the request.",
 				});
-				await call(first, "/routines/receipt-check/run", Type.Unknown(), { key: "run-once" });
+				await call(first, `/routines/${LEAD}/receipt-check/run`, Type.Unknown(), { key: "run-once" });
 				const Runs = Type.Object({ runs: Type.Array(Type.Object({ state: Type.String() })) });
 				await until(async () =>
-					(await call(first, "/routines/receipt-check/runs", Runs)).runs.some((run) => run.state === "said"),
+					(await call(first, `/routines/${LEAD}/receipt-check/runs`, Runs)).runs.some((run) => run.state === "said"),
 				);
 			} finally {
 				await first.close();

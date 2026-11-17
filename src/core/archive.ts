@@ -24,7 +24,7 @@ export async function retire(tx: Tx, id: string, now: number): Promise<void> {
 	const { routines } = await tx.doc(Routines);
 	const owned: string[] = [];
 	for (const [name, record] of Object.entries(routines))
-		if (record.paused === undefined && routineAgent(record) === id) owned.push(name);
+		if (record.paused === undefined && routineAgent(name, record) === id) owned.push(name);
 	const doc = await tx.doc(Permissions);
 	const taken = Object.entries(doc.permissions).filter(([, permission]) => permission.agent === id);
 	const name = await agentWords(tx, id);

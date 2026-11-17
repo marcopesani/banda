@@ -1,10 +1,12 @@
 /** A routine's name as a title: pure, for the tests. */
 
 /**
- * A routine's file name (lowercase words joined by `-`) as words, each word as its description writes it, so a name
+ * A routine's file name (lowercase words joined by `-`), from its name or its id, as words, each word as its description writes it, so a name
  * keeps its capital (call-ana and "remind you to call Ana" read Call Ana); the first word capitalised.
  */
-export function routineTitle(name: string, description?: string): string {
+export function routineTitle(routine: string, description?: string): string {
+	// given its id (`<agent>/<name>`), its title is its name's: whose it is is said elsewhere
+	const name = routine.slice(routine.lastIndexOf("/") + 1);
 	// a word's casing where a sentence does not start with it; all lowercase anywhere wins
 	const said = new Map<string, string>();
 	for (const match of description?.matchAll(/[\p{L}\p{N}]+/gu) ?? []) {

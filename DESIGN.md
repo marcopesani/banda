@@ -58,7 +58,8 @@ The words the rules lean on:
   **draft** is the effect it shows, stored whole.
 - **permission**: a stored, scoped approval the owner gave (once, for a task, for a time, always), within the floor.
 - **group**: a chat with several agents as equal participants; its shared message history is the context they receive.
-- **routine**: a file in `routines/` that wakes its agent on a timer.
+- **routine**: a file in its agent's `agents/<agent>/routines/`, or the shared `routines/`, that wakes its agent on a
+  timer.
 - **watch**: a file in `watches/` that wakes its agent when an object in a connection changes, until what ends it.
 - **event**: a routine's or a watch's wake as the chat shows it: what fired or what changed, and when, before the
   agent's reply.
@@ -91,7 +92,7 @@ The words the rules lean on:
 | **Wait** | a task a tool call blocks on, with an answer slot the owner fills: `ask`, `deadline` |
 | **Draft** | an effect leaving the box, stored whole and shown for approval; approved, it runs exactly as stored, once |
 | **Permission** | a stored approval with a scope; an effect within an open permission runs without asking |
-| **Routine** | `routines/<name>.md` in the workspace: when it runs (a timer) and what it asks; its task submits those inputs to its agent's chat |
+| **Routine** | `agents/<agent>/routines/<name>.md` (its agent's own) or `routines/<name>.md` (shared) in the workspace: when it runs (a timer) and what it asks; its task submits those inputs to its agent's chat |
 | **Watch** | `watches/<name>.md` in the workspace: the object it follows, the account it looks with, what ends it and what matters; its task keeps the reading and submits each change to its agent's chat |
 | **Connection** | A definition banda ships (`shipped/connections/<name>.json`, one schema), on in a home by a switch: a service's tools, which only read, and its objects; its accounts' credentials stay with the daemon. A server the owner adds by its address is a record in the store |
 | **Harness** | `shipped/harnesses/<name>.md`, or a command line the owner gave: an ACP agent on the owner's computer (or banda's own adapter around one that speaks something else), connected in the owner's code folder, for the agents the owner turns it on for |
@@ -643,6 +644,20 @@ gives it, the open asks it covers, and an ask a permission covers by the time it
 - **A routine belongs to one agent and speaks in that agent's chat, but runs apart from it.** The agent writes one
   (a card in its chat the owner accepts) or the owner does from the panel, in effect at once. A `schedule` call is
   that card, never a tool row.
+- **A routine is its folder and its name.** An agent's own routines are in its folder, `agents/<agent>/routines/`
+  (its id, never its display name), and whose they are is that folder; `schedule` and the panel write only there. A
+  routine in the shared `routines/` belongs to the agent the store recorded for it, else the lead. Its id,
+  `<agent>/<name>` or a shared one's `<name>`, names it everywhere: the store, its task, its wakes, its card, the API,
+  its history. Two agents' routines of one name, and a shared one of it, are separate routines; nothing resolves a
+  bare name to whichever exists. Writing the same name again changes the writer's own. A shared routine is never moved
+  into an agent's folder by guessing whose it is.
+- **A routine's card says what runs.** Whoever wrote the file, the card says who asks (the chat's agent) and whom it
+  runs as (its folder's agent, or a shared one's), and whether it is that agent's own or shared; allowing it allows
+  exactly that. Writing into another agent's folder is a request like any other change of a "before" file, the
+  owner's to allow: no agent gains another's by writing there. A folder that names no active agent runs nothing. An
+  agent's own routine and a shared one of its name that wake the same agent both run, and the tool, the card and the
+  panel say so. A routine's folders are folders, never links: a linked one is read as nothing and written through by
+  no tool.
 - **Each run starts fresh**: a conversation of its own, started as its agent (instructions, memory, connections,
   permissions), holding the wake and nothing of the chat's history. The chat's length never reaches a run, and a run's
   work never reaches the chat; only what it sends does. Its usage is its own, counted per routine.
@@ -982,7 +997,8 @@ The workspace is the band's folder, in the box: `agents/`, `routines/`, `watches
 the agents work on. The daemon reads it over the box's connection, and the box reaches only the folders explicitly
 mounted into it. The agent writes it and the owner edits it, so the daemon decides when a change takes
 effect:
-- **Before**: `agents/`, `routines/`, `watches/` and skill instructions take effect once the owner
+- **Before**: `agents/` (each agent's own `routines/` within), `routines/`, `watches/` and skill instructions take
+  effect once the owner
   accepts the change. Accepting binds the hash of the bytes shown; the daemon keeps the accepted version in the store,
   and prompts and loading read only from there. Until then the accepted version stays in effect, and the tool that made
   the change tells the model so. The owner's own write through the app is accepted in the commit that stores it. The app

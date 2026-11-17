@@ -26,6 +26,7 @@ const PAGES: { [before: string]: { runs: RoutineRunView[]; earlier?: number } } 
 	[String(NOW - 10 * HOUR)]: { runs: [run(10), run(11)] },
 };
 const routine = (paused: boolean): RoutineView => ({
+	id: "mara/morning-brief",
 	name: "morning-brief",
 	agent: "mara",
 	state: paused ? "paused" : "active",
@@ -108,11 +109,11 @@ beforeAll(async () => {
 								res.write(": fixture\n\n");
 								return;
 							}
-							if (path === "/api/routines/morning-brief/runs") {
+							if (path === "/api/routines/mara/morning-brief/runs") {
 								const before = new URLSearchParams(query).get("before");
 								return json(res, PAGES[before ?? "newest"] ?? { runs: [] });
 							}
-							if (req.method === "POST" && path.startsWith("/api/routines/morning-brief/")) {
+							if (req.method === "POST" && path.startsWith("/api/routines/mara/morning-brief/")) {
 								await drain(req);
 								posted.push(path);
 								paused = path.endsWith("/pause");
@@ -168,7 +169,7 @@ for (const width of [390, 1280])
 				// Pause asks the daemon and says Paused; then the verb is Resume
 				await page.run(`${button("Pause")}.click()`);
 				await until(() => posted.length === 1);
-				expect(posted).toEqual(["/api/routines/morning-brief/pause"]);
+				expect(posted).toEqual(["/api/routines/mara/morning-brief/pause"]);
 				await page.until(`!!${button("Resume")} && document.querySelector('main').innerText.includes('Paused')`);
 				await page.run(`${button("Edit")}.click()`);
 				await page.run(`${button("Routines")}.click()`);
