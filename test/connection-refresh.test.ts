@@ -4,7 +4,7 @@
  * banda asks for `offline_access` only where the authorization server lists it, beside the resource's own scopes; it
  * keeps rotated refresh tokens, never sends a spent one, and says plainly when a sign-in ran out with nothing to renew it.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectionDefinition, define, signInAsOwner } from "./fixtures/connected.ts";
@@ -99,9 +99,39 @@ describe("a sign-in asks for a refresh token as its server allows", () => {
 			renews: false,
 		},
 		{
-			server: "names no scopes for its resource: no scope is sent, so its default grant stands",
+			server: "names no scopes for its resource and renews unasked: no scope is sent, so its default grant stands",
 			options: { scopes: [], authScopes: ["offline_access"], refreshes: "always" },
 			asked: "",
+			renews: true,
+		},
+		{
+			// offline_access alone could narrow the default grant to nothing of the resource's, so it is not sent
+			server: "names no scopes anywhere and renews only with offline_access: none is asked, so none is given",
+			options: { scopes: [], authScopes: ["offline_access"], refreshes: "offline" },
+			asked: "",
+			renews: false,
+		},
+		{
+			server: "serves no resource metadata and names no scope anywhere: none is asked, so none is given",
+			options: { resourceMetadata: false, authScopes: ["offline_access"], refreshes: "offline" },
+			asked: "",
+			renews: false,
+		},
+		{
+			server: "lists no scopes in its metadata, but its 401 names the one it needs (RFC 6750)",
+			options: { scopes: [], challengeScope: "calendar", authScopes: ["offline_access"], refreshes: "offline" },
+			asked: "calendar offline_access",
+			renews: true,
+		},
+		{
+			server: "serves no resource metadata, but its 401 names the one it needs",
+			options: {
+				resourceMetadata: false,
+				challengeScope: "calendar",
+				authScopes: ["offline_access"],
+				refreshes: "offline",
+			},
+			asked: "calendar offline_access",
 			renews: true,
 		},
 	];
@@ -136,8 +166,7 @@ describe("a sign-in asks for a refresh token as its server allows", () => {
 		expect(fake.refreshed).toHaveLength(1);
 	});
 
-	it("an account kept by an earlier build, which never asked, fits as it was and is not renewed", async () => {
-		// as one signed in before banda asked for offline_access: no `offline`, no refresh token, time left
+	it("a server that never renews: an account with time left fits, is used and is not refreshed", async () => {
 		const { fake, s } = await signedIn({ refreshes: "never" });
 		expect(stored(s).server).not.toHaveProperty("offline");
 		expect(await shownAccount(s)).not.toHaveProperty("stale");
@@ -192,21 +221,31 @@ describe("a refresh token", () => {
 	it("spent by another call's refresh is never sent again: that call's tokens stand", async () => {
 		const { fake, s } = await signedIn({ refreshes: "always" });
 		fake.tokens.clear();
-		// the second refusal waits until the first call has refreshed and finished: a request sent before the refresh
+		// The order is forced, whichever call's request arrives first. The first refusal waits for the second request, so
+		// both calls hold the same version of the sign-in; the second refusal waits until the other call has refreshed,
+		// kept the new tokens and finished, so it lands after the refresh it lost to.
 		let refusals = 0;
-		let firstDone: () => void = () => {};
-		const first = new Promise<void>((resolve) => {
-			firstDone = resolve;
+		let secondArrived: () => void = () => {};
+		const second = new Promise<void>((resolve) => {
+			secondArrived = resolve;
+		});
+		let otherFinished: () => void = () => {};
+		const finished = new Promise<void>((resolve) => {
+			otherFinished = resolve;
 		});
 		fake.onUnauthorized = async () => {
 			refusals += 1;
-			if (refusals === 2) await first;
+			if (refusals === 1) await second;
+			else if (refusals === 2) {
+				secondArrived();
+				await finished;
+			}
 		};
-		const a = s.capabilities.refresh("cal");
-		const b = s.capabilities.refresh("cal");
-		await a;
-		firstDone();
-		await b;
+		const calls = [s.capabilities.refresh("cal"), s.capabilities.refresh("cal")];
+		// the held call cannot finish before it is let go: the first to finish is the other one
+		await Promise.race(calls);
+		otherFinished();
+		await Promise.all(calls);
 		expect(refusals).toBe(2);
 		// one refresh, by the first; the second retried with the tokens it kept, never the spent refresh token
 		expect(fake.refreshed).toHaveLength(1);
@@ -238,6 +277,67 @@ describe("a refresh token", () => {
 });
 
 describe("a sign-in that ran out with nothing to renew it", () => {
+	it("kept by v0.1.0 (no offline, no refresh token, its time past) shows expired; signing in again asks to renew", async () => {
+		const { fake, s } = await signedIn({
+			scopes: ["openid"],
+			authScopes: ["openid", "offline_access"],
+			refreshes: "offline",
+		});
+		// the account as banda v0.1.0 wrote it: what it asked for the resource alone, and a token given no refresh
+		const dir = join(s.home, "auth", "connections", "cal");
+		const [account] = readdirSync(dir);
+		const file = join(dir, account as string, "credentials.json");
+		const now = JSON.parse(readFileSync(file, "utf8")) as {
+			url: string;
+			revision: string;
+			generation: string;
+			oauth: { server: Record<string, unknown>; client: { id: string }; tokens: { access: string } };
+		};
+		const { offline: _, ...server } = now.oauth.server;
+		const old = {
+			url: now.url,
+			oauth: {
+				server: { ...server, scopes: ["openid"] },
+				client: now.oauth.client,
+				tokens: { access: now.oauth.tokens.access, expires: Date.now() - 60_000, scopes: ["openid"] },
+			},
+			revision: now.revision,
+			generation: now.generation,
+		};
+		writeFileSync(file, JSON.stringify(old), { mode: 0o600 });
+		fake.tokens.clear();
+		// it fits as it was; only its time says it ran out, and nothing renews it on its own
+		expect(await shownAccount(s)).toMatchObject({ stale: true, expired: true });
+		const result = await read(s);
+		expect(result.text).toContain("its sign-in expired, and the server gave no refresh token to renew it");
+		expect(fake.refreshed).toHaveLength(0);
+		expect(fake.scopesAsked).toHaveLength(1);
+		// the owner signs that account in again: this time it asks for offline_access and is given a refresh token
+		expect(await signInAsOwner(s.capabilities, "cal", { choice: { account: account as string } })).toMatchObject({
+			ok: true,
+		});
+		expect(fake.scopesAsked.at(-1)).toBe("openid offline_access");
+		expect(stored(s).tokens.refresh).toBeDefined();
+		expect(await shownAccount(s)).not.toHaveProperty("stale");
+		fake.tokens.clear();
+		expect((await read(s)).error).toBe(false);
+		expect(fake.refreshed).toHaveLength(1);
+	});
+
+	it("from a server that names no scope and renews only with offline_access, runs out and says so", async () => {
+		const { fake, s } = await signedIn({
+			scopes: [],
+			authScopes: ["offline_access"],
+			refreshes: "offline",
+			expiresIn: 0,
+		});
+		expect(fake.scopesAsked).toEqual([""]);
+		expect(await shownAccount(s)).toMatchObject({ stale: true, expired: true });
+		fake.tokens.clear();
+		expect((await read(s)).text).toContain("its sign-in expired, and the server gave no refresh token to renew it");
+		expect(fake.refreshed).toHaveLength(0);
+	});
+
 	it("shows as expired, to sign in again, and a call says why, with no token in its words", async () => {
 		const { fake, s } = await signedIn({ refreshes: "never", expiresIn: 0 });
 		expect(stored(s).tokens.refresh).toBeUndefined();

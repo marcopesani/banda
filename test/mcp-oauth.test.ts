@@ -8,6 +8,7 @@ function discovery({
 	token = "https://auth.example/token",
 	resourceScopes = ["mcp"],
 	authScopes,
+	challenge = "",
 }: {
 	issuer?: string;
 	declared?: string;
@@ -17,6 +18,8 @@ function discovery({
 	resourceScopes?: string[] | null;
 	/** The authorization server's `scopes_supported` (RFC 8414); unsaid when undefined. */
 	authScopes?: unknown;
+	/** What follows resource_metadata in the 401's WWW-Authenticate. */
+	challenge?: string;
 } = {}) {
 	const requests: string[] = [];
 	const fetcher: typeof fetch = async (input, init) => {
@@ -25,7 +28,7 @@ function discovery({
 		if (init?.method === "POST")
 			return new Response(null, {
 				status: 401,
-				headers: { "www-authenticate": `Bearer resource_metadata="${metadata}"` },
+				headers: { "www-authenticate": `Bearer resource_metadata="${metadata}"${challenge}` },
 			});
 		const body =
 			url === metadata
@@ -132,6 +135,24 @@ describe("asking for a refresh token, whatever the server", () => {
 		expect(server.scopes).toBeUndefined();
 		expect(scopesOfSignIn(server)).toBeUndefined();
 		expect(scopeAsked(server)).toBeNull();
+	});
+
+	it("takes the scope a 401 names when the resource's metadata lists none, and asks offline_access beside it", async () => {
+		const server = await discovery({
+			resourceScopes: null,
+			authScopes: ["offline_access"],
+			challenge: ', scope="files:read files:read"',
+		}).run();
+		expect(server.scopes).toEqual(["files:read"]);
+		expect(scopeAsked(server)).toBe("files:read offline_access");
+		const empty = await discovery({ resourceScopes: [], challenge: ', scope="files:read"' }).run();
+		expect(empty.scopes).toEqual(["files:read"]);
+	});
+
+	it("keeps what the resource's metadata lists over a 401's scope, and ignores a scope that is not one", async () => {
+		expect((await discovery({ challenge: ', scope="other"' }).run()).scopes).toEqual(["mcp"]);
+		for (const challenge of [', scope=""', ', scope="a\\b"', ', error_scope="x"'])
+			expect((await discovery({ resourceScopes: null, challenge }).run()).scopes).toBeUndefined();
 	});
 
 	it("asks for offline_access once when the resource names it too", async () => {

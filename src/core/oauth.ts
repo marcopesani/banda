@@ -147,8 +147,29 @@ function endpoint(value: unknown, what: string): string {
 	return url.toString();
 }
 
-/** The resource's metadata (RFC 9728): from the 401's header, else at its well-known place; undefined when none. */
-async function resourceMetadata(fetcher: typeof fetch, resource: string): Promise<Record<string, unknown> | undefined> {
+/** A scope token (RFC 6749 §3.3). */
+const SCOPE_TOKEN = /^[\x21\x23-\x5b\x5d-\x7e]{1,200}$/;
+
+/**
+ * The scopes a 401's `WWW-Authenticate` says the resource needs (RFC 6750 §3; MCP's first source of scopes), when it
+ * says any and each is a scope token; else undefined.
+ */
+function challengedScopes(header: string): readonly string[] | undefined {
+	const said = /(?:^|[\s,])scope="([^"]*)"/.exec(header)?.[1];
+	const scopes = said?.split(" ").filter((scope) => scope !== "");
+	return scopes === undefined || scopes.length === 0 || !scopes.every((scope) => SCOPE_TOKEN.test(scope))
+		? undefined
+		: [...new Set(scopes)];
+}
+
+/**
+ * The resource's metadata (RFC 9728): from the 401's header, else at its well-known place; undefined when none. And the
+ * scopes the 401 itself said it needs, when it said any.
+ */
+async function resourceMetadata(
+	fetcher: typeof fetch,
+	resource: string,
+): Promise<{ readonly metadata?: Record<string, unknown>; readonly challenged?: readonly string[] }> {
 	const probe = await fetcher(resource, {
 		method: "POST",
 		redirect: "error",
@@ -158,6 +179,7 @@ async function resourceMetadata(fetcher: typeof fetch, resource: string): Promis
 	await probe?.body?.cancel();
 	const header = probe?.headers.get("www-authenticate") ?? "";
 	const named = /resource_metadata="([^"]+)"/.exec(header)?.[1];
+	const challenged = challengedScopes(header);
 	const url = new URL(resource);
 	const candidates = [
 		...(named === undefined ? [] : [new URL(named, resource).toString()]),
@@ -166,9 +188,9 @@ async function resourceMetadata(fetcher: typeof fetch, resource: string): Promis
 	];
 	for (const candidate of candidates) {
 		const found = await json(fetcher, endpoint(candidate, "resource metadata")).catch(() => undefined);
-		if (found !== undefined) return found;
+		if (found !== undefined) return { metadata: found, ...(challenged === undefined ? {} : { challenged }) };
 	}
-	return undefined;
+	return challenged === undefined ? {} : { challenged };
 }
 
 /** Find where to sign in for `resource` (an MCP server's URL). */
@@ -177,7 +199,7 @@ export async function discover(resource: string, fetcher: typeof fetch = fetch):
 	// its client's row; tool access remains restricted to the scopes in the shipped connection file.
 	const builtIn = Object.values(REST_APIS).find((api) => api.url === resource);
 	if (builtIn !== undefined) return CLIENTS[builtIn.client].server;
-	const metadata = await resourceMetadata(fetcher, resource);
+	const { metadata, challenged } = await resourceMetadata(fetcher, resource);
 	const servers = Array.isArray(metadata?.authorization_servers) ? metadata.authorization_servers : [];
 	const issuer = typeof servers[0] === "string" ? servers[0] : new URL(resource).origin;
 	const at = new URL(endpoint(issuer, "authorization server"));
@@ -197,9 +219,11 @@ export async function discover(resource: string, fetcher: typeof fetch = fetch):
 		throw new Error("The authorization server's issuer does not match its discovery address");
 	const methods = server.code_challenge_methods_supported;
 	if (Array.isArray(methods) && !methods.includes("S256")) throw new Error(`${at.host} does not take PKCE (S256)`);
-	const scopes = Array.isArray(metadata?.scopes_supported)
+	const listed = Array.isArray(metadata?.scopes_supported)
 		? metadata.scopes_supported.filter((scope): scope is string => typeof scope === "string")
 		: undefined;
+	// what the resource lists, else what its 401 said it needs: a sign-in that names a scope can carry offline_access
+	const scopes = listed !== undefined && listed.length > 0 ? listed : challenged;
 	// the authorization server's own list says only whether it renews offline: what to ask for is the resource's
 	const offline = Array.isArray(server.scopes_supported) && server.scopes_supported.includes(OFFLINE);
 	return {

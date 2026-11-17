@@ -117,6 +117,8 @@ export async function startFakeMcp({
 	refreshes: giving = "always",
 	rotate = true,
 	expiresIn = 3600,
+	challengeScope,
+	resourceMetadata = true,
 }: {
 	auth?: "none" | "key" | "oauth";
 	key?: string;
@@ -140,6 +142,10 @@ export async function startFakeMcp({
 	rotate?: boolean;
 	/** The access token's `expires_in`, in seconds. */
 	expiresIn?: number;
+	/** The `scope` its 401 challenge names (RFC 6750 §3); none when undefined. */
+	challengeScope?: string;
+	/** Whether it serves its resource metadata (RFC 9728) at all. */
+	resourceMetadata?: boolean;
 } = {}): Promise<FakeMcp> {
 	const calls: { tool: string; args: unknown }[] = [];
 	const authorizations: string[] = [];
@@ -239,7 +245,7 @@ export async function startFakeMcp({
 						401,
 						{ error: "unauthorized" },
 						{
-							"www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
+							"www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"${challengeScope === undefined ? "" : `, scope="${challengeScope}"`}`,
 						},
 					);
 				}
@@ -321,7 +327,7 @@ export async function startFakeMcp({
 				}
 				return json(res, 200, { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "no such method" } });
 			}
-			if (url.pathname.startsWith("/.well-known/oauth-protected-resource") && auth === "oauth")
+			if (url.pathname.startsWith("/.well-known/oauth-protected-resource") && auth === "oauth" && resourceMetadata)
 				return json(res, 200, {
 					resource: `${origin}/mcp`,
 					authorization_servers: [origin],
