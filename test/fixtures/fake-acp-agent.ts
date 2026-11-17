@@ -36,11 +36,12 @@
  *   task <ms>              background work of a kind with no cancel of its own (`_claude/task`): only close ends it
  *   bgfollow <ms> <text>   a background command that ends after ms, after which Claude Code's own follow-up run (on
  *                          its task notification) says <text>. By default in claude-agent-acp 0.100.0's order: the
- *                          command's exit, then `idle` with the list that drops it (acp-agent.js:4765 then the
- *                          per-message sync at :3933), and only FAKE_ACP_FOLLOW_MS later (the model's first output,
- *                          :7709-7723) `running`, the words and `idle`. FAKE_ACP_FOLLOWUP=atomic sends the proposed
- *                          adapter order instead: `running` first, at the task notification, with the item still
- *                          listed, so no `idle` with an empty list comes between the command and its follow-up
+ *                          command's exit, then `idle` with the list that drops it (first at the terminal
+ *                          `task_updated`, acp-agent.js:4790-4799, else `task_notification` :4765 or
+ *                          `background_tasks_changed` :4968-4975, each followed by the per-message sync at :3933), and
+ *                          only FAKE_ACP_FOLLOW_MS later (the model's first output, :7709-7723) `running`, the words and
+ *                          `idle`. FAKE_ACP_FOLLOWUP=atomic sends a fixed order instead: `running` before the item
+ *                          leaves the list, so no `idle` with an empty list comes between the command and its follow-up
  */
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -274,7 +275,8 @@ async function run(sessionId: string, script: string): Promise<string> {
 			const drop = () => {
 				const at = items.findIndex((item) => item.id === id);
 				if (at < 0) return false;
-				update(sessionId, { sessionUpdate: "terminal_update", terminalId: id, exitStatus: { exitCode: 0 } });
+				// as the adapter: Claude Code reports no exit code for a background command (background-work.js:206)
+				update(sessionId, { sessionUpdate: "terminal_update", terminalId: id, exitStatus: {} });
 				update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" });
 				items.splice(at, 1);
 				record({ backgroundEnded: id, status: "completed" });

@@ -180,6 +180,16 @@ describe("a harness session over ACP v2", () => {
 		expect(s.result(s.woke[0]?.text).said).toContain("the tests passed, committing");
 	});
 
+	it("today ends done before that follow-up, its words never reaching the wake: the defect, pinned", async () => {
+		const s = await setup({ FAKE_ACP_V2: "1", FAKE_ACP_FOLLOW_MS: "1500" });
+		const task = await s.begin("bgfollow 300 the tests passed, committing\nsay started the tests");
+		await until(() => s.woke.length === 1);
+		expect((await s.sessions())[task]?.state).toBe("done");
+		expect(s.result(s.woke[0]?.text).said).toBe("started the tests");
+		expect((await s.logged()).some((entry) => entry.backgroundEnded !== undefined)).toBe(true);
+		expect((await s.logged()).some((entry) => entry.followedUp !== undefined)).toBe(false);
+	});
+
 	it("keeps it open when the adapter opens the follow-up's run before the list drops the command", async () => {
 		const s = await setup({ FAKE_ACP_V2: "1", FAKE_ACP_FOLLOWUP: "atomic", FAKE_ACP_FOLLOW_MS: "1500" });
 		const task = await s.begin("bgfollow 300 the tests passed, committing\nsay started the tests");
