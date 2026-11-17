@@ -32,8 +32,11 @@ export type AcpPermissionOutcome =
 export type AcpHandlers = {
 	/** A `session/update` notification. */
 	readonly update: (sessionId: string, update: AcpUpdate) => void;
-	/** A `session/request_permission` request; the harness waits for the answer, however long. */
-	readonly permission: (request: AcpPermissionRequest) => Promise<AcpPermissionOutcome>;
+	/**
+	 * A `session/request_permission` request; the harness waits for the answer, however long, unless it withdraws it
+	 * (`$/cancel_request`: its tool stopped on its own), when `withdrawn` aborts and the ask is answered as cancelled.
+	 */
+	readonly permission: (request: AcpPermissionRequest, withdrawn: AbortSignal) => Promise<AcpPermissionOutcome>;
 };
 
 export type AcpStart = {
@@ -91,6 +94,8 @@ export function startAcp(start: AcpStart): AcpConnection {
 		detached: true,
 	});
 	const pending = new Map<number, Pending>();
+	// the requests the harness made of this side and waits on, by its id: what `$/cancel_request` withdraws
+	const inbound = new Map<number | string, AbortController>();
 	let next = 1;
 	let ended = false;
 	const write = (message: object) => {
@@ -186,17 +191,28 @@ export function startAcp(start: AcpStart): AcpConnection {
 						start.handlers.update(params.sessionId, params.update);
 					return;
 				}
+				if (message.method === "$/cancel_request") {
+					const withdrawn = (message.params as { requestId?: unknown } | undefined)?.requestId;
+					if (typeof withdrawn === "number" || typeof withdrawn === "string") inbound.get(withdrawn)?.abort();
+					return;
+				}
 				if (message.id === undefined) return; // a notification the client has no use for
 				const id = message.id;
 				if (message.method === "session/request_permission") {
 					// in a promise, so a handler that throws at once is answered as one that rejects: the harness never waits on it.
 					// A v2 request names its tool call as its subject: read as v1's shape, the same either way
+					const withdrawn = new AbortController();
+					inbound.set(id, withdrawn);
 					new Promise<AcpPermissionOutcome>((resolve) =>
-						resolve(start.handlers.permission(permissionOf(message.params, `permission-${String(id)}`))),
-					).then(
-						(outcome) => write({ id, result: { outcome } }),
-						() => write({ id, result: { outcome: { outcome: "cancelled" } } }),
-					);
+						resolve(
+							start.handlers.permission(permissionOf(message.params, `permission-${String(id)}`), withdrawn.signal),
+						),
+					)
+						.then(
+							(outcome) => write({ id, result: { outcome } }),
+							() => write({ id, result: { outcome: { outcome: "cancelled" } } }),
+						)
+						.finally(() => inbound.delete(id));
 					return;
 				}
 				write({ id, error: { code: -32601, message: `${message.method} is not offered` } });

@@ -100,17 +100,50 @@ describe("a v2 session's lifecycle", () => {
 		expect(life.reported).toBe(false);
 	});
 
-	it("a list reported once and then left out, or malformed, is unknown again: never quiet", () => {
+	it("a list left out or malformed after one that named work: that list stands, so the work is not killed", () => {
 		for (const missing of [undefined, null, [{ type: "terminal" }], [42], "[]"]) {
 			const life = new Lifecycle(2, ROOT);
 			life.sent(1);
 			life.accepted(1);
 			life.state(ROOT, "running", undefined, [term("t")]);
 			life.state(ROOT, "idle", "end_turn", missing);
-			expect(life.verdict(0).kind).toBe("unreported");
+			expect(life.verdict(0)).toEqual({ kind: "open", why: "background" });
+			expect(life.reported).toBe(false);
 			// what it named is not taken for ended
 			expect(life.ended).toEqual([]);
+			life.state(ROOT, "idle", undefined, []);
+			expect(life.verdict(0).kind).toBe("quiet");
 		}
+	});
+
+	it("a list left out after an empty one is unknown again: unreported, never quiet", () => {
+		const life = new Lifecycle(2, ROOT);
+		life.sent(1);
+		life.accepted(1);
+		life.state(ROOT, "running", undefined, []);
+		life.state(ROOT, "idle", "end_turn", undefined);
+		expect(life.verdict(0).kind).toBe("unreported");
+	});
+
+	it("a prompt taken in with no run of its own is over at the next idle that ends work, not at a repeated one", () => {
+		const life = new Lifecycle(2, ROOT);
+		life.sent(1);
+		life.accepted(1);
+		life.state(ROOT, "idle", undefined, []);
+		expect(life.verdict(0)).toEqual({ kind: "open", why: "turn" });
+		life.state(ROOT, "idle", "end_turn", []);
+		expect(life.verdict(0).kind).toBe("quiet");
+	});
+
+	it("counts a subagent once, and forgets a subagent's own list once the root no longer lists it", () => {
+		const life = new Lifecycle(2, ROOT);
+		life.state(ROOT, "idle", undefined, [{ type: "subagent", sessionId: "child" }]);
+		life.state("child", "running", undefined, [term("c1")]);
+		expect(life.running).toBe(1);
+		expect(life.background.map((item) => item.id)).toEqual(["c1", "child"]);
+		life.state(ROOT, "idle", undefined, []);
+		expect(life.background).toEqual([]);
+		expect(life.running).toBe(0);
 	});
 
 	it("an item dropped without a final status ended unsaid; a late final fills it in", () => {
@@ -157,7 +190,7 @@ describe("a v2 session's lifecycle", () => {
 });
 
 describe("a v1 session's lifecycle", () => {
-	it("ends unreported once every prompt's turn ended: v1 says nothing of what runs on", () => {
+	it("ends unreported once every prompt's turn ended: v1 says nothing of what runs on, and holds no ask past it", () => {
 		const life = new Lifecycle(1, ROOT);
 		life.sent(1);
 		life.sent(2);
@@ -165,6 +198,7 @@ describe("a v1 session's lifecycle", () => {
 		expect(life.verdict(0)).toEqual({ kind: "open", why: "turn" });
 		life.answered(2, "max_tokens");
 		expect(life.verdict(0)).toEqual({ kind: "unreported", stopReason: "max_tokens" });
+		expect(life.verdict(1).kind).toBe("unreported");
 		// a v2 state on a v1 connection is not trusted for a list
 		expect(life.reported).toBe(false);
 	});

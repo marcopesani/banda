@@ -121,6 +121,26 @@ describe("an ACP v2 permission request", () => {
 		expect(permissionOf(v1, "p")).toBe(v1);
 	});
 
+	it("a command subject is the command it would run; one it cannot show is unreviewable; none shows its words", () => {
+		expect(
+			permissionOf(
+				{ sessionId: "s", title: "Run", subject: { type: "command", command: "rm -rf build", cwd: "/w" }, options: [] },
+				"p1",
+			).toolCall,
+		).toEqual({ toolCallId: "p1", kind: "execute", rawInput: { command: "rm -rf build", cwd: "/w" }, title: "Run" });
+		expect(
+			permissionOf({ sessionId: "s", title: "Do it", subject: { type: "_secret", what: "x" }, options: [] }, "p2")
+				.toolCall,
+		).toMatchObject({ unreviewable: true, title: "Do it" });
+		expect(
+			permissionOf({ sessionId: "s", title: "Open", description: "https://example.com", options: [] }, "p3").toolCall,
+		).toEqual({
+			toolCallId: "p3",
+			title: "Open",
+			content: [{ type: "content", content: { type: "text", text: "https://example.com" } }],
+		});
+	});
+
 	it("its diff carries the patch's lines, so the ask shows the change whole", () => {
 		const request = permissionOf(
 			{

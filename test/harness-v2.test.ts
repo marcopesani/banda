@@ -140,6 +140,32 @@ describe("a harness session over ACP v2", () => {
 		});
 	});
 
+	it("an ask the harness withdraws is gone from the owner, and the session ends without an answer", async () => {
+		const s = await setup({ FAKE_ACP_V2: "1" });
+		const task = await s.begin("withdraw 600 git push\nsay gave up");
+		await until(async () => (await s.sessions())[task]?.asks?.[0]);
+		await until(() => s.woke.length === 1);
+		const ended = (await s.sessions())[task];
+		expect(ended?.state).toBe("done");
+		expect(ended?.asks ?? []).toEqual([]);
+		expect((await s.logged()).some((entry) => entry.withdrew === "git push")).toBe(true);
+	});
+
+	it("Stop with work that has no cancel of its own closes the session at once, not at its clock", async () => {
+		const s = await setup({ FAKE_ACP_V2: "1" }, { stopMs: 20_000 });
+		const task = await s.begin("task 600000\nsay waiting");
+		await until(async () => {
+			const one = (await s.sessions())[task];
+			return one?.background?.foreground === "idle" && one.background.running === 1;
+		});
+		const asked = Date.now();
+		await s.harness.commit((tx) => stopSession(tx, task), context);
+		await until(() => s.woke.length === 1);
+		expect(Date.now() - asked).toBeLessThan(15_000);
+		expect((await s.sessions())[task]?.state).toBe("stopped");
+		expect((await s.logged()).some((entry) => entry.closed !== undefined)).toBe(true);
+	});
+
 	it("an agent that never reports background work ends closed with its turn, never done, and says so", async () => {
 		const s = await setup({ FAKE_ACP_V2: "unreported" });
 		const task = await s.begin("say all done");

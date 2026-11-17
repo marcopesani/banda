@@ -376,8 +376,8 @@ export const harnessesArea: AreaModule = {
 						// its turn is over and the agent reports work running on: the card says it works in the background
 						...(session.ended === undefined &&
 						session.background?.foreground === "idle" &&
-						session.background.items.length > 0
-							? { background: session.background.items.length }
+						session.background.running > 0
+							? { background: session.background.running }
 							: {}),
 					}))
 					.sort((a, b) => b.at - a.at),

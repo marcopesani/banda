@@ -32,6 +32,8 @@
  *   bg <ms>                a background command (a timer, no process) that ends after ms
  *   monitor <ms>           a background tool call that ends after ms
  *   bgask <ms> <command>   a background command that, after ms, asks to run <command>, then ends
+ *   withdraw <ms> <command> asks to run <command>, and withdraws the ask after ms ($/cancel_request), unanswered
+ *   task <ms>              background work of a kind with no cancel of its own (`_claude/task`): only close ends it
  */
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -49,11 +51,15 @@ const V2 = process.env.FAKE_ACP_V2;
 /** Whether this connection negotiated v2. */
 let v2 = false;
 let foreground: "idle" | "running" = "idle";
-type Item = { type: "terminal" | "tool_call"; id: string; end: () => void };
+type Item = { type: "terminal" | "tool_call" | "_claude/task"; id: string; end: () => void };
 const items: Item[] = [];
 const listed = () =>
 	items.map((item) =>
-		item.type === "terminal" ? { type: "terminal", terminalId: item.id } : { type: "tool_call", toolCallId: item.id },
+		item.type === "terminal"
+			? { type: "terminal", terminalId: item.id }
+			: item.type === "tool_call"
+				? { type: "tool_call", toolCallId: item.id }
+				: { type: item.type, taskId: item.id, description: "a task" },
 	);
 const state = (sessionId: string, value: "idle" | "running", stopReason?: string) => {
 	foreground = value;
@@ -70,7 +76,7 @@ const toolCall = (sessionId: string, fields: object) =>
 	update(sessionId, { sessionUpdate: v2 ? "tool_call_update" : "tool_call", ...fields });
 /** Background work: listed now, its final status then the list without it when it ends (or is cancelled). */
 function background(sessionId: string, type: Item["type"], ms: number, then?: () => Promise<void>) {
-	const id = `${type === "terminal" ? "term" : "tool"}-${++call}`;
+	const id = `${type === "terminal" ? "term" : type === "tool_call" ? "tool" : "task"}-${++call}`;
 	let timer: NodeJS.Timeout | undefined;
 	const end = (status = "completed") => {
 		clearTimeout(timer);
@@ -82,21 +88,22 @@ function background(sessionId: string, type: Item["type"], ms: number, then?: ()
 				terminalId: id,
 				exitStatus: status === "cancelled" ? { signal: "SIGTERM" } : { exitCode: 0 },
 			});
-		update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: id, status });
+		if (type !== "_claude/task") update(sessionId, { sessionUpdate: "tool_call_update", toolCallId: id, status });
 		items.splice(at, 1);
 		record({ backgroundEnded: id, status });
 		state(sessionId, foreground);
 	};
 	if (type === "terminal") update(sessionId, { sessionUpdate: "terminal_update", terminalId: id, command: `bg ${ms}` });
-	update(sessionId, {
-		sessionUpdate: "tool_call_update",
-		toolCallId: id,
-		title: type === "terminal" ? `bg ${ms}` : "Monitor",
-		kind: type === "terminal" ? "execute" : "other",
-		status: "in_progress",
-		rawInput: type === "terminal" ? { command: `bg ${ms}` } : {},
-		...(type === "terminal" ? { content: [{ type: "terminal", terminalId: id }] } : {}),
-	});
+	if (type !== "_claude/task")
+		update(sessionId, {
+			sessionUpdate: "tool_call_update",
+			toolCallId: id,
+			title: type === "terminal" ? `bg ${ms}` : "Monitor",
+			kind: type === "terminal" ? "execute" : "other",
+			status: "in_progress",
+			rawInput: type === "terminal" ? { command: `bg ${ms}` } : {},
+			...(type === "terminal" ? { content: [{ type: "terminal", terminalId: id }] } : {}),
+		});
 	items.push({ type, id, end: () => end("cancelled") });
 	record({ backgroundStarted: id });
 	state(sessionId, foreground);
@@ -243,6 +250,32 @@ async function run(sessionId: string, script: string): Promise<string> {
 			background(sessionId, "terminal", Number(rest[0] ?? 0));
 		} else if (v2 && verb === "monitor") {
 			background(sessionId, "tool_call", Number(rest[0] ?? 0));
+		} else if (v2 && verb === "task") {
+			background(sessionId, "_claude/task", Number(rest[0] ?? 0));
+		} else if (v2 && verb === "withdraw") {
+			const command = rest.slice(1).join(" ");
+			const request = nextRequest++;
+			asked.set(request, () => {});
+			send({
+				id: request,
+				method: "session/request_permission",
+				params: {
+					sessionId,
+					title: command,
+					subject: {
+						type: "tool_call",
+						toolCall: { toolCallId: `call-${++call}`, kind: "execute", rawInput: { command } },
+					},
+					options: [
+						{ optionId: "allow", name: "Allow", kind: "allow_once" },
+						{ optionId: "reject", name: "Reject", kind: "reject_once" },
+					],
+				},
+			});
+			await sleep(Number(rest[0] ?? 0), sessionId);
+			asked.delete(request);
+			send({ method: "$/cancel_request", params: { requestId: request } });
+			record({ withdrew: command });
 		} else if (v2 && verb === "bgask") {
 			const command = rest.slice(1).join(" ");
 			background(sessionId, "terminal", Number(rest[0] ?? 0), async () => {

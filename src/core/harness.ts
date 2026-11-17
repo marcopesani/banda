@@ -110,6 +110,8 @@ export type HarnessBackground = {
 	foreground: Foreground;
 	/** The root's latest list was reported: false is "not reported", never "nothing runs". */
 	reported: boolean;
+	/** How many pieces of work the root's list names now: a subagent once, with whatever work of its own. */
+	running: number;
 	/** What its lists name now, bounded. */
 	items: BackgroundItem[];
 	/** What lists dropped, with the final status the agent sent first, if any; bounded, newest kept. */
@@ -831,6 +833,8 @@ export function defineHarnesses(options: HarnessOptions) {
 			typeof raw.command === "string"
 				? raw.command
 				: (call.title ?? (typeof raw.file_path === "string" ? raw.file_path : "an action"));
+		if ((call as { unreviewable?: unknown }).unreviewable === true)
+			throw new Error("The coding agent asked about something it did not show. Its action was refused.");
 		const diffs = ((call.content as ToolContent[] | undefined) ?? []).filter((part) => part.type === "diff");
 		// a v2 change that names its file but shows no patch cannot be reviewed whole: refused, never approved blind
 		if (diffs.some((part) => diffLines(part, Infinity) === undefined))
@@ -968,9 +972,9 @@ export function defineHarnesses(options: HarnessOptions) {
 				>();
 				let cancelled = false;
 				let closing = false;
-				const asked = async (request: AcpPermissionRequest): Promise<AcpPermissionOutcome> => {
+				const asked = async (request: AcpPermissionRequest, withdrawn?: AbortSignal): Promise<AcpPermissionOutcome> => {
 					fault("harness:ask");
-					if (cancelled || closing) return { outcome: "cancelled" };
+					if (cancelled || closing || withdrawn?.aborted === true) return { outcome: "cancelled" };
 					let ask: HarnessAsk;
 					try {
 						ask = askOf(request);
@@ -981,6 +985,31 @@ export function defineHarnesses(options: HarnessOptions) {
 					const outcome = new Promise<AcpPermissionOutcome>((resolve) => {
 						open.set(ask.id, { resolve, request });
 					});
+					// the harness withdrew it (the tool that asked stopped on its own): the owner no longer has it to answer
+					withdrawn?.addEventListener(
+						"abort",
+						() => {
+							const waiting = open.get(ask.id);
+							if (waiting === undefined) return;
+							open.delete(ask.id);
+							waiting.resolve({ outcome: "cancelled" });
+							busy++;
+							void runtime
+								.commit(async (tx) => {
+									const session = (await tx.doc(Harnesses)).sessions[id];
+									if (session === undefined || session.ended !== undefined) return undefined;
+									session.asks = (session.asks ?? []).filter((one) => one.id !== ask.id);
+									if (session.asks.length === 0 && session.state === "waiting") session.state = "working";
+									return undefined;
+								}, ctx)
+								.catch((error: unknown) => options.log(`${definition.name}: ${(error as Error).message}`))
+								.finally(() => {
+									busy--;
+									check();
+								});
+						},
+						{ once: true },
+					);
 					await flushing;
 					await flush();
 					await runtime.commit(async (tx) => {
@@ -1032,6 +1061,7 @@ export function defineHarnesses(options: HarnessOptions) {
 						: {
 								foreground: life.foreground,
 								reported: life.reported,
+								running: life.running,
 								items: life.background.slice(-BACKGROUND_KEPT),
 								...(life.ended.length === 0 ? {} : { ended: life.ended.slice(-BACKGROUND_KEPT) }),
 							};
@@ -1056,6 +1086,9 @@ export function defineHarnesses(options: HarnessOptions) {
 				// v2: Stop reaches what runs on past the turn, each item once: a cancel spares background work
 				const cancelListed = () => {
 					if (connection === undefined || life === undefined) return;
+					// work with no cancel of its own ends only with session/close: Stop closes now, not at its clock
+					if (life.background.some((item) => !["terminal", "tool_call", "subagent"].includes(item.type)))
+						return finished("stopped");
 					for (const item of life.background) {
 						const one = `${item.session}\u0000${item.type}\u0000${item.id}`;
 						if (cancelledItems.has(one)) continue;
@@ -1065,7 +1098,7 @@ export function defineHarnesses(options: HarnessOptions) {
 							fault("harness:cancel-item");
 							void cancelItem(connection, item);
 						} catch (error) {
-							options.log(`harness: a cancel of ${item.type} failed: ${(error as Error).message}`);
+							options.log(`${definition.name}: a cancel of its ${item.type} failed: ${(error as Error).message}`);
 						}
 					}
 				};
@@ -1607,8 +1640,8 @@ export async function sessionOf(
 			? `${
 					session.state === "waiting"
 						? "waiting on the owner"
-						: session.background?.foreground === "idle" && session.background.items.length > 0
-							? `working: its turn is over and ${session.background.items.length} piece(s) of work it reports run on in the background`
+						: session.background?.foreground === "idle" && session.background.running > 0
+							? `working: its turn is over and ${session.background.running} piece(s) of work it reports run on in the background`
 							: session.state
 				}, for ${ago(at - session.at).replace(" ago", "")}`
 			: `${howItEnded(session, session.outcome)}, ${ago(at - session.ended)}`;

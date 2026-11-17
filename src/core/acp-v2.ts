@@ -13,6 +13,8 @@ import type { AcpPermissionRequest, AcpUpdate } from "./acp.ts";
 
 /** How much of a terminal's output is kept, its end. */
 const OUTPUT_MAX = 8_000;
+/** Terminals remembered at once, the newest kept: one exits, and goes, once its call has its output. */
+const TERMINALS_KEPT = 64;
 
 type Terminal = { output: string; command?: string; exit?: string; call?: string };
 
@@ -116,9 +118,15 @@ export class V2Updates {
 			if (output !== undefined) terminal.output = tailOf(decode(output));
 			if (typeof update.command === "string") terminal.command = update.command;
 		}
+		const exited = typeof update.exitStatus === "object" && update.exitStatus !== null;
+		if (this.#terminals.size > TERMINALS_KEPT) {
+			const oldest = this.#terminals.keys().next().value;
+			if (oldest !== undefined && oldest !== id) this.#terminals.delete(oldest);
+		}
 		// the claude adapter names a command's terminal after its call; any other names it in the call's content
 		const call = terminal.call;
 		if (call === undefined) return [];
+		if (exited) this.#terminals.delete(id);
 		return [{ sessionUpdate: "tool_call_update", toolCallId: call, rawOutput: terminal.output }];
 	}
 }
@@ -139,7 +147,9 @@ function v1Diff(part: DiffPart): DiffPart {
 
 /**
  * A v2 permission request (`title`, `subject.toolCall`) as the v1 shape the asks are made of (`toolCall` with its
- * title). One with no tool call as its subject is still an ask, named by `fallback`.
+ * title). A `command` subject is the command it would run, in its folder; one with no subject is its title and
+ * description, both shown. A subject of another kind cannot be shown whole, so it is marked unreviewable: refused,
+ * never approved from its title alone. Either way it is named by `fallback` when it names no tool call.
  */
 export function permissionOf(params: unknown, fallback: string): AcpPermissionRequest {
 	const request = (params ?? {}) as {
@@ -150,7 +160,30 @@ export function permissionOf(params: unknown, fallback: string): AcpPermissionRe
 		options?: unknown;
 	};
 	if (request.toolCall !== undefined) return request as unknown as AcpPermissionRequest;
-	const call = request.subject?.type === "tool_call" ? (request.subject.toolCall ?? {}) : {};
+	const subject = request.subject as
+		| { type?: unknown; toolCall?: unknown; command?: unknown; cwd?: unknown }
+		| null
+		| undefined;
+	const description =
+		typeof (request as { description?: unknown }).description === "string"
+			? (request as { description: string }).description
+			: undefined;
+	const call: { [field: string]: unknown } =
+		subject?.type === "tool_call"
+			? ((subject.toolCall ?? {}) as { [field: string]: unknown })
+			: subject?.type === "command" && typeof subject.command === "string"
+				? {
+						...(typeof (subject as { toolCallId?: unknown }).toolCallId === "string"
+							? { toolCallId: (subject as { toolCallId: string }).toolCallId }
+							: {}),
+						kind: "execute",
+						rawInput: { command: subject.command, ...(typeof subject.cwd === "string" ? { cwd: subject.cwd } : {}) },
+					}
+				: subject === undefined || subject === null
+					? description === undefined
+						? {}
+						: { content: [{ type: "content", content: { type: "text", text: description } }] }
+					: { unreviewable: true };
 	const content = Array.isArray(call.content) ? (call.content as { type?: string }[]) : undefined;
 	return {
 		sessionId: String(request.sessionId ?? ""),

@@ -87,6 +87,8 @@ export class Lifecycle {
 	#lists = new Map<string, BackgroundItem[] | undefined>();
 	#stopReason: string | undefined;
 	#finals = new Map<string, string>();
+	/** Sessions whose latest state left the list out, after one that named work: that list stands. */
+	#lost = new Set<string>();
 	#ended: EndedItem[] = [];
 
 	constructor(protocol: 1 | 2, root: string) {
@@ -138,9 +140,11 @@ export class Lifecycle {
 		if (foreground === "running" || foreground === "requires_action")
 			for (const prompt of this.#prompts.values()) if (prompt.accepted) prompt.held = true;
 		if (foreground === "idle") {
-			// an idle ends the foreground work that held a prompt; one taken in but not yet run waits for its run
-			for (const prompt of this.#prompts.values()) if (prompt.accepted && prompt.held) prompt.done = true;
-			if (typeof stopReason === "string") this.#stopReason = stopReason;
+			// an idle ends the foreground work that held a prompt; one taken in but not yet run waits for its run, or for
+			// an idle that ends work (it carries a stop reason: a repeated snapshot carries none) after it was taken in
+			const ends = typeof stopReason === "string" && stopReason !== "";
+			for (const prompt of this.#prompts.values()) if (prompt.accepted && (prompt.held || ends)) prompt.done = true;
+			if (ends) this.#stopReason = stopReason;
 		}
 		return changed;
 	}
@@ -162,6 +166,13 @@ export class Lifecycle {
 	#list(session: string, items: BackgroundItem[] | undefined): boolean {
 		const before = this.#lists.get(session);
 		const had = this.#lists.has(session);
+		// a list left out (or malformed) after one that named work says nothing of that work: it may still run, so the
+		// last list stands (the agent MUST send it on every state). After an empty one, it is unknown again
+		if (items === undefined && before !== undefined && before.length > 0) {
+			this.#lost.add(session);
+			return false;
+		}
+		this.#lost.delete(session);
 		this.#lists.set(session, items);
 		if (before !== undefined) {
 			const now = new Set((items ?? []).map(key));
@@ -185,15 +196,34 @@ export class Lifecycle {
 
 	/** The root's latest list was reported (and well formed). */
 	get reported(): boolean {
-		return this.protocol === 2 && this.#lists.get(this.root) !== undefined;
+		return this.protocol === 2 && this.#lists.get(this.root) !== undefined && !this.#lost.has(this.root);
 	}
 
-	/** Every item every session's latest reported list names, the root's last. */
+	/**
+	 * Every item the lists name: the root's, and those of the subagents it lists now (one it no longer lists is over,
+	 * whatever its own last list said), the root's last.
+	 */
 	get background(): BackgroundItem[] {
+		const root = this.#lists.get(this.root) ?? [];
 		const all: BackgroundItem[] = [];
-		for (const [session, items] of this.#lists) if (session !== this.root) all.push(...(items ?? []));
-		all.push(...(this.#lists.get(this.root) ?? []));
+		const seen = new Set<string>();
+		const walk = (items: readonly BackgroundItem[]) => {
+			for (const item of items)
+				if (item.type === "subagent" && !seen.has(item.id)) {
+					seen.add(item.id);
+					const own = this.#lists.get(item.id) ?? [];
+					walk(own);
+					all.push(...own);
+				}
+		};
+		walk(root);
+		all.push(...root);
 		return all;
+	}
+
+	/** The pieces of work it reports running on: the root's list, each subagent counted once with its own work. */
+	get running(): number {
+		return (this.#lists.get(this.root) ?? []).length;
 	}
 
 	/** Items lists dropped, with the final status sent for each, when one was. */
@@ -201,14 +231,17 @@ export class Lifecycle {
 		return this.#ended;
 	}
 
-	/** Whether it may end now, and on what: `asks` is how many of its asks wait on the owner. */
+	/**
+	 * Whether it may end now, and on what: `asks` is how many of its asks wait on the owner. A v1 turn that ended has
+	 * no ask left to answer (its harness answered them, or withdrew them, before it ended the turn): asks hold only v2.
+	 */
 	verdict(asks: number): Verdict {
 		if (this.#prompts.size === 0) return { kind: "open", why: "prompt" };
 		for (const prompt of this.#prompts.values())
 			if (!prompt.done) return { kind: "open", why: prompt.accepted || this.protocol === 1 ? "turn" : "prompt" };
-		if (asks > 0) return { kind: "open", why: "ask" };
 		const stopReason = this.#stopReason === undefined ? {} : { stopReason: this.#stopReason };
 		if (this.protocol === 1) return { kind: "unreported", ...stopReason };
+		if (asks > 0) return { kind: "open", why: "ask" };
 		if (this.#foreground !== "idle") return { kind: "open", why: "foreground" };
 		const root = this.#lists.get(this.root);
 		if (root === undefined) return { kind: "unreported", ...stopReason };

@@ -558,8 +558,8 @@ naming one that is not there answers with those that are.
   like the agent's own work, a session at work is not said there. Stop answers them all, and before the ask was sent,
   stops it from being sent. The owner steers in their own words: a note is sent to the harness as a
   prompt it takes after its current step. Stop cancels the turn and each piece of work the harness lists running in
-  the background (its own cancel for a command, a tool call or a subagent; `session/close` for the rest), and a
-  harness that has not ended them within seconds is ended, with all it started. Stop acts at once, with no
+  the background (its own cancel for a command, a tool call or a subagent; work with no cancel of its own ends the
+  session at once, by `session/close`), and a harness that has not ended them within seconds is ended, with all it started. Stop acts at once, with no
   confirmation: a stopped session keeps its record, and the agent can follow it up (native resume where the harness
   supports it, otherwise a fresh session handed a summary of what happened). A follow-up takes up the conversation,
   not the work Stop ended: a background command or a subagent it stopped is not running again until the harness starts it again.
@@ -572,8 +572,10 @@ naming one that is not there answers with those that are.
   nothing until it ends. It ends done only when every prompt's run is over, no ask is open, its foreground is idle and
   its list is reported empty. A harness that does not report the list (every v1 harness, and a v2 one that leaves it
   out) ends closed when the rest holds: its turn is over, but whether all it started had finished is not known, so
-  banda stops whatever is left, says so on the card and in its agent's wake, and never calls it done. A piece of work a
-  list drops is ended with the final status the harness sent first, or with none said, never taken for completed.
+  banda stops whatever is left, says so on the card and in its agent's wake, and never calls it done. A list left out
+  after one that named work leaves that list standing (the work may still run, so it is not killed); after an empty
+  one it is unknown again. An ask the harness withdraws leaves the owner's view. A piece of work a list drops is ended
+  with the final status the harness sent first, or with none said, never taken for completed.
 - **Once, and then the agent hears.** The ask is sent at most once: a restart after it was sent ends the session
   interrupted, never sends it again, and a session whose task ended without ending it ends failed. Either way, and
   when the harness finishes, its agent wakes once with what was done, fenced as foreign data: how it ended, what it
