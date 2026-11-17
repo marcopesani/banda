@@ -327,7 +327,11 @@ function Part({ title, note, children }: { title: string; note?: ReactNode; chil
 }
 
 /** The access an account was given, in the definition's words where they name it; else the scopes as they are. */
-export function accessWords(account: Pick<AccountView, "scopes" | "stale">, access: ScopeChoices | undefined): string {
+export function accessWords(
+	account: Pick<AccountView, "scopes" | "stale" | "expired">,
+	access: ScopeChoices | undefined,
+): string {
+	if (account.expired === true) return "Its sign-in expired, and the service gave no way to renew it";
 	if (account.stale === true) return "Its sign-in no longer fits this connection";
 	const scopes = account.scopes ?? [];
 	const labels =

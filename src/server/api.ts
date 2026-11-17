@@ -886,7 +886,8 @@ export type ConnectionView = {
 
 /**
  * An account of a connection: one sign-in, named by what the service calls the owner ("@bandarra"), the agents that may
- * use it, and whether its credentials no longer fit the connection's definition (it signs in again).
+ * use it, and whether it signs in again: its credentials no longer fit the connection's definition, or they ran out
+ * with nothing to renew them.
  */
 export type AccountView = {
 	/** Its key in the API's paths. */
@@ -898,6 +899,8 @@ export type AccountView = {
 	readonly at: number;
 	readonly agents: readonly string[];
 	readonly stale?: boolean;
+	/** Why it is stale: its access token's time is past and the server gave no refresh token to renew it. */
+	readonly expired?: boolean;
 	/** The scopes this account was given (as the service said, else as it asked): its own, whatever the others'. */
 	readonly scopes?: readonly string[];
 	/** Scopes it may ask for that a tool needs and it was not given, one per tool: "needs Send email". */
