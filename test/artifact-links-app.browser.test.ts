@@ -88,26 +88,32 @@ it.skipIf(!hasChrome())(
 			// the lead's main chat, which the app opens at #/a/sancho
 			const thread = "main";
 			let chat: number | undefined;
+			/** The chat's whole transcript, page after page. */
+			const items = async () => {
+				const all: Item[] = [];
+				let after: number | undefined = chat === undefined ? undefined : 0;
+				while (after !== undefined) {
+					const page: { items: Item[]; next?: number } = await api(`/chats/${chat}/items?after=${after}`);
+					all.push(...page.items);
+					after = page.next;
+				}
+				return all;
+			};
 			const say = async (text: string) => {
-				const before =
-					chat === undefined ? 0 : (await api<{ items: Item[] }>(`/chats/${chat}/items?after=0`)).items.length;
+				const before = (await items()).length;
 				const posted = await api<{ chat: number }>("/messages", {
 					method: "POST",
 					body: JSON.stringify({ id: randomUUID(), text, ...(chat === undefined ? { thread } : { chat }) }),
 				});
 				chat = posted.chat;
 				await until(async () => {
-					const items = (await api<{ items: Item[] }>(`/chats/${chat}/items?after=0`)).items;
 					const row = (await api<ChatRow[]>("/chats")).find((one) => one.chat === chat);
-					return items.length > before + 2 && row?.state === "idle";
+					return (await items()).length > before + 2 && row?.state === "idle";
 				});
 			};
 			/** The model's message_user call with `args`, by the owner's word for it. */
 			const speak = (args: Parameters<typeof fauxToolCall>[1]) => say(`say ${calls.push(args) - 1}`);
-			const lastResult = async () =>
-				(await api<{ items: Item[] }>(`/chats/${chat}/items?after=0`)).items
-					.filter((item) => item.role === "tool")
-					.at(-1);
+			const lastResult = async () => (await items()).filter((item) => item.role === "tool").at(-1);
 
 			await say("publish plan.md Lisbon trip plan");
 			await say("publish old.md Old notes");
@@ -190,6 +196,86 @@ it.skipIf(!hasChrome())(
 						await page.until(`location.hash !== '#/artifact/${plan}' && ${link} !== null`);
 						await page.click(link);
 						await page.until(`location.hash === '#/artifact/${plan}'`);
+						expect(page.errors()).toEqual([]);
+					});
+			} finally {
+				await server.close();
+			}
+		} finally {
+			await daemon.close();
+		}
+	},
+	120_000,
+);
+
+it.skipIf(!hasChrome())(
+	"a card a publish of the same run drew is drawn once, as the model is told",
+	async () => {
+		const home = await tempHome();
+		await writeFile(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
+		const token = await ownerToken(home);
+		const faux = fauxProvider();
+		const models = createModels();
+		models.setProvider(faux.provider);
+		// the owner's `go`: one run publishes, then shows by its id what that publish just drew
+		faux.setResponses(
+			Array.from({ length: 20 }, () => (ctx: { messages: readonly Said[] }) => {
+				const last = ctx.messages.at(-1);
+				const made = /its id is ([0-9a-f]{16})/.exec(textOf(last?.content))?.[1];
+				if (last?.role === "toolResult" && made !== undefined)
+					return fauxAssistantMessage([fauxToolCall("message_user", { text: "Shown again.", artifacts: [made] })], {
+						stopReason: "toolUse",
+					});
+				if (last?.role === "user" && textOf(last.content) === "go")
+					return fauxAssistantMessage([fauxToolCall("publish", { path: "same.md", title: "Same run" })], {
+						stopReason: "toolUse",
+					});
+				return fauxAssistantMessage("done");
+			}) as never,
+		);
+		const daemon = await startDaemon({ home, port: 0, models, log: () => {}, box: hostBox(home) });
+		const base = `http://127.0.0.1:${daemon.port}`;
+		const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+			const response = await fetch(`${base}/api${path}`, {
+				...init,
+				headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers },
+			});
+			if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+			return (await response.json()) as T;
+		};
+		try {
+			await skipShippedSkills(daemon.port, token);
+			await mkdir(join(home, "workspace"), { recursive: true });
+			await writeFile(join(home, "workspace", "same.md"), "# Same run\n");
+			const { chat } = await api<{ chat: number }>("/messages", {
+				method: "POST",
+				body: JSON.stringify({ id: randomUUID(), text: "go", thread: "main" }),
+			});
+			const shown = await until(async () => {
+				const items = (await api<{ items: Item[] }>(`/chats/${chat}/items?after=0`)).items;
+				return items.find((item) => item.role === "tool" && item.name === "message_user");
+			});
+			expect(shown).toMatchObject({
+				error: false,
+				text: "Sent. The owner sees “Same run” at version 1 as the card your publish drew in this run, not a second one.",
+			});
+			const server = await webServer({
+				server: { proxy: { "/api": { target: base, changeOrigin: true, headers: { origin: base } } } },
+			});
+			try {
+				for (const width of [390, 1440])
+					await withPage(`${server.origin}/#token=${token}`, { width, height: 900 }, async (page) => {
+						await page.until("document.body.innerText.includes('Sancho')");
+						await page.run("location.hash = '#/a/sancho'");
+						await page.until("document.body.innerText.includes('Shown again.')");
+						const tiles = `[...document.querySelectorAll('[data-tile]')].filter(tile => tile.textContent.includes('Same run')).length`;
+						await page.until(`${tiles} > 0`);
+						expect(await page.run(tiles)).toBe(1);
+						const shots = process.env.BANDA_ARTIFACT_LINK_SHOTS;
+						if (shots !== undefined) {
+							await mkdir(shots, { recursive: true });
+							await page.shoot(join(shots, `${width}-same-run.png`));
+						}
 						expect(page.errors()).toEqual([]);
 					});
 			} finally {

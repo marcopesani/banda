@@ -102,14 +102,6 @@ export const ARTIFACT_ID = /^[0-9a-f]{16}$/;
 /** The scheme an artifact is linked by in a message's text, `[words](artifact:<id>)`, as a blob is by `sha256:`. */
 export const ARTIFACT_SCHEME = "artifact:";
 
-/**
- * Every artifact link target in markdown `text`, as written: an inline link's (`](artifact:…)`), a reference
- * definition's (`]: artifact:…`) and an autolink's (`<artifact:…>`), the scheme in any case. Prose that only says the
- * word is none.
- */
-export const artifactLinks = (text: string): string[] =>
-	[...text.matchAll(/(?:\]\(\s*<?|\]:[ \t]*<?|<)(artifact:[^\s)>]*)/gi)].map((match) => match[1] as string);
-
 const KINDS: { readonly [mimeType: string]: ArtifactKind } = {
 	"text/markdown": "markdown",
 	"text/plain": "text",

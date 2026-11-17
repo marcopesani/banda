@@ -591,8 +591,11 @@ carries:
   `artifacts`, it is drawn inline as the artifact's icon and its title in the Library, never the words written (only
   the model wrote them), a link that opens it; it draws no card, and beside a card the same message shows, each is
   drawn. One the Library no longer holds, or a link in that scheme that names no id, is its words, marked
-  unavailable, opening nothing. A file's name or path in the words shows the owner nothing: what they see of an
-  artifact is its card or this link. The call's result says which they see;
+  unavailable, opening nothing. The daemon reads the links with the parser the app draws with (CommonMark and GFM),
+  so what it checks is what is drawn: a reference, an entity or an escape counts, code does not; an artifact in an
+  image or in raw HTML is refused. A file's name or path in the words shows the owner nothing: what they see of an
+  artifact is its card or this link. The call's result says which they see, a card left out as already drawn in the
+  run included, naming by title only this chat's artifacts (another's by its id, as the refusal lists them);
 - **file**: a path in the box, sent as an attachment and shown inline where it can be;
 - **artifacts**: ids of artifacts in the Library (`publish` returns its id), each drawn as its card at the version
   current when it was sent; an id the Library does not hold is refused before anything is sent. An artifact is shown

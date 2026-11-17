@@ -53,7 +53,15 @@ describe("groups", () => {
 					: "lead";
 			const last = ctx.messages.filter((m) => m.role !== "system").at(-1);
 			if (last?.role === "toolResult") {
-				results.push(textOf(last.content));
+				const said = textOf(last.content);
+				results.push(said);
+				// asked to publish and show it in one turn: it shows by its id what that publish just drew
+				const asked = textOf(ctx.messages.filter((m) => m.role === "user").at(-1)?.content);
+				const made = /^(?:Published|Unchanged).*its id is ([0-9a-f]{16})/.exec(said)?.[1];
+				if (asked.includes("PUBLISH SHOW") && made !== undefined)
+					return fauxAssistantMessage([fauxToolCall("message_group", { text: "Here it is.", artifacts: [made] })], {
+						stopReason: "toolUse",
+					});
 				return fauxAssistantMessage("done");
 			}
 			const text = textOf(last?.content);
@@ -67,7 +75,7 @@ describe("groups", () => {
 			// a file the owner sent: the agent sends it back, from where the turn says it is in its box (first: a turn
 			// reads every message since it last worked, an earlier FAIL ME among them)
 			// publishing to the Library from the room (first, like a file: a turn reads every message since it last worked)
-			if (text.includes("PUBLISH IT"))
+			if (text.includes("PUBLISH IT") || text.includes("PUBLISH SHOW"))
 				return fauxAssistantMessage([fauxToolCall("publish", { path: "draft.md", title: "Launch post" })], {
 					stopReason: "toolUse",
 				});
@@ -306,6 +314,19 @@ describe("groups", () => {
 				return view.messages.find((m) => m.text === "Here it is again.");
 			});
 			expect(again.artifacts).toMatchObject([{ id: card.artifacts?.[0]?.id, title: "Launch post", n: 1 }]);
+			// published and shown in one turn: the room draws that version once, and the member is told so, not of a
+			// second card
+			await post(room, { key: randomUUID(), text: "PUBLISH SHOW", mentions: ["researcher"] });
+			const once = await until(async () => {
+				const view = await api<GroupView>(`/groups/${room}`);
+				return view.messages.find((m) => m.text === "Here it is.");
+			});
+			expect(once.artifacts ?? []).toEqual([]);
+			await until(() =>
+				results.includes(
+					"Posted to the group. The owner sees “Launch post” at version 1 as the card your publish drew in this run, not a second one.",
+				),
+			);
 			// the publish told the member the room sees its card, and how to name it later
 			expect(results.find((result) => result.startsWith("Published as version 1"))).toMatch(
 				/The owner sees “Launch post” here now, as its card at version 1; .*\[words\]\(artifact:[0-9a-f]{16}\)/,

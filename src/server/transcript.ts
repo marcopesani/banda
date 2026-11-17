@@ -26,6 +26,7 @@ import {
 	type SubmissionId,
 	type TaskGraph,
 	type TaskGraphNode,
+	type Tx,
 	UsageDoc,
 	watchEvents,
 } from "@earendil-works/pi-durable";
@@ -64,6 +65,7 @@ import {
 	WAKE,
 	type WakeData,
 } from "../core/routines.ts";
+import { startsRun } from "../core/runs.ts";
 import { localTime } from "../core/schedule.ts";
 import { openWaits, status } from "../core/status.ts";
 import { context } from "../core/store.ts";
@@ -250,6 +252,30 @@ export function turnUsage(usage: Usage | undefined): TurnUsage {
 		...(usage?.reasoning === undefined ? {} : { reasoning: usage.reasoning }),
 		cost: usage?.cost?.total ?? 0,
 	};
+}
+
+/**
+ * Chat `chat`'s tool calls, each by the run it was made in, counted from the items the app draws (`startsRun`), and the
+ * run its newest entry is in. Reads only.
+ */
+export async function callRuns(
+	tx: Tx,
+	chat: number,
+): Promise<{ readonly runs: Map<string, number>; readonly last: number }> {
+	const runs = new Map<string, number>();
+	let run = 0;
+	let cursor: Parameters<Tx["scanEntries"]>[2];
+	do {
+		const page = await tx.scanEntries({ conversationId: chat as ConversationId, order: "ascending" }, 100, cursor);
+		for (const entry of page.items) {
+			const item = itemOf(entry);
+			if (item === undefined) continue;
+			if (startsRun(item)) run = item.id;
+			if (item.role === "assistant") for (const call of item.calls ?? []) runs.set(call.id, run);
+		}
+		cursor = page.next;
+	} while (cursor !== undefined);
+	return { runs, last: run };
 }
 
 export function itemOf(entry: EntryRecord): Item | undefined {
