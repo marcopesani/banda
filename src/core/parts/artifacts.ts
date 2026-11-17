@@ -12,7 +12,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { JsonObject } from "@earendil-works/pi-durable";
 import { ARTIFACT_ID, ARTIFACT_SCHEME, type Artifact, Artifacts, quoted } from "../artifacts.ts";
-import { markdownLinks } from "../markdown-links.ts";
 import { callsOfRun } from "../runs.ts";
 import type { MessagePart } from "./part.ts";
 
@@ -26,9 +25,19 @@ const ids = (args: JsonObject): string[] =>
 const SCHEME = /^artifact:/i;
 const ARTIFACT_LINK = new RegExp(`^${ARTIFACT_SCHEME}(${ARTIFACT_ID.source.slice(1, -1)})$`);
 
+/**
+ * Whether `text` may draw anything in the artifact scheme: it holds the scheme's letters (any case; an escape is still
+ * them), or a character reference that could write them. Without either it cannot, and the parser is not loaded: a
+ * daemon and each of its workers load it the first time a message might need it, not as they start.
+ */
+const mayName = (text: string) => /artifact/i.test(text) || text.includes("&");
+
 /** What the text draws in the artifact scheme: its links' targets, and why it cannot be sent as written. */
-function artifactLinks(args: JsonObject): { readonly ids: readonly string[]; readonly refused?: string } {
-	if (typeof args.text !== "string") return { ids: [] };
+async function artifactLinks(
+	args: JsonObject,
+): Promise<{ readonly ids: readonly string[]; readonly refused?: string }> {
+	if (typeof args.text !== "string" || !mayName(args.text)) return { ids: [] };
+	const { markdownLinks } = await import("../markdown-links.ts");
 	const drawn = markdownLinks(args.text);
 	const links = drawn.links.filter((href) => SCHEME.test(href));
 	const bad = links.find((href) => !ARTIFACT_LINK.test(href));
@@ -60,8 +69,6 @@ export const artifacts: MessagePart = {
 		"name in words shows the owner nothing.",
 	present: (args) => ids(args).length > 0,
 	refuse: (args) => {
-		const refused = artifactLinks(args).refused;
-		if (refused !== undefined) return refused;
 		if (args.artifacts === undefined) return undefined;
 		const given = ids(args);
 		if (!Array.isArray(args.artifacts) || given.length !== args.artifacts.length)
@@ -70,7 +77,10 @@ export const artifacts: MessagePart = {
 	},
 	prepare: async (args, api, ctx, { to }) => {
 		const given = ids(args);
-		const links = artifactLinks(args).ids;
+		// the text's links are read here, not in `refuse`, so the parser loads only for a text that may need it
+		const linked = await artifactLinks(args);
+		if (linked.refused !== undefined) return linked.refused;
+		const links = linked.ids;
 		if (given.length === 0 && links.length === 0) return undefined;
 		const chat = Number(api.conversationId);
 		const library = (await api.snapshot(Artifacts, ctx))?.artifacts ?? {};
