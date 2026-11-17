@@ -165,12 +165,12 @@ harness.resume();
 const web = { gateway: "web", peer: OWNER };
 /** How many releases and Turns are still live. */
 async function settledReleases(): Promise<number> {
-	const graph = await harness.taskGraph(context);
+	const graph = await harness.watchTaskGraph(context);
 	try {
 		return Object.values(graph.value.tasks).filter((node) => node.kind === RELEASE || node.kind === "banda.turn")
 			.length;
 	} finally {
-		graph.dispose();
+		await graph.stop();
 	}
 }
 

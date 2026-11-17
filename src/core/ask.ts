@@ -730,7 +730,8 @@ export function effect<P extends TSchema>(asking: Asking, tool: EffectTool<P>): 
 		replay: "safe",
 		// effects leave the box in the order the model wrote them, each checked against the permissions as it starts
 		executionMode: "sequential",
-		execute: async (called, api, ctx) => running(called, await api.memo("key", crypto.randomUUID(), ctx), api, ctx),
+		execute: async (called, api, ctx) =>
+			running(called as Static<P>, await api.memo("key", crypto.randomUUID(), ctx), api, ctx),
 	} as ToolRegistration<P>) as ToolRegistration;
 }
 

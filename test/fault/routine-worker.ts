@@ -135,9 +135,9 @@ if ((await harness.snapshot(Accepted, context))?.files[routinePath(BRIEF)] === u
 	);
 
 const idle = async () => {
-	const graph = await harness.taskGraph(context);
+	const graph = await harness.watchTaskGraph(context);
 	const busy = Object.values(graph.value.tasks).some((task) => task.kind !== "banda.routine");
-	graph.dispose();
+	await graph.stop();
 	return !busy;
 };
 while (!(await idle())) await new Promise((r) => setTimeout(r, 5));

@@ -206,9 +206,9 @@ const activity = async (harness: Harness, routine: string) =>
 
 const idle = (harness: Harness) =>
 	until(async () => {
-		const graph = await harness.taskGraph(context);
+		const graph = await harness.watchTaskGraph(context);
 		const busy = Object.values(graph.value.tasks).some((task) => task.kind !== "banda.routine");
-		graph.dispose();
+		await graph.stop();
 		return !busy;
 	});
 
@@ -381,9 +381,9 @@ describe("Routines", () => {
 		s.clock.now += 35 * MINUTE;
 		await new Promise((r) => setTimeout(r, 100));
 		expect(await wakes(harness)).toEqual([]);
-		const graph = await harness.taskGraph(context);
+		const graph = await harness.watchTaskGraph(context);
 		expect(Object.values(graph.value.tasks).filter((task) => task.kind === "banda.routine")).toEqual([]);
-		graph.dispose();
+		await graph.stop();
 		await resume(harness, s.core.reconcile, s.clock.now);
 		await until(async () => (await wakes(harness)).length === 1);
 		await idle(harness);
@@ -441,11 +441,11 @@ describe("Pause", () => {
 						await s.core.receive(harness, { id: "m1", origin: { gateway: "fake", peer: OWNER }, text: "hi" });
 					await pause(harness, s.core.reconcile, s.clock.now);
 					const live = async () => {
-						const graph = await harness.taskGraph(context);
+						const graph = await harness.watchTaskGraph(context);
 						const tasks = Object.values(graph.value.tasks).filter(
 							(task) => !task.background || task.kind === "banda.routine",
 						);
-						graph.dispose();
+						await graph.stop();
 						return tasks;
 					};
 					await until(async () => (await live()).length === 0);

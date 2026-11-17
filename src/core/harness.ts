@@ -1008,8 +1008,9 @@ export function defineHarnesses(options: HarnessOptions) {
 				};
 				// the owner's notes, Stop and answers, as the record changes: watched from before the harness starts
 				const watch = await runtime.watchDoc(Harnesses, ctx);
-				watch?.start(async (doc) => {
-					const session = doc?.sessions[id];
+				watch?.start(async (call) => {
+					if (call.kind !== "value") return;
+					const session = call.value?.sessions[id];
 					if (session === undefined) return;
 					// everything is taken before the first await: watch callbacks overlap, and the turn may end meanwhile
 					if (session.stop === true && !cancelled) {

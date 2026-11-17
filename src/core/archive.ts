@@ -67,13 +67,13 @@ export async function stopArchived(harness: Harness, ctx: Context = context): Pr
 	}, ctx);
 	if (archived.size === 0) return;
 	const mine = new Set(chats);
-	const graph = await harness.taskGraph(ctx);
+	const graph = await harness.watchTaskGraph(ctx);
 	const nodes = Object.values(graph.value.tasks).filter(
 		(node) =>
 			((node.kind === "banda.admit" || node.kind === RELEASE) && mine.has(Number(node.conversationId))) ||
 			node.kind === "banda.group-turn",
 	);
-	graph.dispose();
+	await graph.stop();
 	for (const node of nodes) {
 		const task = await harness.getTask(node.id as TaskId, ctx);
 		if (task === undefined || task.state.status === "terminal") continue;

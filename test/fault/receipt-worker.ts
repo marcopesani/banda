@@ -237,11 +237,11 @@ async function main() {
 	const origin = { gateway: "fake", peer: OWNER, thread: "receipt-recovery" };
 	const web = { gateway: "web", peer: OWNER };
 	const live = async (opened: Harness) => {
-		const graph = await opened.taskGraph(context);
+		const graph = await opened.watchTaskGraph(context);
 		try {
 			return Object.keys(graph.value.tasks).length;
 		} finally {
-			graph.dispose();
+			await graph.stop();
 		}
 	};
 	try {

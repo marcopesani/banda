@@ -9,7 +9,6 @@ import type { Context } from "@earendil-works/chord/context";
 import {
 	AssistantEntry,
 	CompactionEntry,
-	type ConversationHandle,
 	type ConversationId,
 	defineDoc,
 	defineExtension,
@@ -20,6 +19,7 @@ import {
 	type ModelRef,
 	type PromptSection,
 	type Registry,
+	type SettledSubmissionRecord,
 	type TaskId,
 	type ToolExecutionApi,
 	type ToolRegistration,
@@ -77,7 +77,7 @@ export type GroupNotice = { readonly at: number } & (
 async function endOf(
 	tx: Tx,
 	execution: number,
-	settled: Awaited<ReturnType<Awaited<ReturnType<ConversationHandle["submit"]>>["wait"]>>,
+	settled: SettledSubmissionRecord,
 ): Promise<{ readonly failed: string } | { readonly stopped: true } | undefined> {
 	if (settled.status === "unanswered") {
 		if (settled.reason === "aborted") return { stopped: true };
@@ -1046,11 +1046,11 @@ export function defineGroups(options: GroupOptions) {
 		const group = (await harness.snapshot(Groups, ctx))?.groups[room];
 		if (group === undefined) return false;
 		const members = agent === undefined ? group.members : group.members.filter((member) => member === agent);
-		const graph = await harness.taskGraph(ctx);
+		const graph = await harness.watchTaskGraph(ctx);
 		const turns = Object.values(graph.value.tasks).filter(
 			(node) => node.kind === "banda.group-turn" && Number(node.conversationId) === room,
 		);
-		graph.dispose();
+		await graph.stop();
 		for (const node of turns) {
 			const task = await harness.getTask(node.id, ctx);
 			if (task === undefined || task.state.status === "terminal") continue;

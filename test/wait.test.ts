@@ -71,7 +71,7 @@ function setup() {
 		registry.install(
 			defineExtension({ name: "test", tools: [effect("deploy", "unsafe"), effect("publish", "idempotent")] }),
 		);
-		const harness = await openStore(home, { models, registry, now, onReport: (error) => reports.push(error) });
+		const harness = await openStore(home, { models, registry, now, onReport: (report) => reports.push(report) });
 		harness.resume();
 		return harness;
 	};

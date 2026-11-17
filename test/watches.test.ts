@@ -122,11 +122,11 @@ describe("a watch on a pull request", () => {
 		// a look while its last wake's run still goes holds what it sees for that run: wait for the runs first
 		const settled = async (harness: Harness) => {
 			for (;;) {
-				const graph = await harness.taskGraph(context);
+				const graph = await harness.watchTaskGraph(context);
 				const busy = Object.values(graph.value.tasks).some(
 					(task) => task.kind !== "banda.watch" && task.kind !== "banda.routine",
 				);
-				graph.dispose();
+				await graph.stop();
 				if (!busy) return;
 				await new Promise((r) => setTimeout(r, 5));
 			}

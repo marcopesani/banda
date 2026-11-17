@@ -95,9 +95,9 @@ await core.reconcile(harness);
 const settled = async () => {
 	const { routines } = (await harness.snapshot(Routines, context)) ?? { routines: {} };
 	if (!Object.keys(files).every((name) => (routines[name]?.fired ?? START) >= now)) return false;
-	const graph = await harness.taskGraph(context);
+	const graph = await harness.watchTaskGraph(context);
 	const busy = Object.values(graph.value.tasks).some((task) => task.kind !== "banda.routine");
-	graph.dispose();
+	await graph.stop();
 	return !busy;
 };
 for (;;) {

@@ -430,11 +430,11 @@ export async function watchScenario(
 			for (const name of names) if (options.only?.(name, i + 1) ?? true) await core.checkWatch(harness, name, key);
 		}
 		const idle = async () => {
-			const graph = await harness.taskGraph(context);
+			const graph = await harness.watchTaskGraph(context);
 			const busy = Object.values(graph.value.tasks).some(
 				(task) => task.kind !== "banda.watch" && task.kind !== "banda.routine",
 			);
-			graph.dispose();
+			await graph.stop();
 			return !busy;
 		};
 		while (!(await idle())) await new Promise((r) => setTimeout(r, 5));
@@ -662,11 +662,11 @@ export function watchProblems(summary: WatchSummary): string[] {
 /** Until no run (a turn, a send) is live: a look made while its watch's last run goes holds what it sees for it. */
 export async function runsEnded(harness: Harness): Promise<void> {
 	for (;;) {
-		const graph = await harness.taskGraph(context);
+		const graph = await harness.watchTaskGraph(context);
 		const busy = Object.values(graph.value.tasks).some(
 			(task) => task.kind !== "banda.watch" && task.kind !== "banda.routine",
 		);
-		graph.dispose();
+		await graph.stop();
 		if (!busy) return;
 		await new Promise((r) => setTimeout(r, 5));
 	}
