@@ -13,6 +13,7 @@ import { Type } from "@earendil-works/pi-ai";
 import type { JsonObject } from "@earendil-works/pi-durable";
 import { ARTIFACT_ID, ARTIFACT_SCHEME, type Artifact, Artifacts, quoted } from "../artifacts.ts";
 import { markdownLinks } from "../markdown-links.ts";
+import { callsOfRun } from "../runs.ts";
 import type { MessagePart } from "./part.ts";
 
 /** At most this many cards in one message. */
@@ -106,8 +107,9 @@ export const artifacts: MessagePart = {
 
 /**
  * Of `shown`, each `<id>:<n>` a publish of this chat drew in the run this call is in, counted as the app counts runs:
- * from the items it draws in a chat (`callRuns`), from the room's turns in a group member's (`runsOf`). Read only when
- * one of this chat's publishes made a shown version.
+ * from the items it draws in a chat (`chatRunEntry`), from the room's turns in a group member's (`groupRunEntry`). Read
+ * only when one of this chat's publishes made a shown version, and then once for the whole message, back only to the
+ * start of this call's run (`callsOfRun`).
  */
 async function drawnThisRun(
 	api: Parameters<NonNullable<MessagePart["prepare"]>>[1],
@@ -124,17 +126,10 @@ async function drawnThisRun(
 	);
 	if (publishes.length === 0) return new Set();
 	// read lazily: the transcript and the groups import the speaking tools that import this part
-	const runs = await api.commit(async (tx) => {
-		if (to === "group") {
-			const { runsOf } = await import("../groups.ts");
-			const calls = await runsOf(tx, chat);
-			return { runs: calls, last: Math.max(0, ...calls.values()) };
-		}
-		const { callRuns } = await import("../../server/transcript.ts");
-		return callRuns(tx, chat);
-	}, ctx);
-	const now = runs.runs.get(api.callId) ?? runs.last;
-	return new Set(
-		publishes.flatMap(({ version, call }) => (call !== api.callId && runs.runs.get(call) === now ? [version] : [])),
-	);
+	const read =
+		to === "group"
+			? (await import("../groups.ts")).groupRunEntry
+			: (await import("../../server/transcript.ts")).chatRunEntry;
+	const { calls } = await api.commit((tx) => callsOfRun(tx, chat, api.callId, read), ctx);
+	return new Set(publishes.flatMap(({ version, call }) => (call !== api.callId && calls.has(call) ? [version] : [])));
 }

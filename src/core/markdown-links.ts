@@ -62,3 +62,33 @@ export function markdownLinks(text: string): MarkdownLinks {
 	});
 	return { links, images, html };
 }
+
+/** What the app draws as written or already as a link: never words to make a link of (a mention). */
+const LITERAL = new Set([
+	"link",
+	"linkReference",
+	"definition",
+	"image",
+	"imageReference",
+	"inlineCode",
+	"code",
+	"html",
+]);
+
+/**
+ * Where `text` holds what the app draws as written or already as a link (code, raw HTML, a link with its words and
+ * its destination, a reference, a definition, an image): `[start, end)` offsets into `text`, read with the same parser.
+ * A link made inside one would nest a link in a link, which markdown draws as neither.
+ */
+export function literalRanges(text: string): readonly (readonly [number, number])[] {
+	const tree = fromMarkdown(text, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+	const ranges: [number, number][] = [];
+	const walk = (node: Nodes) => {
+		const start = node.position?.start.offset;
+		const end = node.position?.end.offset;
+		if (LITERAL.has(node.type) && start !== undefined && end !== undefined) ranges.push([start, end]);
+		else for (const child of children(node)) walk(child);
+	};
+	walk(tree);
+	return ranges;
+}

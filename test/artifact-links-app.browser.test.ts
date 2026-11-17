@@ -5,6 +5,7 @@
  * one removed since stays its words, marked unavailable; any other scheme stays as the markdown makes it safe.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
@@ -12,7 +13,7 @@ import { expect, it } from "vitest";
 import { artifactId } from "../src/core/artifacts.ts";
 import { startDaemon } from "../src/daemon.ts";
 import { ownerToken } from "../src/home.ts";
-import type { ChatRow, Item } from "../src/server/api.ts";
+import type { ChatRow, GroupView, Item } from "../src/server/api.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { skipShippedSkills, tempHome, until, webServer } from "./helpers.ts";
 import { hasChrome, type Page, withPage } from "./smoke/chrome.ts";
@@ -275,6 +276,118 @@ it.skipIf(!hasChrome())(
 						if (shots !== undefined) {
 							await mkdir(shots, { recursive: true });
 							await page.shoot(join(shots, `${width}-same-run.png`));
+						}
+						expect(page.errors()).toEqual([]);
+					});
+			} finally {
+				await server.close();
+			}
+		} finally {
+			await daemon.close();
+		}
+	},
+	120_000,
+);
+
+it.skipIf(!hasChrome())(
+	"in a group's room, a member's artifact link whose words name the member it asks stays a link beside the mention",
+	async () => {
+		const home = await tempHome();
+		await writeFile(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
+		const token = await ownerToken(home);
+		const faux = fauxProvider();
+		const models = createModels();
+		models.setProvider(faux.provider);
+		const results: string[] = [];
+		// the researcher, asked: publishes, then names it in a link whose words mention the writer it asks
+		faux.setResponses(
+			Array.from({ length: 40 }, () => (ctx: { messages: readonly Said[] }) => {
+				const researcher = JSON.stringify(ctx.messages.filter((m) => m.role === "system")).includes("RESEARCHER");
+				const last = ctx.messages.filter((m) => m.role !== "system").at(-1);
+				if (last?.role === "toolResult") {
+					const said = textOf(last.content);
+					results.push(said);
+					const made = /its id is ([0-9a-f]{16})/.exec(said)?.[1];
+					if (made !== undefined)
+						return fauxAssistantMessage(
+							[
+								fauxToolCall("message_group", {
+									text: `[@Writer see](artifact:${made}) before Friday.`,
+									ask: ["Writer"],
+								}),
+							],
+							{ stopReason: "toolUse" },
+						);
+					return fauxAssistantMessage("done");
+				}
+				if (researcher && textOf(last?.content).includes("PUBLISH"))
+					return fauxAssistantMessage([fauxToolCall("publish", { path: "draft.md", title: "Launch post" })], {
+						stopReason: "toolUse",
+					});
+				return fauxAssistantMessage([fauxToolCall("message_group", { text: "On it." })], { stopReason: "toolUse" });
+			}) as never,
+		);
+		const daemon = await startDaemon({ home, port: 0, models, log: () => {}, box: hostBox(home) });
+		const base = `http://127.0.0.1:${daemon.port}`;
+		const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
+			const response = await fetch(`${base}/api${path}`, {
+				...init,
+				headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers },
+			});
+			if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+			return (await response.json()) as T;
+		};
+		try {
+			await skipShippedSkills(daemon.port, token);
+			await until(async () => existsSync(join(home, "workspace", "agents", "sancho.md")));
+			for (const [id, name] of [
+				["researcher", "Researcher"],
+				["writer", "Writer"],
+			] as const)
+				await api(`/agents/${id}`, {
+					method: "PUT",
+					body: JSON.stringify({
+						text: `---\nname: ${name}\ndescription: ${name} things\ntools: [read]\n---\n${name.toUpperCase()} INSTRUCTIONS.\n`,
+						base: null,
+					}),
+				});
+			await writeFile(join(home, "workspace", "draft.md"), "# Launch\n\nFriday.\n");
+			const { room } = await api<{ room: number }>("/groups", {
+				method: "POST",
+				body: JSON.stringify({ members: ["researcher", "writer"] }),
+			});
+			await api(`/groups/${room}/messages`, {
+				method: "POST",
+				body: JSON.stringify({ key: randomUUID(), text: "PUBLISH", mentions: ["researcher"] }),
+			});
+			const posted = await until(async () =>
+				(await api<GroupView>(`/groups/${room}`)).messages.find((m) => m.text.includes("before Friday")),
+			);
+			expect(posted.mentions).toEqual(["writer"]);
+			await until(() => results.includes("Posted to the group. The owner sees “Launch post” as a link in your words."));
+			const server = await webServer({
+				server: { proxy: { "/api": { target: base, changeOrigin: true, headers: { origin: base } } } },
+			});
+			try {
+				for (const width of [390, 1440])
+					await withPage(`${server.origin}/#token=${token}`, { width, height: 900 }, async (page) => {
+						await page.until("document.body.innerText.includes('Sancho')");
+						await page.run(`location.hash = '#/g/${room}'`);
+						await page.until("document.body.innerText.includes('before Friday')");
+						const link = `document.querySelector('[data-artifact-link=""] a')`;
+						await page.until(`${link} !== null`);
+						// the link is whole: the Library's title, opening it; the writer's mention stands before the words
+						expect(await page.run(`[${link}.textContent, ${link}.getAttribute('href')]`)).toEqual([
+							"Launch post",
+							expect.stringMatching(/^#\/artifact\/[0-9a-f]{16}$/),
+						]);
+						expect(await page.run("document.body.innerText.includes('[@Writer see]')")).toBe(false);
+						expect(await page.run("document.body.innerText.includes('Writer see')")).toBe(false);
+						const shots = process.env.BANDA_ARTIFACT_LINK_SHOTS;
+						if (shots !== undefined) {
+							await mkdir(shots, { recursive: true });
+							await page.run(`${link}.scrollIntoView({ block: 'center' })`);
+							await page.shoot(join(shots, `${width}-group-mention.png`));
 						}
 						expect(page.errors()).toEqual([]);
 					});
