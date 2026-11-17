@@ -1005,6 +1005,30 @@ export async function targetOf(tx: Tx, agent: string, name: string, text: string
 }
 
 /**
+ * How watch `id`'s folders stand in the box, outermost first, each by its own entry (never followed): all folders
+ * (`ok`), one not there yet (`missing`: it is made when the file is written), or `trouble`, in words: one that is a
+ * link or a file, or one that could not be looked at, which is never taken for missing. Checked before any commit that
+ * would keep a watch there, so a refusal leaves the store as it was.
+ */
+export async function folderState(
+	env: NonNullable<Parameters<ToolRegistration["execute"]>[1]["env"]>,
+	root: string,
+	id: string,
+	ctx: Context,
+): Promise<"ok" | "missing" | { readonly trouble: string; readonly link?: true }> {
+	for (const folder of watchFolders(id)) {
+		const info = await env.fileInfo(`${root}/${folder}`, ctx);
+		if (!info.ok) {
+			if (info.error.code === "not_found") return "missing";
+			return { trouble: `${folder} cannot be looked at (${info.error.message})` };
+		}
+		if (info.value.kind !== "directory")
+			return { trouble: `${folder} is not a folder (a link, or a file)`, link: true };
+	}
+	return "ok";
+}
+
+/**
  * The watch files of the shared folder and of agent `agent`'s own, by id: each one's text, or null for something there
  * that cannot be read as a watch (not a plain file, a link, too big, not text, unreadable), which is still there and
  * never taken for absent. Nothing is read through a link. A folder that cannot be listed is refused, not taken for empty.
@@ -1020,12 +1044,10 @@ export async function boxWatchTexts(
 		["watches", (name: string) => name],
 		[`agents/${agent}/watches`, (name: string) => watchId({ agent, name })],
 	] as const) {
-		let real = true;
-		for (const each of watchFolders(idOf("x"))) {
-			const info = await env.fileInfo(`${root}/${each}`, ctx);
-			real &&= info.ok && info.value.kind === "directory";
-		}
-		if (!real) continue;
+		// a folder that is a link is read as nothing; one that cannot be looked at is refused, never taken for empty
+		const state = await folderState(env, root, idOf("x"), ctx);
+		if (state === "missing" || (typeof state === "object" && state.link === true)) continue;
+		if (typeof state === "object") throw new WatchRefused(`Not written: ${state.trouble}.`);
 		const listed = await env.listDir(`${root}/${folder}`, ctx);
 		if (!listed.ok) {
 			if (listed.error.code === "not_found") continue;
@@ -2021,6 +2043,11 @@ export function defineWatches(options: WatchesOptions) {
 		const asker = await api.commit((tx) => agentOf(tx, Number(api.conversationId)), ctx);
 		if (asker === undefined) throw new WatchRefused("Not written: this chat runs no agent a watch could belong to.");
 		const boxed = await boxWatchTexts(env, root, asker, ctx);
+		// the folders it may write to, looked at before the commit that would record it: a refusal records nothing
+		const folders = {
+			own: await folderState(env, root, watchId({ agent: asker, name: "x" }), ctx),
+			shared: await folderState(env, root, "x", ctx),
+		};
 		const made = await api.commit(async (tx) => {
 			const agent = await agentOf(tx, Number(api.conversationId));
 			if (agent !== asker) throw new WatchRefused("Not written: this chat runs no agent a watch could belong to.");
@@ -2049,6 +2076,8 @@ export function defineWatches(options: WatchesOptions) {
 								"the owner; it is not yours to replace. Tell the owner.",
 				);
 			const name = chosen.id;
+			const state = watchRef(name)?.agent === undefined ? folders.shared : folders.own;
+			if (typeof state === "object") throw new WatchRefused(`Not written: ${state.trouble}; the owner can fix it.`);
 			const text = watchText({
 				object,
 				...(picked.id === undefined ? {} : { account: picked.id }),

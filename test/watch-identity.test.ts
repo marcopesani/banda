@@ -26,6 +26,7 @@ import { Readings } from "../src/core/objects.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import {
+	Followed,
 	identityName,
 	type Looked,
 	MAX_WATCH_BYTES,
@@ -750,6 +751,93 @@ describe("something at a watch's file that cannot be read as one", () => {
 			const files = (await harness.snapshot(Accepted, context))?.files ?? {};
 			expect(Object.keys(files).filter((each) => each.includes("watches/"))).toEqual([]);
 		} finally {
+			await close();
+		}
+	});
+});
+
+describe("a watch's folder that is a link, or cannot be looked at", () => {
+	const kinds: [string, (workspace: string) => Promise<() => Promise<void>>][] = [
+		[
+			"a link",
+			async (workspace) => {
+				// Curro's watches folder made a link to a folder elsewhere, holding a file of its own
+				await mkdir(join(workspace, "elsewhere"), { recursive: true });
+				await writeFile(join(workspace, "elsewhere/keep.md"), "not a watch\n");
+				await mkdir(join(workspace, "agents/curro"), { recursive: true });
+				await symlink(join(workspace, "elsewhere"), join(workspace, "agents/curro/watches"));
+				return async () => {};
+			},
+		],
+		[
+			"no permission to look",
+			async (workspace) => {
+				await mkdir(join(workspace, "agents/curro"), { recursive: true });
+				await chmod(join(workspace, "agents/curro"), 0o000);
+				return () => chmod(join(workspace, "agents/curro"), 0o755);
+			},
+		],
+	];
+
+	it.each(kinds)("%s: the tool and the owner's follow refuse before any commit; nothing is kept", async (_, make) => {
+		const { watchAs, harness, workspace, box, close } = await setUp(await tempHome());
+		const restore = await make(box.workspace);
+		try {
+			const [a] = CHANNELS;
+			const refused = await watchAs("curro", { object: `slack/${a}`, account: WORK, ask });
+			expect(refused.isError).toBe(true);
+			expect(refused.output[0]?.text).toMatch(/agents\/curro\/watches (is not a folder|cannot be looked at)/);
+			await expect(
+				createWatch(
+					harness,
+					workspace,
+					reconcile,
+					baseline,
+					{ agent: "curro", object: `slack/${a}`, account: WORK },
+					NOW,
+					context,
+				),
+			).rejects.toMatchObject({
+				status: 409,
+				message: expect.stringMatching(/agents\/curro\/watches (is not a folder|cannot be looked at)/),
+			});
+			// no file, record, task, reading or cursor was kept
+			const files = (await harness.snapshot(Accepted, context))?.files ?? {};
+			expect(Object.keys(files).filter((each) => each.includes("watches/"))).toEqual([]);
+			expect((await harness.snapshot(Watches, context))?.watches ?? {}).toEqual({});
+			expect((await harness.snapshot(Followed, context))?.objects ?? {}).toEqual({});
+			await restore();
+			if (_ === "a link") expect(await readdir(join(box.workspace, "elsewhere"))).toEqual(["keep.md"]);
+			else expect(await readdir(join(box.workspace, "agents/curro"))).toEqual([]);
+		} finally {
+			await restore();
+			await close();
+		}
+	});
+
+	it.each(kinds)("%s: the owner's edit of a watch there is refused before any commit", async (_, make) => {
+		const { receipt, harness, workspace, box, close } = await setUp(await tempHome());
+		let restore = async () => {};
+		try {
+			const own = await receipt("otto", { object: `slack/${CHANNELS[0]}`, account: WORK, ask });
+			await accept(harness, workspace, reconcile, baseline, own.id, own.sha, NOW, context);
+			// Curro's folder gets the trouble; Otto's watch moves there by its id, as a store from before would hold it
+			const id = `curro/${watchRef(own.id)?.name}`;
+			const text = await readFile(join(box.workspace, watchPath(own.id)), "utf8");
+			await harness.commit(async (tx) => {
+				const files = (await tx.doc(Accepted)).files;
+				files[watchPath(id)] = { sha: shaOf(text), text, at: NOW };
+				(await tx.doc(Watches)).watches[id] = { agent: "curro", since: NOW, sha: shaOf(text) };
+			}, context);
+			restore = await make(box.workspace);
+			const before = await harness.snapshot(Watches, context);
+			await expect(
+				changeWatch(harness, workspace, reconcile, id, { ask: "Something else." }, shaOf(text), NOW, context),
+			).rejects.toMatchObject({ status: 409 });
+			expect((await harness.snapshot(Accepted, context))?.files[watchPath(id)]?.text).toBe(text);
+			expect(await harness.snapshot(Watches, context)).toEqual(before);
+		} finally {
+			await restore();
 			await close();
 		}
 	});

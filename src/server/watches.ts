@@ -32,6 +32,7 @@ import {
 	cannotFollow,
 	DEFAULT_WAKES_A_DAY,
 	Followed,
+	folderState,
 	followed,
 	type Looked,
 	MAX_WATCH_BYTES,
@@ -84,7 +85,8 @@ async function realFolder(workspace: Workspace, folder: string, ctx: Context): P
 	const info = await workspace.env().fileInfo(`${workspace.root}/${folder}`, ctx);
 	if (!info.ok) {
 		if (info.error.code === "not_found") return false;
-		throw info.error;
+		// never taken for missing: what cannot be looked at is refused
+		throw new BadRequest(`${folder} cannot be looked at (${info.error.message}): fix it in the workspace`, 409);
 	}
 	return info.value.kind === "directory";
 }
@@ -509,6 +511,9 @@ export async function changeWatch(
 	const base = box === undefined ? null : shaOf(box.text);
 	if (base !== sha && !(pending?.sha === sha && pending.base === base))
 		throw new BadRequest("it has a change waiting for you to allow it: answer that first", 409);
+	// its folders are looked at before the commit that would keep the edit: a refusal keeps nothing
+	const state = await folderState(workspace.env(), workspace.root, name, ctx);
+	if (typeof state === "object") throw new BadRequest(`${state.trouble}: fix it in the workspace`, 409);
 	let text: string | undefined = file.text;
 	if (change.until !== undefined) text = withUntil(text, change.until);
 	if (change.wakesADay !== undefined && text !== undefined) text = withWakesADay(text, change.wakesADay);
@@ -618,6 +623,11 @@ export async function createWatch(
 	const texts = await boxWatchTexts(workspace.env(), workspace.root, made.agent, ctx).catch((error: unknown) => {
 		throw new BadRequest(error instanceof Error ? error.message.replace(/^Not written: /, "") : String(error), 409);
 	});
+	// the folders it may be kept in, looked at before the commit that would keep it: a refusal keeps nothing
+	const folders = {
+		own: await folderState(workspace.env(), workspace.root, watchId({ agent: made.agent, name: "x" }), ctx),
+		shared: await folderState(workspace.env(), workspace.root, "x", ctx),
+	};
 	const { name, text, sha, before, earlier } = await harness.commit(async (tx) => {
 		if (await isArchived(tx, made.agent))
 			throw new BadRequest(`${await agentWords(tx, made.agent)} is archived: restore it first`, 409);
@@ -643,6 +653,8 @@ export async function createWatch(
 				409,
 			);
 		const name = chosen.id;
+		const state = watchRef(name)?.agent === undefined ? folders.shared : folders.own;
+		if (typeof state === "object") throw new BadRequest(`${state.trouble}: fix it in the workspace`, 409);
 		// one agent follows an object as one account once while that watch lives: following it again starts afresh once
 		// it ended
 		if (chosen.as === "live")
