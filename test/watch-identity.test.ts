@@ -8,7 +8,7 @@
  * the others, and their cards and approvals folded into one.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	createRegistry,
@@ -28,6 +28,7 @@ import { defineCore } from "../src/core/turn.ts";
 import {
 	identityName,
 	type Looked,
+	MAX_WATCH_BYTES,
 	Watches,
 	type WatchReceipt,
 	watchAgent,
@@ -578,7 +579,7 @@ describe("a watch waiting for the owner", () => {
 		}
 	});
 
-	it("calls at once, by every form of the object, while its card's name changes, make one file", async () => {
+	it("calls at once by every form of the object, each batch after its card's name changed, make one file", async () => {
 		const { receipt, harness, box, close } = await setUp(await tempHome());
 		try {
 			const [channel] = CHANNELS;
@@ -588,13 +589,18 @@ describe("a watch waiting for the owner", () => {
 				`slack:channel:slack/${channel}`,
 				`  slack/${channel}  `,
 			];
-			const wrote = await Promise.all([
-				...forms.map((object, i) =>
-					receipt("curro", { object, account: i % 2 === 0 ? WORK : WORK.toLowerCase(), ask }),
-				),
-				carded(harness, channel, "#one").then(() => carded(harness, channel, "#two")),
-			]);
-			const ids = new Set(wrote.flatMap((each) => (each !== undefined && "id" in each ? [each.id] : [])));
+			const batch = (round: number) =>
+				Promise.all(
+					forms.map((object, i) =>
+						receipt("curro", { object, account: i % 2 === 0 ? WORK : WORK.toLowerCase(), ask: `${ask} ${round}` }),
+					),
+				);
+			// the first batch with no card; each next one only once the card's name changed, never racing it
+			const ids = new Set((await batch(0)).map((each) => each.id));
+			await carded(harness, channel, "#one");
+			for (const each of await batch(1)) ids.add(each.id);
+			await carded(harness, channel, "#two");
+			for (const each of await batch(2)) ids.add(each.id);
 			expect(ids.size).toBe(1);
 			expect(
 				(await readdir(join(box.workspace, "agents/curro/watches"))).filter((f) => f.endsWith(".md")),
@@ -687,6 +693,62 @@ describe("a change that would follow something else", () => {
 			);
 			const same = (await views()).find((each) => each.id === own.id);
 			expect(same?.change && "retarget" in same.change ? same.change.retarget : undefined).toBeUndefined();
+		} finally {
+			await close();
+		}
+	});
+});
+
+describe("something at a watch's file that cannot be read as one", () => {
+	const cases: [string, (path: string) => Promise<void>][] = [
+		["not text", (path) => writeFile(path, Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x2d, 0x2d]))],
+		["too big", (path) => writeFile(path, `---\nobject: slack/C0TESTBBB02\n---\n${"x".repeat(MAX_WATCH_BYTES)}\n`)],
+		[
+			"unreadable",
+			async (path) => {
+				await writeFile(path, "---\nobject: slack/C0TESTBBB02\n---\nhidden\n");
+				await chmod(path, 0o000);
+			},
+		],
+		["a folder", (path) => mkdir(path)],
+		["a link", (path) => symlink("/etc/hosts", path)],
+	];
+
+	it.each(cases)("%s: is there, and neither the tool nor the owner's follow writes over it", async (_, make) => {
+		const { watchAs, harness, workspace, box, close } = await setUp(await tempHome());
+		const [a] = CHANNELS;
+		const path = join(box.workspace, watchPath(`curro/${identityName(slackKey(a))}`));
+		const bytes = async () => {
+			const { lstat } = await import("node:fs/promises");
+			const info = await lstat(path);
+			if (!info.isFile()) return info.isDirectory() ? "a folder" : "a link";
+			await chmod(path, 0o600);
+			const read = await readFile(path);
+			return read.toString("base64");
+		};
+		try {
+			await mkdir(join(box.workspace, "agents/curro/watches"), { recursive: true });
+			await make(path);
+			const restore = _ === "unreadable" ? () => chmod(path, 0o000) : async () => {};
+			const before = await bytes();
+			await restore();
+			const refused = await watchAs("curro", { object: `slack/${a}`, account: WORK, ask });
+			expect(refused.isError).toBe(true);
+			expect(refused.output[0]?.text).toContain("holds something that cannot be read as a watch");
+			await expect(
+				createWatch(
+					harness,
+					workspace,
+					reconcile,
+					baseline,
+					{ agent: "curro", object: `slack/${a}`, account: WORK },
+					NOW,
+					context,
+				),
+			).rejects.toMatchObject({ status: 409, message: expect.stringContaining("cannot be read as a watch") });
+			expect(await bytes()).toBe(before);
+			const files = (await harness.snapshot(Accepted, context))?.files ?? {};
+			expect(Object.keys(files).filter((each) => each.includes("watches/"))).toEqual([]);
 		} finally {
 			await close();
 		}

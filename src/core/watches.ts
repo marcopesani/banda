@@ -1004,14 +1004,18 @@ export async function targetOf(tx: Tx, agent: string, name: string, text: string
 	};
 }
 
-/** The watch files of the shared folder and of agent `agent`'s own, by id, as text: none through a link, nor too big. */
+/**
+ * The watch files of the shared folder and of agent `agent`'s own, by id: each one's text, or null for something there
+ * that cannot be read as a watch (not a plain file, a link, too big, not text, unreadable), which is still there and
+ * never taken for absent. Nothing is read through a link. A folder that cannot be listed is refused, not taken for empty.
+ */
 export async function boxWatchTexts(
 	env: NonNullable<Parameters<ToolRegistration["execute"]>[1]["env"]>,
 	root: string,
 	agent: string,
 	ctx: Context,
-): Promise<Map<string, string>> {
-	const out = new Map<string, string>();
+): Promise<Map<string, string | null>> {
+	const out = new Map<string, string | null>();
 	for (const [folder, idOf] of [
 		["watches", (name: string) => name],
 		[`agents/${agent}/watches`, (name: string) => watchId({ agent, name })],
@@ -1023,25 +1027,32 @@ export async function boxWatchTexts(
 		}
 		if (!real) continue;
 		const listed = await env.listDir(`${root}/${folder}`, ctx);
-		if (!listed.ok) continue;
+		if (!listed.ok) {
+			if (listed.error.code === "not_found") continue;
+			throw new WatchRefused(`Not written: ${folder} cannot be read (${listed.error.message}).`);
+		}
 		for (const entry of listed.value) {
 			const name = /^(.+)\.md$/.exec(entry.name)?.[1];
-			if (name === undefined || entry.kind !== "file" || !WATCH_NAME.test(name)) continue;
-			const opened = await env.openBinaryReader(`${root}/${folder}/${entry.name}`, { noFollow: true }, ctx);
-			if (!opened.ok) continue;
-			try {
-				const info = await opened.value.info(ctx);
-				if (!info.ok || info.value.size > MAX_WATCH_BYTES) continue;
-				const bytes = await opened.value.read(0, info.value.size, ctx);
-				if (bytes.ok) out.set(idOf(name), new TextDecoder("utf-8", { fatal: true }).decode(bytes.value));
-			} catch {
-				// not text: no watch
-			} finally {
-				await opened.value.close(ctx);
-			}
+			if (name === undefined || !WATCH_NAME.test(name)) continue;
+			out.set(idOf(name), entry.kind === "file" ? await textOf(`${root}/${folder}/${entry.name}`) : null);
 		}
 	}
 	return out;
+
+	async function textOf(path: string): Promise<string | null> {
+		const opened = await env.openBinaryReader(path, { noFollow: true }, ctx);
+		if (!opened.ok) return null;
+		try {
+			const info = await opened.value.info(ctx);
+			if (!info.ok || info.value.size > MAX_WATCH_BYTES) return null;
+			const bytes = await opened.value.read(0, info.value.size, ctx);
+			return bytes.ok ? new TextDecoder("utf-8", { fatal: true }).decode(bytes.value) : null;
+		} catch {
+			return null;
+		} finally {
+			await opened.value.close(ctx);
+		}
+	}
 }
 
 /**
@@ -1056,8 +1067,11 @@ export async function watchFor(
 	tx: Tx,
 	agent: string,
 	key: string,
-	boxed: ReadonlyMap<string, string>,
-): Promise<{ readonly id: string; readonly as: "live" | "waiting" | "new" } | { readonly taken: string }> {
+	boxed: ReadonlyMap<string, string | null>,
+): Promise<
+	| { readonly id: string; readonly as: "live" | "waiting" | "new" }
+	| { readonly taken: string; readonly unreadable?: true }
+> {
 	const made = watchId({ agent, name: identityName(key) });
 	const { watches } = await tx.doc(Watches);
 	const files = (await tx.doc(Accepted)).files;
@@ -1071,12 +1085,15 @@ export async function watchFor(
 	}
 	const waiting: string[] = [];
 	for (const [id, text] of boxed)
-		if (mine(id) && shaOf(text) !== files[watchPath(id)]?.sha && (await follows(id, text))) waiting.push(id);
+		if (text !== null && mine(id) && shaOf(text) !== files[watchPath(id)]?.sha && (await follows(id, text)))
+			waiting.push(id);
 	const pick = (ids: readonly string[]) => (ids.includes(made) ? made : [...ids].sort()[0]);
 	const id = pick(live) ?? pick(waiting) ?? made;
 	// whatever is at that file, in effect or waiting, must follow this; anything else is not this watch's to replace
+	// something there that cannot be read as a watch is still there: never taken for absent, never written over
+	if (boxed.get(id) === null) return { taken: id, unreadable: true };
 	for (const text of [files[watchPath(id)]?.text, boxed.get(id)])
-		if (text !== undefined && !(await follows(id, text))) return { taken: id };
+		if (typeof text === "string" && !(await follows(id, text))) return { taken: id };
 	return { id, as: live.includes(id) ? "live" : waiting.includes(id) ? "waiting" : "new" };
 }
 
@@ -2025,8 +2042,11 @@ export function defineWatches(options: WatchesOptions) {
 			const chosen = await watchFor(tx, agent, key, boxed);
 			if ("taken" in chosen)
 				throw new WatchRefused(
-					`Not written: ${watchPath(chosen.taken)} holds a watch on something else, in effect or waiting for the ` +
-						"owner; it is not yours to replace. Tell the owner.",
+					chosen.unreadable === true
+						? `Not written: ${watchPath(chosen.taken)} holds something that cannot be read as a watch; it is not ` +
+								"yours to replace. Tell the owner."
+						: `Not written: ${watchPath(chosen.taken)} holds a watch on something else, in effect or waiting for ` +
+								"the owner; it is not yours to replace. Tell the owner.",
 				);
 			const name = chosen.id;
 			const text = watchText({

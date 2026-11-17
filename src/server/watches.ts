@@ -28,6 +28,7 @@ import {
 	ALLOWED_KEPT,
 	acceptedWatch,
 	accountFor,
+	boxWatchTexts,
 	cannotFollow,
 	DEFAULT_WAKES_A_DAY,
 	Followed,
@@ -613,7 +614,10 @@ export async function createWatch(
 	const accepted = (await harness.snapshot(Accepted, ctx))?.files ?? {};
 	if (!activeAgents(accepted).includes(made.agent)) throw new BadRequest(`there is no agent named ${made.agent}`, 404);
 	const boxed = (await watchFiles(workspace, ctx)).files;
-	const texts = new Map([...boxed].flatMap(([id, file]) => ("text" in file ? [[id, file.text] as const] : [])));
+	// the agent's and the shared files as the tool reads them: what cannot be read as a watch is still there
+	const texts = await boxWatchTexts(workspace.env(), workspace.root, made.agent, ctx).catch((error: unknown) => {
+		throw new BadRequest(error instanceof Error ? error.message.replace(/^Not written: /, "") : String(error), 409);
+	});
 	const { name, text, sha, before, earlier } = await harness.commit(async (tx) => {
 		if (await isArchived(tx, made.agent))
 			throw new BadRequest(`${await agentWords(tx, made.agent)} is archived: restore it first`, 409);
@@ -632,7 +636,12 @@ export async function createWatch(
 		const key = readingKey(picked.account, refKey(found.ref, found.connection.objects ?? {}));
 		const chosen = await watchFor(tx, made.agent, key, texts);
 		if ("taken" in chosen)
-			throw new BadRequest(`${watchPath(chosen.taken)} holds a watch on something else: it is not replaced`, 409);
+			throw new BadRequest(
+				chosen.unreadable === true
+					? `${watchPath(chosen.taken)} holds something that cannot be read as a watch: it is not replaced`
+					: `${watchPath(chosen.taken)} holds a watch on something else: it is not replaced`,
+				409,
+			);
 		const name = chosen.id;
 		// one agent follows an object as one account once while that watch lives: following it again starts afresh once
 		// it ended
