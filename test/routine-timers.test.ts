@@ -405,7 +405,8 @@ describe("Routines", () => {
 		await s.allow(harness, "tea", "---\ndescription: Tea\nevery: 5m\n---\nGo.");
 		const second = (await harness.snapshot(Routines, context))?.routines.tea?.task;
 		expect(second).not.toBe(first);
-		expect((await harness.getTask(first as never, context))?.state.status).toBe("terminal");
+		// aborted: its end is a commit of its own, published after this one
+		await until(async () => (await harness.getTask(first as never, context))?.state.status === "terminal");
 		s.clock.now += 5 * MINUTE;
 		await until(async () => (await wakes(harness)).length === 1);
 		await harness.commit(async (tx) => {
