@@ -5,3 +5,6 @@ export const agentId = (name: string): string =>
 		.normalize("NFKD")
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
+
+/** The lead: every gateway's new chats run it unless the owner picks another. */
+export const LEAD = "sancho";

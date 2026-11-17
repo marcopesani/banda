@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useContext } from "react";
 import { cn } from "@/lib/cn";
+import { LEAD } from "../../../src/core/agent-id.ts";
 import { defaultAvatarFace } from "../../../src/core/avatar-face.ts";
 import { DEFAULT_WAKES_A_DAY } from "../../../src/core/watch-limits.ts";
 import { actOnRoutine } from "../areas/routines.ts";
@@ -207,7 +208,7 @@ function ChangeLine({ who, segment }: { who: Who; segment: Extract<Segment, { ki
 /** An agent's name as the app says it, by its id: the lead's is the companion's. */
 function agentNameOf(shell: ReturnType<typeof useShell>, id: string): string {
 	const accepted = shell.agents.find((view) => view.accepted?.agent?.id === id)?.accepted?.agent;
-	if (id === "sancho") return shell.companion?.name ?? accepted?.name ?? "Sancho";
+	if (id === LEAD) return shell.companion?.name ?? accepted?.name ?? "Sancho";
 	return accepted?.name ?? id;
 }
 

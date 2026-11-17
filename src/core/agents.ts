@@ -19,6 +19,7 @@ import {
 	type ModelRef,
 	type Tx,
 } from "@earendil-works/pi-durable";
+import { LEAD } from "./agent-id.ts";
 import { type AvatarFace, readAvatarFace, writeAvatarFace } from "./avatar-face.ts";
 import { DEFAULT_FACE, DEFAULT_NAME, DEFAULT_PERSONALITY, type StoredAvatarFace } from "./choices.ts";
 import { Companion, nameLine } from "./companion.ts";
@@ -35,8 +36,8 @@ import {
 } from "./toolsets.ts";
 import { hiddenError, nfc } from "./visible.ts";
 
-/** The lead: every gateway's new chats run it unless the owner picks another. */
-export const LEAD = "sancho";
+/** The lead (defined beside agent ids, which the app reads too). */
+export { LEAD };
 
 /** An agent's name, which is its file's: lowercase words joined by `-`. */
 export const AGENT_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;

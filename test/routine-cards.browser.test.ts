@@ -1,7 +1,9 @@
 /**
  * A routine's card says what runs, through the app at phone and desktop width: Curro's plain `write` into Sancho's
  * folder is a card in Curro's chat that says Curro asks and Sancho runs it, and allowing it there runs it as Sancho;
- * Sancho's own routine beside a shared one that wakes Sancho too says both will run. `BANDA_SHOTS=<dir>` saves shots.
+ * the lead's write into Curro's folder runs as Curro, with Curro's instructions and none of the lead's; a target archived
+ * before Allow is refused; Sancho's own routine beside a shared one that wakes Sancho too says both will run, and
+ * Curro's beside it (another agent's) does not. `BANDA_SHOTS=<dir>` saves shots.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -71,6 +73,20 @@ async function daemonOn(home: string) {
 		"curro schedules": {
 			tool: "schedule",
 			args: { name: NAME, description: "Curro weekly summary", cron: "30 9 * * *", ask: "CURRO ASK: draft it." },
+		},
+		"sancho writes into curro": {
+			tool: "write",
+			args: {
+				path: "agents/curro/routines/probe2.md",
+				content: "---\ndescription: Probe by Sancho\ncron: 0 5 * * 1\n---\nPROBE2 ASK written by Sancho.\n",
+			},
+		},
+		"sancho writes into curro again": {
+			tool: "write",
+			args: {
+				path: "agents/curro/routines/probe3.md",
+				content: "---\ndescription: Probe three\ncron: 0 4 * * 1\n---\nPROBE3 ASK.\n",
+			},
 		},
 		"curro writes into sancho": {
 			tool: "write",
@@ -178,12 +194,68 @@ for (const width of [390, 1440])
 						expect(probe.system).not.toContain("CURRO INSTRUCTIONS");
 						// Sancho is the lead: its prompt is the lead's
 						expect(probe.system).toContain("You are the owner's lead agent");
+						expect(probe.system).toContain("Your stable agent id is sancho");
 
 						// in Sancho's chat: its own beside the shared one that wakes it too, and the card says both will run
 						await page.run(`location.hash='#/a/sancho'`);
 						await page.until(shows("SANCHO ASK"));
 						await page.until(shows("A shared routine of this name also runs as Sancho: both will run."));
 						await shot("3-sancho-twin-card");
+
+						// Curro's own routine of the name beside the shared one, which runs as Sancho: no twins, no warning
+						await say("curro schedules", "curro");
+						await until(
+							async () => (await routines()).find((each) => each.id === `curro/${NAME}`)?.change !== undefined,
+							30_000,
+						);
+						expect((await routines()).find((each) => each.id === `curro/${NAME}`)?.twins).toBeUndefined();
+						await page.run(`location.hash='#/a/curro'`);
+						await page.until(shows("CURRO ASK"));
+						await page.until(shows("Curro's own routine"));
+						expect(await page.run<boolean>(shows("both will run"))).toBe(false);
+						await shot("4-curro-no-twin");
+
+						// the other way: the lead writes into Curro's folder; its card in Sancho's chat says Curro, and it runs as
+						// Curro, with none of the lead's prompt
+						const pending = (await routines()).find((each) => each.id === `sancho/${NAME}`)?.change as { sha: string };
+						await api(`/routines/sancho/${NAME}/accept`, "POST", { sha: pending.sha });
+						await say("sancho writes into curro", "sancho");
+						await until(
+							async () => (await routines()).find((each) => each.id === "curro/probe2")?.change !== undefined,
+							30_000,
+						);
+						await page.run(`location.hash='#/a/sancho'`);
+						await page.until(shows("PROBE2 ASK"));
+						await page.until(shows("Sancho asks to set up a routine for Curro"));
+						await page.until(shows("Curro's own routine"));
+						await page.until(shows("It wakes Curro on its own, with Curro's instructions and access"));
+						await shot("5-lead-writes-into-curro");
+						await click(page, button("Set it up"));
+						await until(
+							async () => (await routines()).find((each) => each.id === "curro/probe2")?.change === undefined,
+						);
+						await api("/routines/curro/probe2/run", "POST", { key: "probe2" });
+						const probe2 = await until(async () => requests.find((each) => each.text.includes("PROBE2 ASK")), 30_000);
+						expect(probe2.system).toContain("CURRO INSTRUCTIONS");
+						expect(probe2.system).toContain("Your stable agent id is curro");
+						expect(probe2.system).not.toContain("You are the owner's lead agent");
+
+						// its agent archived between the card and Allow: refused, and nothing is accepted
+						await say("sancho writes into curro again", "sancho");
+						const third = await until(
+							async () => (await routines()).find((each) => each.id === "curro/probe3" && each.change),
+							30_000,
+						);
+						const agents = await api<{ accepted?: { agent?: { id: string }; text: string; sha: string } }[]>("/agents");
+						const curro = agents.find((each) => each.accepted?.agent?.id === "curro")?.accepted;
+						if (curro === undefined) throw new Error("Curro is not in effect");
+						const archived = curro.text.replace("---\nCURRO", "state: archived\n---\nCURRO");
+						expect(archived).not.toBe(curro.text);
+						await api("/agents/curro", "PUT", { text: archived, base: curro.sha });
+						await expect(
+							api("/routines/curro/probe3/accept", "POST", { sha: (third.change as { sha: string }).sha }),
+						).rejects.toThrow(/409/);
+						expect((await routines()).find((each) => each.id === "curro/probe3")?.accepted).toBeUndefined();
 					});
 				} finally {
 					await server.close();

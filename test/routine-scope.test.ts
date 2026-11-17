@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	createModels,
@@ -18,6 +18,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createRegistry, type Harness, type SetTimer } from "@earendil-works/pi-durable";
 import { describe, expect, it } from "vitest";
+import { openBox } from "../src/box/box.ts";
 import { Accepted, shaOf } from "../src/core/agents.ts";
 import { retire } from "../src/core/archive.ts";
 import { pauseRoutine } from "../src/core/control.ts";
@@ -35,7 +36,9 @@ import { context, openStore } from "../src/core/store.ts";
 import { defineCore } from "../src/core/turn.ts";
 import { startDaemon } from "../src/daemon.ts";
 import { readDaemonFile } from "../src/home.ts";
+import type { Workspace } from "../src/server/agents.ts";
 import type { ControlView, RoutineRunsPage, RoutineView } from "../src/server/api.ts";
+import { accept, routines } from "../src/server/routines.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { blobStore, echoModels, FAUX_MODEL, FakeGateway, tempHome, until } from "./helpers.ts";
 
@@ -368,6 +371,44 @@ describe("what a routine file's path and text may claim", () => {
 			await started.close();
 		}
 	}, 90_000);
+});
+
+describe("a routine's folders are folders", () => {
+	it("an agent's folder, or the agents folder itself, reached through a link holds no routine of anyone's", async () => {
+		const home = await tempHome();
+		const box = openBox(hostBox(home), () => {});
+		const harness = await openStore(home, { models: echoModels().models, registry: createRegistry() });
+		const workspace: Workspace = { env: () => box.env(), root: box.workspace, tools: () => [], known: () => true };
+		const text = "---\ndescription: Probe\nevery: 1d\n---\nPROBE.\n";
+		const ids = async () => (await routines(harness, workspace, Date.now())).map((each) => each.id).sort();
+		try {
+			const agents = join(box.workspace, "agents");
+			await mkdir(join(agents, "curro", "routines"), { recursive: true });
+			await writeFile(join(agents, "curro", "routines", "probe.md"), text);
+			// an agent's folder that is a link to another's: its routines are that other's alone
+			await symlink(join(agents, "curro"), join(agents, "sancho"));
+			expect(await ids()).toEqual(["curro/probe"]);
+			const reconcile = async () => {};
+			await expect(accept(harness, workspace, reconcile, "sancho/probe", shaOf(text), Date.now())).rejects.toThrow(
+				/changed since you saw it/,
+			);
+			// the agents folder itself a link: no agent's routine is read through it
+			const elsewhere = join(home, "elsewhere");
+			await rename(agents, elsewhere);
+			await symlink(elsewhere, agents);
+			expect(await ids()).toEqual([]);
+			await expect(accept(harness, workspace, reconcile, "curro/probe", shaOf(text), Date.now())).rejects.toThrow(
+				/changed since you saw it/,
+			);
+			expect(
+				Object.keys((await harness.snapshot(Accepted, context))?.files ?? {}).filter((path) =>
+					path.includes("routines"),
+				),
+			).toEqual([]);
+		} finally {
+			await harness.close(context);
+		}
+	});
 });
 
 const MINUTE = 60_000;
