@@ -1,0 +1,83 @@
+# DIAGNOSTIC ONLY, on its own branch: the browser box suite on the computer, with the browser's event order traced.
+name: diag-browser-trace
+
+on:
+  push:
+    branches: [diag/browser-free-write-trace]
+
+permissions:
+  contents: read
+
+jobs:
+  computer-trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      BANDA_TEST_SITE: 11.77.0.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+      - name: Restore the native runtime build
+        id: native-runtime-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: release/cache/computer/runtime
+          key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
+      - run: npm ci
+      - name: Prepare the development computer
+        run: node scripts/microvm-bundle.ts --prepare
+      - name: Keep the native runtime build
+        if: steps.native-runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: release/cache/computer/runtime
+          key: native-runtime-linux-x64-${{ hashFiles('scripts/microvm-runtime.*', 'src/box/microvm-assets.ts') }}
+      # The computer's box image carries no git: the git suite puts one in /tools, as an agent installs it there.
+      - name: Stage git for the computer's /tools
+        run: sh test/fixtures/box-git.sh "$(node -p 'require("./computer/manifest.json").box.ref')" "$RUNNER_TEMP/box-tools"
+      # As the release verifies the computer: this account joins the kvm group, and the suites run in a fresh session
+      # that has it. An ACL on /dev/kvm is not enough on this runner (the release's start diagnostic: the ACL arm's
+      # machine aborts before its relay, the group arm's starts).
+      - name: Give this account the kvm group
+        run: |
+          test -c /dev/kvm
+          getent group kvm
+          sudo -n /usr/sbin/usermod -aG kvm "$(id -un)"
+          sudo -n -u "$(id -un)" -- /usr/bin/env -i PATH=/usr/bin:/bin "$(command -v node)" -e '
+            const { accessSync, constants } = require("node:fs");
+            accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+            console.log("a fresh session opens /dev/kvm; groups:", require("node:child_process").execFileSync("/usr/bin/id", ["-nG"], { encoding: "utf8" }).trim());
+          '
+      - name: Put the stand-in site on a public address routed nowhere
+        run: |
+          sudo ip link add banda-site type dummy
+          sudo ip address add "$BANDA_TEST_SITE/32" dev banda-site
+          sudo ip link set banda-site up
+          node test/fixtures/site-names.ts "$BANDA_TEST_SITE" | sudo tee -a /etc/hosts
+          getent hosts echo.banda-site.example
+          resolvectl query echo.banda-site.example || true
+      - run: mkdir -p "$RUNNER_TEMP/computer-evidence"
+      - name: The browser box suite on the computer, traced, three times
+        run: |
+          fails=0
+          for i in 1 2 3; do
+            sudo -n -u "$(id -un)" -- /usr/bin/env -i \
+              "PATH=$(dirname "$(command -v node)"):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+              "HOME=$HOME" LANG=C.UTF-8 CI=true GITHUB_ACTIONS=true "BANDA_TEST_SITE=$BANDA_TEST_SITE" \
+              "BANDA_TEST_BOX_TOOLS=$RUNNER_TEMP/box-tools" BANDA_TEST_BOX=microvm \
+              "BANDA_TRACE_BROWSER=$RUNNER_TEMP/computer-evidence/trace-$i.log" \
+              npx vitest run --project box test/browser.box.test.ts --reporter=default --reporter=junit --outputFile.junit="$RUNNER_TEMP/computer-evidence/junit-$i.xml" || fails=$((fails+1))
+          done
+          echo "failed iterations: $fails"
+          test "$fails" = 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: computer-trace
+          path: ${{ runner.temp }}/computer-evidence
+          if-no-files-found: ignore

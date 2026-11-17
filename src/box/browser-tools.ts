@@ -38,7 +38,7 @@ import { covering } from "../core/permissions.ts";
 import { addressWords, bodyFields, bodyWords, headersWords } from "../core/request-words.ts";
 import { context } from "../core/store.ts";
 import { type Ask, answer, liveWaits, type WaitResult } from "../core/wait.ts";
-import { type Action, type Browser, type PageWrite, Refused, Taken } from "./browser.ts";
+import { type Action, type Browser, type PageWrite, Refused, Taken, trace } from "./browser.ts";
 
 /** Where a key a page showed is kept: as a connection's key, or as a credential the proxy sets for a host. */
 export type KeyPlace =
@@ -329,6 +329,7 @@ export function browserTools(options: BrowserToolOptions): ToolRegistration[] {
 					free = write;
 					break;
 				}
+			trace("releaseFree:round", { chat, round, free: free?.id });
 			if (free === undefined) break;
 			const what = `${free.method} ${addressWords(free.url)}`;
 			try {

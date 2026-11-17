@@ -19,7 +19,21 @@
  *   the owner typed into included; a key the page shows is a handle only the daemon can turn into its value.
  */
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { Cdp, CdpError, type CdpEvent } from "./cdp.ts";
+
+// DIAGNOSTIC ONLY (diag/browser-free-write-trace): the order of what the browser saw, to a file CI keeps.
+const TRACE = process.env.BANDA_TRACE_BROWSER;
+const t0 = Date.now();
+export const trace = (...parts: unknown[]) => {
+	if (TRACE === undefined || TRACE === "") return;
+	try {
+		appendFileSync(
+			TRACE,
+			`${String(Date.now() - t0).padStart(7)} ${parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p))).join(" ")}\n`,
+		);
+	} catch {}
+};
 import {
 	type AxNode,
 	type Element,
@@ -415,10 +429,20 @@ export function openBrowser(options: BrowserOptions): Browser {
 		const document = p.resourceType === "Document";
 		const headers = Object.entries(request.headers);
 		const withCookies = headers.some(([name]) => name.toLowerCase() === "cookie");
+		trace("guard:start", {
+			chat: s.chat,
+			id,
+			net: p.networkId,
+			method: request.method,
+			url: request.url,
+			type: p.resourceType,
+			withCookies,
+		});
 		const target =
 			options.sessionAt === undefined
 				? undefined
 				: await options.sessionAt(s.chat, request.url, withCookies ? await cookiesAt(s, request.url) : []);
+		trace("guard:sessionAt", { id, target });
 		const allowed = target !== undefined && (target.allowed || s.allowing === target.site);
 		if (target !== undefined && document && !allowed) {
 			// a page of a signed-in site this task did not allow: stopped where it stands, and told
@@ -439,6 +463,7 @@ export function openBrowser(options: BrowserOptions): Browser {
 			}
 		}
 		if (READS.has(request.method.toUpperCase())) {
+			trace("guard:read-continue", { id });
 			await s.cdp.send("Fetch.continueRequest", { requestId: id, ...stampOf(s, headers) }, s.page);
 			return;
 		}
@@ -466,6 +491,14 @@ export function openBrowser(options: BrowserOptions): Browser {
 			cookies: cookiesAt(s, request.url),
 		};
 		s.writes.set(write.id, write);
+		trace("guard:held", {
+			chat: s.chat,
+			write: write.id,
+			id,
+			net: network,
+			page: write.page,
+			inflight: [...s.inflight],
+		});
 		if (navigation)
 			void s.cdp.send("Fetch.failRequest", { requestId: id, errorReason: "Aborted" }, s.page).catch(() => undefined);
 		return;
@@ -473,6 +506,25 @@ export function openBrowser(options: BrowserOptions): Browser {
 
 	const onEvent = (s: Session, event: CdpEvent) => {
 		const p = event.params;
+		if (
+			/^(Fetch\.requestPaused|Network\.(requestWillBeSent|loadingFinished|loadingFailed)|Page\.(frameStartedLoading|frameStoppedLoading|loadEventFired|frameNavigated|domContentEventFired))$/.test(
+				event.method,
+			)
+		)
+			trace("ev", event.method, {
+				chat: s.chat,
+				id: p.requestId,
+				net: p.networkId,
+				url: (p.request as { url?: string } | undefined)?.url ?? (p.frame as { url?: string } | undefined)?.url,
+				method: (p.request as { method?: string } | undefined)?.method,
+				type: p.resourceType ?? p.type,
+				frame: p.frameId ?? (p.frame as { id?: string } | undefined)?.id,
+				parent: (p.frame as { parentId?: string } | undefined)?.parentId,
+				err: p.errorText,
+				control,
+				inflight: s.inflight.size,
+				loading: s.loading,
+			});
 		switch (event.method) {
 			case "Fetch.requestPaused": {
 				const request = p.request as { method: string; url: string; headers: Record<string, string> };
@@ -829,12 +881,31 @@ export function openBrowser(options: BrowserOptions): Browser {
 
 	const settle = async (s: Session, longest = settleMs, signal?: AbortSignal) => {
 		const until = Date.now() + longest;
+		const began = Date.now();
+		trace("settle:start", {
+			chat: s.chat,
+			longest,
+			inflight: [...s.inflight],
+			loading: s.loading,
+			writes: [...s.writes.keys()],
+		});
 		let quiet = 0;
+		let polls = 0;
 		while (Date.now() < until && s.cdp.closed === undefined) {
 			await sleep(100, signal);
 			quiet = s.inflight.size === 0 && !s.loading ? quiet + 1 : 0;
+			if (++polls % 10 === 0)
+				trace("settle:poll", { inflight: [...s.inflight], loading: s.loading, writes: [...s.writes.keys()] });
 			if (quiet >= 4) break;
 		}
+		trace("settle:end", {
+			chat: s.chat,
+			ms: Date.now() - began,
+			quiet: quiet >= 4,
+			inflight: [...s.inflight],
+			loading: s.loading,
+			writes: [...s.writes.keys()],
+		});
 		// the browser's own record of the page: a renderer busy with a navigation it waits on answers nothing
 		const info = await drive(s, signal)
 			.send<{ targetInfo: { title: string; url: string } }>(
@@ -1373,6 +1444,11 @@ export function openBrowser(options: BrowserOptions): Browser {
 		},
 		writes: async (chat) => {
 			const held = [...(session?.writes.values() ?? [])].filter((write) => write.chat === chat);
+			trace("writes", {
+				chat,
+				held: held.map((w) => w.id),
+				all: [...(session?.writes.values() ?? [])].map((w) => [w.id, w.chat, w.url]),
+			});
 			return Promise.all(
 				held.map(async ({ request: _r, network: _n, navigation: _v, secret, cookies, ...write }) => ({
 					...write,
