@@ -25,13 +25,18 @@ export type OAuthServer = {
 	readonly register?: string;
 	/** Where a sign-in by code starts (RFC 8628), when the server offers one. */
 	readonly device?: string;
-	/** What the resource wants (its RFC 9728 metadata, else the file): what an account asks for and is checked against. */
+	/**
+	 * What the resource wants, as its RFC 9728 metadata lists them (else the file names them): what an account asks for
+	 * and is checked against. banda reads the metadata's list and not a 401's `scope` parameter, which MCP's scope
+	 * selection puts first; where the metadata lists none, none is named.
+	 */
 	readonly scopes?: readonly string[];
 	/**
-	 * The authorization server lists `offline_access` among its own `scopes_supported` (RFC 8414): a sign-in that names
-	 * scopes also asks for it, to be given a refresh token (OpenID Connect Core §11; MCP's "Refresh Tokens"). It asks
-	 * for no access to the resource, so it is never one of `scopes`: what fits an account and what the owner picks from
-	 * stay the resource's. The server may still give no refresh token; nothing here promises one.
+	 * `offline_access` is listed by the authorization server among its own `scopes_supported` (RFC 8414), or by the
+	 * resource's metadata: a sign-in that names scopes also asks for it, to be given a refresh token (OpenID Connect
+	 * Core §11; the MCP draft's "Refresh Tokens"). It asks for no access to the resource, so it is not one of `scopes`:
+	 * what fits an account and what the owner picks from stay the resource's. The server may still give no refresh
+	 * token; nothing here promises one.
 	 */
 	readonly offline?: true;
 };
@@ -147,29 +152,8 @@ function endpoint(value: unknown, what: string): string {
 	return url.toString();
 }
 
-/** A scope token (RFC 6749 §3.3). */
-const SCOPE_TOKEN = /^[\x21\x23-\x5b\x5d-\x7e]{1,200}$/;
-
-/**
- * The scopes a 401's `WWW-Authenticate` says the resource needs (RFC 6750 §3; MCP's first source of scopes), when it
- * says any and each is a scope token; else undefined.
- */
-function challengedScopes(header: string): readonly string[] | undefined {
-	const said = /(?:^|[\s,])scope="([^"]*)"/.exec(header)?.[1];
-	const scopes = said?.split(" ").filter((scope) => scope !== "");
-	return scopes === undefined || scopes.length === 0 || !scopes.every((scope) => SCOPE_TOKEN.test(scope))
-		? undefined
-		: [...new Set(scopes)];
-}
-
-/**
- * The resource's metadata (RFC 9728): from the 401's header, else at its well-known place; undefined when none. And the
- * scopes the 401 itself said it needs, when it said any.
- */
-async function resourceMetadata(
-	fetcher: typeof fetch,
-	resource: string,
-): Promise<{ readonly metadata?: Record<string, unknown>; readonly challenged?: readonly string[] }> {
+/** The resource's metadata (RFC 9728): from the 401's header, else at its well-known place; undefined when none. */
+async function resourceMetadata(fetcher: typeof fetch, resource: string): Promise<Record<string, unknown> | undefined> {
 	const probe = await fetcher(resource, {
 		method: "POST",
 		redirect: "error",
@@ -179,7 +163,6 @@ async function resourceMetadata(
 	await probe?.body?.cancel();
 	const header = probe?.headers.get("www-authenticate") ?? "";
 	const named = /resource_metadata="([^"]+)"/.exec(header)?.[1];
-	const challenged = challengedScopes(header);
 	const url = new URL(resource);
 	const candidates = [
 		...(named === undefined ? [] : [new URL(named, resource).toString()]),
@@ -188,9 +171,9 @@ async function resourceMetadata(
 	];
 	for (const candidate of candidates) {
 		const found = await json(fetcher, endpoint(candidate, "resource metadata")).catch(() => undefined);
-		if (found !== undefined) return { metadata: found, ...(challenged === undefined ? {} : { challenged }) };
+		if (found !== undefined) return found;
 	}
-	return challenged === undefined ? {} : { challenged };
+	return undefined;
 }
 
 /** Find where to sign in for `resource` (an MCP server's URL). */
@@ -199,7 +182,7 @@ export async function discover(resource: string, fetcher: typeof fetch = fetch):
 	// its client's row; tool access remains restricted to the scopes in the shipped connection file.
 	const builtIn = Object.values(REST_APIS).find((api) => api.url === resource);
 	if (builtIn !== undefined) return CLIENTS[builtIn.client].server;
-	const { metadata, challenged } = await resourceMetadata(fetcher, resource);
+	const metadata = await resourceMetadata(fetcher, resource);
 	const servers = Array.isArray(metadata?.authorization_servers) ? metadata.authorization_servers : [];
 	const issuer = typeof servers[0] === "string" ? servers[0] : new URL(resource).origin;
 	const at = new URL(endpoint(issuer, "authorization server"));
@@ -222,10 +205,17 @@ export async function discover(resource: string, fetcher: typeof fetch = fetch):
 	const listed = Array.isArray(metadata?.scopes_supported)
 		? metadata.scopes_supported.filter((scope): scope is string => typeof scope === "string")
 		: undefined;
-	// what the resource lists, else what its 401 said it needs: a sign-in that names a scope can carry offline_access
-	const scopes = listed !== undefined && listed.length > 0 ? listed : challenged;
+	// offline_access asks to be renewed, not for access: the resource's own scopes are the rest. A resource that names
+	// it alone keeps it as its one scope, so its sign-in asks exactly what it asked before banda told them apart; so
+	// does a server a shipped client's row signs in to, which asks for renewal its own way.
+	const shipped = Object.values(CLIENTS).some((row) => row.server.issuer === issuer);
+	const own = shipped ? listed : listed?.filter((scope) => scope !== OFFLINE);
+	const scopes = own !== undefined && own.length > 0 ? own : listed;
 	// the authorization server's own list says only whether it renews offline: what to ask for is the resource's
-	const offline = Array.isArray(server.scopes_supported) && server.scopes_supported.includes(OFFLINE);
+	const offline =
+		!shipped &&
+		(listed?.includes(OFFLINE) === true ||
+			(Array.isArray(server.scopes_supported) && server.scopes_supported.includes(OFFLINE)));
 	return {
 		issuer,
 		...(server.authorization_response_iss_parameter_supported === true ? { issuerParameter: true as const } : {}),

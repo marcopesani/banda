@@ -436,10 +436,11 @@ lives inside agents' settings and the app's Settings, never as a screen of its o
   every scope its tools need), so a personal mailbox can read while a work one sends; what an account was given is what
   its credentials record, and a tool it was not given access for is refused in words before any request. Narrowing what
   the definition allows makes the accounts beyond it sign in again. A sign-in outlasts its access token where the server
-  allows: one that names scopes (the resource's metadata's, else those its 401 names) also asks for `offline_access` when
-  the authorization server's own metadata lists it, never as one of the account's scopes; one that names none asks for
-  none, so the server's default grant is never narrowed, and each refresh token the server rotates in replaces the one spent, which is
-  never sent again. One that ran out with nothing to renew it says so and signs in again when the owner asks, never on
+  allows: one that names scopes (those the resource's metadata lists, or its file names; a 401's `scope` is not read)
+  also asks for `offline_access` when the authorization server's or the resource's metadata lists it, never as one of the
+  account's scopes; one that names none asks for none, so the server's default grant is never narrowed. Each refresh
+  token the server rotates in replaces the one spent, which is never sent again. One that ran out with nothing to renew
+  it says so and signs in again when the owner asks, never on
   its own. The owner signs in another at any time; signing out forgets the
   credentials and switches the account off for every agent. Credentials never reach the
   box, a prompt, an entry, the store or a log; what a server echoes of one is hidden.

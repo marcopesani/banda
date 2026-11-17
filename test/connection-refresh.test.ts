@@ -105,7 +105,8 @@ describe("a sign-in asks for a refresh token as its server allows", () => {
 			renews: true,
 		},
 		{
-			// offline_access alone could narrow the default grant to nothing of the resource's, so it is not sent
+			// RFC 6749 §3.3 applies the server's default only when scope is left out: offline_access alone could narrow it to
+			// nothing of the resource's, so it is not sent, and a server that renews only with it gives no refresh token
 			server: "names no scopes anywhere and renews only with offline_access: none is asked, so none is given",
 			options: { scopes: [], authScopes: ["offline_access"], refreshes: "offline" },
 			asked: "",
@@ -118,19 +119,26 @@ describe("a sign-in asks for a refresh token as its server allows", () => {
 			renews: false,
 		},
 		{
-			server: "lists no scopes in its metadata, but its 401 names the one it needs (RFC 6750)",
-			options: { scopes: [], challengeScope: "calendar", authScopes: ["offline_access"], refreshes: "offline" },
-			asked: "calendar offline_access",
+			// banda reads no 401 scope: the challenged one alone could narrow the default grant, with no step-up to widen it
+			server: "lists no scopes but challenges with one: no scope is asked, so its default grant stands",
+			options: { scopes: [], challengeScope: "calendar", authScopes: ["offline_access"], refreshes: "always" },
+			asked: "",
 			renews: true,
 		},
 		{
-			server: "serves no resource metadata, but its 401 names the one it needs",
+			server: "serves no resource metadata but challenges with a scope: none is asked, so none is given",
 			options: {
 				resourceMetadata: false,
 				challengeScope: "calendar",
 				authScopes: ["offline_access"],
 				refreshes: "offline",
 			},
+			asked: "",
+			renews: false,
+		},
+		{
+			server: "names offline_access among its own scopes: asked once, beside them, and never an account's scope",
+			options: { scopes: ["calendar", "offline_access"], refreshes: "offline" },
 			asked: "calendar offline_access",
 			renews: true,
 		},
@@ -160,6 +168,23 @@ describe("a sign-in asks for a refresh token as its server allows", () => {
 		expect(fake.scopesAsked).toEqual(["calendar offline_access"]);
 		expect(stored(s).server.scopes).toEqual(["calendar"]);
 		expect(await shownAccount(s)).toMatchObject({ scopes: ["calendar", "offline_access"] });
+		expect(await shownAccount(s)).not.toHaveProperty("stale");
+		fake.tokens.clear();
+		expect((await read(s)).error).toBe(false);
+		expect(fake.refreshed).toHaveLength(1);
+	});
+
+	it("an account an earlier build kept with offline_access among its scopes still fits and renews", async () => {
+		const { fake, s } = await signedIn({ scopes: ["calendar", "offline_access"], refreshes: "offline" });
+		expect(stored(s).server.scopes).toEqual(["calendar"]);
+		// as a build before offline_access was told apart wrote it: one of the account's scopes, no `offline`
+		const dir = join(s.home, "auth", "connections", "cal");
+		const [account] = readdirSync(dir);
+		const file = join(dir, account as string, "credentials.json");
+		const kept = JSON.parse(readFileSync(file, "utf8")) as { oauth: { server: Record<string, unknown> } };
+		const { offline: _, ...server } = kept.oauth.server;
+		kept.oauth.server = { ...server, scopes: ["calendar", "offline_access"] };
+		writeFileSync(file, JSON.stringify(kept), { mode: 0o600 });
 		expect(await shownAccount(s)).not.toHaveProperty("stale");
 		fake.tokens.clear();
 		expect((await read(s)).error).toBe(false);

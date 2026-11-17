@@ -137,27 +137,32 @@ describe("asking for a refresh token, whatever the server", () => {
 		expect(scopeAsked(server)).toBeNull();
 	});
 
-	it("takes the scope a 401 names when the resource's metadata lists none, and asks offline_access beside it", async () => {
-		const server = await discovery({
-			resourceScopes: null,
-			authScopes: ["offline_access"],
-			challenge: ', scope="files:read files:read"',
-		}).run();
-		expect(server.scopes).toEqual(["files:read"]);
-		expect(scopeAsked(server)).toBe("files:read offline_access");
-		const empty = await discovery({ resourceScopes: [], challenge: ', scope="files:read"' }).run();
-		expect(empty.scopes).toEqual(["files:read"]);
-	});
-
-	it("keeps what the resource's metadata lists over a 401's scope, and ignores a scope that is not one", async () => {
+	it("reads no scope from a 401: a resource whose metadata lists none still names none", async () => {
+		for (const resourceScopes of [null, []]) {
+			const server = await discovery({
+				resourceScopes,
+				authScopes: ["offline_access"],
+				challenge: ', scope="files:read"',
+			}).run();
+			expect(server.scopes).toBeUndefined();
+			expect(scopeAsked(server)).toBeNull();
+		}
 		expect((await discovery({ challenge: ', scope="other"' }).run()).scopes).toEqual(["mcp"]);
-		for (const challenge of [', scope=""', ', scope="a\\b"', ', error_scope="x"'])
-			expect((await discovery({ resourceScopes: null, challenge }).run()).scopes).toBeUndefined();
 	});
 
-	it("asks for offline_access once when the resource names it too", async () => {
-		const server = await discovery({ resourceScopes: ["mcp", "offline_access"], authScopes: ["offline_access"] }).run();
-		expect(scopeAsked(server)).toBe("mcp offline_access");
+	it("keeps offline_access the resource names out of its scopes, and asks it once beside them", async () => {
+		// whether the authorization server lists it or says nothing of its scopes
+		for (const authScopes of [["offline_access"], undefined]) {
+			const server = await discovery({ resourceScopes: ["mcp", "offline_access"], authScopes }).run();
+			expect(server).toMatchObject({ scopes: ["mcp"], offline: true });
+			expect(scopeAsked(server)).toBe("mcp offline_access");
+		}
+	});
+
+	it("asks a resource that names only offline_access for it alone, as before", async () => {
+		const server = await discovery({ resourceScopes: ["offline_access"] }).run();
+		expect(server.scopes).toEqual(["offline_access"]);
+		expect(scopeAsked(server)).toBe("offline_access");
 	});
 
 	it("asks the same for a sign-in by code", async () => {
