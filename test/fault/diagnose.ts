@@ -1,8 +1,11 @@
 /**
- * What a hung fault worker was waiting on: when the sweep's worker timeout sends SIGTERM, print one `DIAG` line to
- * stderr (which the sweep's error carries) and exit. Only kinds, ids, states and times: no text, no home path. It
+ * What a hung fault worker was waiting on: when the sweep's worker timeout sends SIGTERM, write one line of it to
+ * `<home>/diag.json` and exit; `runWorker` adds it to the failure. A file, not stderr: Node's `execFile` destroys the
+ * child's pipes before it sends the timeout's signal. Only kinds, ids, states and times: no text, no paths. It
  * changes nothing the worker does before that signal.
  */
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { type ConversationId, type Harness, LiveDoc, type TaskId } from "@earendil-works/pi-durable";
 import { context as background } from "../../src/core/store.ts";
@@ -15,6 +18,7 @@ const within = <T>(promise: Promise<T>): Promise<T | "timed out"> =>
 
 /** Register before the store opens: `harness` throws (or is undefined) until it has, which the line says. */
 export function diagnoseOnTimeout(
+	home: string,
 	harness: () => Harness | undefined,
 	faults: Faults,
 	clock: () => number,
@@ -33,8 +37,9 @@ export function diagnoseOnTimeout(
 				: report(open, faults, clock, ctx);
 		void line
 			.then(
-				(line) => process.stderr.write(`DIAG ${line}\n`),
-				(error: unknown) => process.stderr.write(`DIAG failed: ${(error as Error).message}\n`),
+				(line) => writeFileSync(join(home, "diag.json"), line),
+				(error: unknown) =>
+					writeFileSync(join(home, "diag.json"), JSON.stringify({ failed: (error as Error).message })),
 			)
 			.finally(() => process.exit(143));
 	});

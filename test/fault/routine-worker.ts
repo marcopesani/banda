@@ -33,6 +33,7 @@ const [home, scheduleJson] = process.argv.slice(2) as [string, string];
 const faults = new Faults(JSON.parse(scheduleJson) as Fault[]);
 // a hung run says what it waited on when the sweep's timeout ends it
 diagnoseOnTimeout(
+	home,
 	() => harness,
 	faults,
 	() => NOW,
