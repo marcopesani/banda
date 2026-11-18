@@ -59,7 +59,14 @@ export function WatchLine({
 }
 
 export type WatchProposalView = {
+	/** The agent that asks: the one whose chat this is. */
 	readonly agent: string;
+	/** The agent it wakes, whose chat what changes lands in: the one whose folder holds it; `agent` when the same. */
+	readonly runsAs?: string | undefined;
+	/** In the shared `watches/` rather than its agent's own folder. */
+	readonly shared?: boolean | undefined;
+	/** Another live watch of the same agent follows the same object as the same account: each wakes on its own. */
+	readonly twin?: boolean | undefined;
 	/** What it follows, as the daemon names it, else the link. */
 	readonly title: string;
 	/** The object drawn inline (its mark, state and linked title), in place of the title's words. */
@@ -85,7 +92,12 @@ export function WatchProposal({
 	onDecline?: () => void;
 }) {
 	const { kind } = watch;
-	const what = kind === "new" ? "follow" : kind === "changed" ? "change how it follows" : "stop following";
+	const runsAs = watch.runsAs ?? watch.agent;
+	const elsewhere = runsAs !== watch.agent;
+	const what =
+		(kind === "new" ? "follow" : kind === "changed" ? "change how it follows" : "stop following") +
+		(elsewhere ? ` for ${runsAs}` : "");
+	const scope = watch.shared === true ? `Shared watch · wakes ${runsAs}` : `${runsAs}'s own watch`;
 	return (
 		<Tile className="flex flex-col gap-3 p-4">
 			<span className="flex flex-col gap-0.5">
@@ -93,7 +105,15 @@ export function WatchProposal({
 					{watch.agent} asks to {what}
 				</span>
 				<span className="text-body font-semibold text-ink [overflow-wrap:anywhere]">{watch.object ?? watch.title}</span>
+				<span className="text-meta text-ink-2" data-watch-scope>
+					{scope}
+				</span>
 			</span>
+			{watch.twin !== true || kind === "removed" ? null : (
+				<p className="text-meta text-ink" role="note" data-watch-twin>
+					Another watch of {runsAs}'s follows this too, as the same account: each wakes on its own.
+				</p>
+			)}
 			{kind === "removed" ? null : (
 				<Facts
 					rows={[
@@ -107,7 +127,7 @@ export function WatchProposal({
 			<p className="text-meta text-ink-2">
 				{kind === "removed"
 					? "It stops looking; what it saw stays in the chat."
-					: `banda reads it on its own and wakes ${watch.agent} with what changed; ${watch.agent} stays quiet when nothing matters.`}
+					: `banda reads it on its own and wakes ${runsAs} with what changed${elsewhere ? `, in ${runsAs}'s chat, not here` : ""}; ${runsAs} stays quiet when nothing matters.`}
 			</p>
 			<span className="flex items-center gap-2">
 				<Button variant={kind === "removed" ? "destructive" : "default"} onClick={onAllow}>

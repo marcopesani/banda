@@ -32,6 +32,17 @@ export type WatchRowView = {
 	readonly behind?: boolean | undefined;
 	/** A change the agent asked for, waiting for the owner: what allowing it does. */
 	readonly waiting?: "set up" | "change" | "stop" | undefined;
+	/**
+	 * The change waiting was not written by the agent's own `watch` tool (a command, another agent writing into its
+	 * folder): nobody may be said to have asked, though allowing it wakes this agent.
+	 */
+	readonly unasked?: boolean | undefined;
+	/** How many other live watches of this agent follow the same object as the same account: each wakes on its own. */
+	readonly twins?: number | undefined;
+	/** It is in the shared `watches/`, not the agent's own folder. */
+	readonly shared?: boolean | undefined;
+	/** The change waiting would make it follow another object or account: what it follows now, and what it would. */
+	readonly retarget?: { readonly from: string; readonly to: string } | undefined;
 	readonly onAllow?: (() => void) | undefined;
 	readonly onDecline?: (() => void) | undefined;
 };
@@ -89,7 +100,7 @@ export function sawWords(watch: WatchView, now: number): string | undefined {
 }
 
 /**
- * Agent `agent`'s watches as its panel's rows, by name: each with what it follows, what ends it, what it last saw read
+ * Agent `agent`'s watches as its panel's rows, by id: each with what it follows, what ends it, what it last saw read
  * at `now`, and a change the agent made waiting for the owner, as it would be; `act` wires the owner's answers.
  */
 export function watchRows(
@@ -115,10 +126,17 @@ export function watchRows(
 							: ("change" as const);
 			const saw = sawWords(watch, now);
 			const until = untilWords(watch);
+			const retarget = change !== undefined && change.kind !== "removed" ? change.retarget : undefined;
+			const said = (target: { readonly name: string; readonly account?: string }) =>
+				target.account === undefined ? target.name : `${target.name} as ${target.account}`;
 			return [
 				{
-					id: watch.name,
-					name: watchTitle(watch),
+					id: watch.id,
+					// a change to what it follows is named by what it follows now; the row says what it would
+					name: retarget === undefined ? watchTitle(watch) : retarget.from.name,
+					...(retarget === undefined ? {} : { retarget: { from: said(retarget.from), to: said(retarget.to) } }),
+					...(watch.shared === true ? { shared: true } : {}),
+					...(watch.twins === undefined || watch.twins.length === 0 ? {} : { twins: watch.twins.length }),
 					service: watch.object?.service,
 					...(watch.object === undefined ? {} : { object: { ref: watch.object.ref } }),
 					...(until === undefined ? {} : { until }),
@@ -137,11 +155,12 @@ export function watchRows(
 						? {}
 						: {
 								waiting,
+								...(change.kind === "removed" || change.asked !== true ? { unasked: true } : {}),
 								...(act === undefined
 									? {}
 									: {
-											onAllow: () => act.allow(watch.name, change.kind === "removed" ? null : (change.sha ?? null)),
-											onDecline: () => act.decline(watch.name),
+											onAllow: () => act.allow(watch.id, change.kind === "removed" ? null : (change.sha ?? null)),
+											onDecline: () => act.decline(watch.id),
 										}),
 							}),
 				},

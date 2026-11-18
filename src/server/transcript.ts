@@ -87,6 +87,7 @@ import {
 	WAKE as WATCH_WAKE,
 	type WatchTroubleData,
 	type WatchWakeData,
+	watchRef,
 } from "../core/watches.ts";
 import type {
 	AgentView,
@@ -234,9 +235,9 @@ export function receiptOf(tool: string, isError: boolean, details: unknown): Rec
 		(receipt.change === "added" || receipt.change === "changed" || receipt.change === "same")
 	) {
 		const { name, sha, change } = receipt;
-		if (kind === "watch") return { kind, name, sha, change };
-		// a receipt with no id is from before agents had folders, when every routine a call wrote was a shared one
+		// a receipt with no id is from before agents had folders, when every file a call wrote was a shared one
 		const id = typeof receipt.id === "string" ? receipt.id : name;
+		if (kind === "watch") return watchRef(id) === undefined ? undefined : { kind, id, name, sha, change };
 		return routineRef(id) === undefined ? undefined : { kind, id, name, sha, change };
 	}
 	return undefined;

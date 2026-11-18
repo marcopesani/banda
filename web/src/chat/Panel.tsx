@@ -598,6 +598,18 @@ function WatchRow({
 						{watch.until === undefined ? "" : `${watch.until} · `}Waiting for you to{" "}
 						{watch.waiting === "set up" ? "set it up" : `${watch.waiting} it`}
 					</span>
+					{watch.retarget === undefined ? null : (
+						<span className="text-meta text-ink [overflow-wrap:anywhere]" data-watch-retarget>
+							Would follow {watch.retarget.to} instead of {watch.retarget.from}
+						</span>
+					)}
+					{watch.unasked === true ? (
+						<span className="text-meta text-danger">
+							{agent} didn't ask for this: it was written{" "}
+							{watch.shared === true ? "in the shared watches" : "in its folder"} some other way.
+							{watch.waiting === "stop" ? "" : ` Allowed, it wakes ${agent}.`}
+						</span>
+					) : null}
 				</span>
 				<span className="flex gap-1.5">
 					<Button variant={watch.waiting === "stop" ? "destructive" : "default"} size="xs" onClick={watch.onAllow}>
@@ -620,7 +632,9 @@ function WatchRow({
 				? "Paused"
 				: watch.behind === true
 					? "Behind"
-					: null;
+					: watch.twins !== undefined
+						? "Followed twice"
+						: null;
 	const failing = watch.failing === true && watch.done !== true;
 	const subline = failing
 		? watch.saw

@@ -462,7 +462,7 @@ function Main() {
 				setFocus((was) => ({ agent: where.id, n: (was?.agent === where.id ? was.n : 0) + 1 }));
 			};
 			const openWatch =
-				editing?.watch === undefined ? undefined : shell.watches?.find((each) => each.name === editing.watch);
+				editing?.watch === undefined ? undefined : shell.watches?.find((each) => each.id === editing.watch);
 			// a routine gone since it was opened (deleted, or its removal allowed) leaves the list
 			const openRoutine =
 				editing?.routine === undefined

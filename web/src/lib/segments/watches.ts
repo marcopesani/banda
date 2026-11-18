@@ -16,7 +16,9 @@ export type WatchCallSegment = {
 	readonly kind: "watchCall";
 	readonly key: string;
 	readonly state: FeedState;
-	/** The watch's name, as the call's receipt names the file it wrote. */
+	/** The watch's id (`<agent>/<name>`, or a shared one's `<name>`), as the call's receipt names the file it wrote. */
+	readonly id?: string;
+	/** Its file's name. */
 	readonly name?: string;
 	readonly sha?: string;
 	readonly change?: Written["change"];
@@ -37,25 +39,39 @@ declare module "./types.ts" {
 	}
 }
 
+/** The workspace file of watch `id`: an agent's own, `agents/<agent>/watches/<name>.md`, or a shared one's. */
+export const watchPathOf = (id: string): string => {
+	const [first, second] = id.split("/");
+	return second === undefined ? `watches/${first}.md` : `agents/${first}/watches/${second}.md`;
+};
+
 /**
- * How watch `name` stands now, for a line whose call wrote `sha` at `since`: waiting for the owner while any change
- * of it waits; done while what the call wrote is in effect, or was allowed; removed when it was taken out of effect
- * after the call; declined otherwise (never allowed).
+ * How watch `id` stands now, for a line whose call wrote `sha` at `since`: waiting for the owner while the change that
+ * waits is what this call wrote (never another, written after it by anyone: that one is not this line's to answer);
+ * done while what the call wrote is in effect, or was allowed; removed when it was taken out of effect after the call;
+ * declined otherwise (never allowed).
  */
 export function watchState(
 	watches: readonly WatchView[],
-	name: string,
+	id: string,
 	removed: { readonly [path: string]: number } | undefined,
 	since = 0,
 	sha?: string,
 ): { state: FeedState; watch?: WatchView } {
-	const watch = watches.find((each) => each.name === name);
-	if (watch?.change !== undefined) return { state: "pending", watch };
+	const watch = watches.find((each) => each.id === id);
+	const change = watch?.change;
+	if (
+		watch !== undefined &&
+		change !== undefined &&
+		change.kind !== "removed" &&
+		(sha === undefined || change.sha === sha)
+	)
+		return { state: "pending", watch };
 	const allowed =
 		watch?.accepted?.watch !== undefined &&
 		(sha === undefined || watch.accepted.sha === sha || watch.allowed?.includes(sha) === true);
 	if (allowed) return { state: "done", watch };
-	const gone = removed?.[`watches/${name}.md`];
+	const gone = removed?.[watchPathOf(id)];
 	if (gone !== undefined && gone >= since) return { state: "removed" };
 	return watch === undefined ? { state: "declined" } : { state: "declined", watch };
 }
@@ -124,7 +140,9 @@ export const watches: Segmenter = {
 			kind: "watchCall",
 			key,
 			state: early ?? (receipt === undefined ? "refused" : "working"),
-			...(receipt === undefined ? {} : { name: receipt.name, sha: receipt.sha, change: receipt.change }),
+			...(receipt === undefined
+				? {}
+				: { id: receipt.id, name: receipt.name, sha: receipt.sha, change: receipt.change }),
 			...(early === "refused" ? { why: refusalWhy(at.result) } : {}),
 			...(at.result?.at === undefined ? {} : { at: at.result.at }),
 		};
@@ -134,15 +152,15 @@ export const watches: Segmenter = {
 	after: (segments, input) => {
 		const last = new Map<string, number>();
 		segments.forEach((segment, i) => {
-			if (segment.kind === "watchCall" && segment.name !== undefined) last.set(segment.name, i);
+			if (segment.kind === "watchCall" && segment.id !== undefined) last.set(segment.id, i);
 		});
 		return segments.flatMap((segment, i): Segment[] => {
 			if (segment.kind !== "watchCall") return [segment];
-			if (segment.name === undefined) return [{ ...segment, state: settled(segment.key, segment.state, input) }];
-			if (last.get(segment.name) !== i) return [];
+			if (segment.id === undefined) return [{ ...segment, state: settled(segment.key, segment.state, input) }];
+			if (last.get(segment.id) !== i) return [];
 			const { watches, removed } = input.context;
 			if (watches === undefined) return [segment];
-			return [{ ...segment, ...watchState(watches, segment.name, removed, segment.at, segment.sha) }];
+			return [{ ...segment, ...watchState(watches, segment.id, removed, segment.at, segment.sha) }];
 		});
 	},
 	shown: (segment) => (segment.kind === "watchCall" ? [watchCallWords(segment)] : undefined),

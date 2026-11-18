@@ -193,7 +193,7 @@ describe("a watch on a Slack channel", () => {
 });
 
 describe("a walk held on a Slack channel", () => {
-	it("a walk read for another object or account is never gone on from: the look starts afresh", async () => {
+	it("a walk or a cursor read for another object or account is never gone on from: the look starts afresh", async () => {
 		const seen: WatchRecord[] = [];
 		const summary = await follow(
 			CHANNEL_REF,
@@ -214,7 +214,10 @@ describe("a walk held on a Slack channel", () => {
 		// the second look began a walk of its own, one page in, not the third page of the walk it found
 		expect(seen[2]?.pages?.history?.items).toHaveLength(15);
 		expect(summary.record.pages).toBeUndefined();
-		expect(summary.wakes).toHaveLength(1);
+		// and its cursor was on the other object's readings: it starts from a baseline of this one, so what came before
+		// that baseline is no change, never a diff across two objects
+		expect(seen[2]?.seen).toBeUndefined();
+		expect(summary.wakes).toHaveLength(0);
 	}, 60_000);
 
 	it("a walk whose page keeps failing for an hour stops asking from its cursor and merges with a gap", async () => {

@@ -60,7 +60,8 @@ The words the rules lean on:
 - **group**: a chat with several agents as equal participants; its shared message history is the context they receive.
 - **routine**: a file in its agent's `agents/<agent>/routines/`, or the shared `routines/`, that wakes its agent on a
   timer.
-- **watch**: a file in `watches/` that wakes its agent when an object in a connection changes, until what ends it.
+- **watch**: a file in its agent's `agents/<agent>/watches/`, or the shared `watches/`, that wakes its agent when an
+  object in a connection changes, until what ends it.
 - **event**: a routine's or a watch's wake as the chat shows it: what fired or what changed, and when, before the
   agent's reply.
 - **connection**: a service the band can work with (GitHub, mail, a calendar); an **account** is one sign-in to it
@@ -93,7 +94,7 @@ The words the rules lean on:
 | **Draft** | an effect leaving the box, stored whole and shown for approval; approved, it runs exactly as stored, once |
 | **Permission** | a stored approval with a scope; an effect within an open permission runs without asking |
 | **Routine** | `agents/<agent>/routines/<name>.md` (its agent's own) or `routines/<name>.md` (shared) in the workspace: when it runs (a timer) and what it asks; its task submits those inputs to its agent's chat |
-| **Watch** | `watches/<name>.md` in the workspace: the object it follows, the account it looks with, what ends it and what matters; its task keeps the reading and submits each change to its agent's chat |
+| **Watch** | `agents/<agent>/watches/<name>.md` (its agent's own) or `watches/<name>.md` (shared) in the workspace: the object it follows, the account it looks with, what ends it and what matters; its task keeps the reading and submits each change to its agent's chat |
 | **Connection** | A definition banda ships (`shipped/connections/<name>.json`, one schema), on in a home by a switch: a service's tools, which only read, and its objects; its accounts' credentials stay with the daemon. A server the owner adds by its address is a record in the store |
 | **Harness** | `shipped/harnesses/<name>.md`, or a command line the owner gave: an ACP agent on the owner's computer (or banda's own adapter around one that speaks something else), connected in the owner's code folder, for the agents the owner turns it on for |
 | **Object** | the daemon's rendering of one thing in a connection, read with an account's credentials for the owner's eyes |
@@ -692,11 +693,28 @@ A watch follows one object outside, through a connection, and wakes its agent wh
 it merges, an issue until it closes, a mailbox for what matters. A routine's trigger is a time on someone's wall and
 a Wait blocks a tool call; a watch's trigger is the world, and the world ends it. Like a routine, it is kept whether
 or not the model remembers it.
-- **Watches are files**: `watches/<name>.md`, written by the `watch` tool (a card in its agent's chat the owner
+- **Watches are files**: an agent's own in its folder, `agents/<agent>/watches/<name>.md`, written by the `watch` tool (a card in its agent's chat the owner
   accepts: "Follow banda#142 until merged?") or by the owner from an object's card or the panel, in effect at once;
   the accepted file is what runs. The file names the object (a link the connection recognises), the account it looks
   with and what ends it; its body says what matters and what to do about it, words the agent gets at every wake. The
   store holds only the watch's task: its reading, its health and its wakes.
+- **A watch is what it follows, never what it is called.** Its identity is its agent, the connection, the object as
+  that connection canonically names it (a link, an id and the canonical words for one object are one) and the account
+  it looks with, resolved (named or the agent's one, by the service's id for it, never a credential). Its file's name is
+  its connection and kind and a hash of that identity, nothing a label or card says, so the same object again is the
+  same file, changed, and any other is another, however alike or changed their words; its id, `<agent>/<name>` or a shared one's `<name>`, names it everywhere: the
+  store, its task, its wakes, its cursor, its card, the API and its history. One agent's watch on an object as one
+  account is found among its files in effect and waiting by what each actually follows, never by its name, a shared one
+  included, so asking again never makes a second; a file that follows something else is never written over, by the
+  tool or the owner's follow, whatever its name; a
+  file that comes to follow another object or account starts from a fresh baseline, never a cursor on another's
+  readings. A watch in an agent's folder is that agent's; a shared one is the agent the store recorded for it, else
+  the lead, and is never moved by guessing. A change in a folder its agent's `watch` tool did not write (a command,
+  another agent writing there) is shown as nobody's ask, though allowing it wakes that agent, and one that would follow
+  another object or account names what it follows now and what it would; a card says who asks and
+  whom it wakes, own or shared, and answers only the bytes it showed. A folder that names no active agent wakes
+  nobody: allowing a watch there is refused. A watch's folders are folders, never links: a linked one is read as
+  nothing and written through by no tool. Two live watches of one agent on one object as one account each say so.
 - **A connection says how each kind of object is followed**, in that kind's entry beside the read that fetches it,
   the fields its card shows and the writes that act on it, as data, never code: the further reads a following needs
   (only tools listed under `reads`), how each list in the reading is keyed (comments by id; check runs by name, since
@@ -1000,7 +1018,8 @@ The workspace is the band's folder, in the box: `agents/`, `routines/`, `watches
 the agents work on. The daemon reads it over the box's connection, and the box reaches only the folders explicitly
 mounted into it. The agent writes it and the owner edits it, so the daemon decides when a change takes
 effect:
-- **Before**: `agents/` (each agent's own `routines/` within), `routines/`, `watches/` and skill instructions take
+- **Before**: `agents/` (each agent's own `routines/` and `watches/` within), `routines/`, `watches/` and skill
+  instructions take
   effect once the owner
   accepts the change. Accepting binds the hash of the bytes shown; the daemon keeps the accepted version in the store,
   and prompts and loading read only from there. Until then the accepted version stays in effect, and the tool that made
