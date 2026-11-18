@@ -388,10 +388,7 @@ function HarnessHeaderSample({
 			<Header
 				name={MARA.name}
 				face={MARA.face}
-				state={waiting ? "waiting" : "idle"}
-				doing={waiting ? "Waiting on you · Claude Code" : undefined}
 				phone={phone}
-				onActivity={() => setOpen(true)}
 				delegated={
 					<HarnessMenu
 						count={count}
@@ -576,7 +573,7 @@ export function HarnessSection() {
 			</Section>
 			<Section
 				id="harness-header"
-				note="Coding sessions at work: their count at the right of the header, which opens them. The header says nothing of the work."
+				note="Coding sessions at work: their count at the right of the header, which opens them. Below the name the header says nothing, of the work or of an ask."
 			>
 				<HarnessHeaderSample count={1} />
 				<HarnessHeaderSample count={1} waiting />
