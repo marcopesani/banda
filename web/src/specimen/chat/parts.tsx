@@ -785,7 +785,7 @@ export function Parts() {
 			</Section>
 			<Section
 				id="routine-run"
-				note="A run's line opens its own conversation beneath it, in a box: read only when you open it, and the same parts the chat draws."
+				note="A run's line opens its own conversation beneath it, in a box: read only when you open it, and the same parts the chat draws. The routine's name alone opens the routine."
 			>
 				<div className="flex flex-col gap-6">
 					<Group label="Closed: a run that said something, your own Run now, one still going">
@@ -1032,6 +1032,8 @@ function RunSpecimen({
 	return (
 		<RoutineRun
 			words={words}
+			name="Morning brief"
+			onRoutine={() => {}}
 			time={time}
 			working={working}
 			open={open}

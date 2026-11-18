@@ -17,6 +17,8 @@ export type RunRead = "reading" | "read" | { readonly failed: string } | { reado
 
 export function RoutineRun({
 	words,
+	name,
+	onRoutine,
 	time,
 	working = false,
 	open,
@@ -27,6 +29,9 @@ export function RoutineRun({
 }: {
 	/** The line's words: "Morning brief ran", "You ran Morning brief", "Running Morning brief…". */
 	words: string;
+	/** The routine's name within the words: with `onRoutine`, it alone opens the routine itself; the rest opens the run. */
+	name?: string | undefined;
+	onRoutine?: (() => void) | undefined;
 	time?: string | undefined;
 	/** The run still goes: its words shimmer, as a working line's do. */
 	working?: boolean;
@@ -40,27 +45,49 @@ export function RoutineRun({
 	children?: ReactNode;
 }) {
 	const id = useId();
+	// the routine's name stands apart in the line only when it can open the routine and the words hold it
+	const at = name === undefined || onRoutine === undefined ? -1 : words.indexOf(name);
+	const named = at < 0 ? undefined : name;
+	const before = at < 0 ? words : words.slice(0, at);
+	const after = at < 0 || name === undefined ? "" : words.slice(at + name.length);
+	const said = (text: string) => (text === "" ? null : working ? <Shimmer as="span">{text}</Shimmer> : text);
 	return (
 		<div className="mx-auto flex w-full max-w-[var(--measure)] flex-col items-center gap-2 px-4">
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-controls={id}
-				onClick={() => onOpenChange(!open)}
-				className={cn(
-					"group/run min-w-0 cursor-pointer rounded-field px-1 text-center text-ui text-ink-2 [overflow-wrap:anywhere]",
-					"hover:bg-paper-3 focus-visible:bg-paper-3 focus-visible:outline-none",
-				)}
-			>
-				<CalendarClockIcon aria-hidden="true" className="mr-1.5 inline-block size-3.5 shrink-0 align-[-0.1875rem]" />
-				{working ? <Shimmer as="span">{words}</Shimmer> : words}
-				{time === undefined ? null : <span className="ml-1.5 whitespace-nowrap text-meta text-ink-2">{time}</span>}
-				<ChevronDownIcon
-					aria-hidden="true"
-					// it turns with the box it opens: the same time and curve as `Reveal`
-					className="ml-1 inline-block size-3.5 shrink-0 align-[-0.1875rem] transition-transform duration-[240ms] ease-out group-aria-expanded/run:rotate-180 motion-reduce:transition-none"
+			{/* the whole line opens the run: its button lies under the words, and the routine's name alone stands over it */}
+			<div className="relative min-w-0 rounded-field px-1 text-center text-ui text-ink-2 [overflow-wrap:anywhere] hover:bg-paper-3 has-[[data-run-toggle]:focus-visible]:bg-paper-3">
+				<button
+					type="button"
+					data-run-toggle=""
+					aria-expanded={open}
+					aria-controls={id}
+					aria-label={`${words}: what it did`}
+					onClick={() => onOpenChange(!open)}
+					className="absolute inset-0 cursor-pointer rounded-field focus-visible:outline-none"
 				/>
-			</button>
+				<span className="pointer-events-none relative">
+					<CalendarClockIcon aria-hidden="true" className="mr-1.5 inline-block size-3.5 shrink-0 align-[-0.1875rem]" />
+					{said(before)}
+					{named === undefined ? null : (
+						<button
+							type="button"
+							onClick={onRoutine}
+							className="pointer-events-auto cursor-pointer rounded-field underline decoration-line-soft underline-offset-2 hover:decoration-current focus-visible:bg-paper-3 focus-visible:outline-none"
+						>
+							{named}
+						</button>
+					)}
+					{said(after)}
+					{time === undefined ? null : <span className="ml-1.5 whitespace-nowrap text-meta text-ink-2">{time}</span>}
+					<ChevronDownIcon
+						aria-hidden="true"
+						// it turns with the box it opens: the same time and curve as `Reveal`
+						className={cn(
+							"ml-1 inline-block size-3.5 shrink-0 align-[-0.1875rem] transition-transform duration-[240ms] ease-out motion-reduce:transition-none",
+							open && "rotate-180",
+						)}
+					/>
+				</span>
+			</div>
 			<Reveal open={open} id={id}>
 				<section
 					aria-label={`${words}: what it did`}

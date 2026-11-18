@@ -19,6 +19,8 @@ export function RunLine({
 	chat,
 	entry,
 	words,
+	name,
+	onRoutine,
 	time,
 	who,
 	agent,
@@ -27,6 +29,9 @@ export function RunLine({
 	chat: number;
 	entry: number;
 	words: string;
+	/** The routine's name within the words, and what opens the routine itself. */
+	name?: string | undefined;
+	onRoutine?: (() => void) | undefined;
 	time?: string | undefined;
 	/** The agent whose routine it is: the run's conversation is its own. */
 	who: Who;
@@ -54,6 +59,8 @@ export function RunLine({
 	return (
 		<RoutineRun
 			words={words}
+			name={name}
+			onRoutine={onRoutine}
 			time={time}
 			open={open}
 			onOpenChange={(next) => {

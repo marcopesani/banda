@@ -144,6 +144,8 @@ type CoreSegment =
 			readonly kind: "wake";
 			readonly key: string;
 			readonly text: string;
+			/** The routine's name within `text`, as the line says it. */
+			readonly title?: string;
 			readonly routine?: string;
 			readonly owner?: true;
 			readonly at?: number;
@@ -625,6 +627,7 @@ export function view(
 					item.owner === true
 						? `You ran ${routineTitle(item.routine, item.text)}`
 						: `${routineTitle(item.routine, item.text)} ran`,
+				title: routineTitle(item.routine, item.text),
 				routine: item.routine,
 				...(item.owner === true ? { owner: true as const } : {}),
 				...(item.at === undefined ? {} : { at: item.at }),

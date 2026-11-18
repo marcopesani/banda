@@ -877,6 +877,8 @@ function partOf(
 					chat={chat}
 					entry={Number(segment.key)}
 					words={segment.text}
+					name={segment.title}
+					onRoutine={openRoutine}
 					time={time(segment.at)}
 					who={who}
 					agent={agent}

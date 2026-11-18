@@ -3,7 +3,7 @@
  * provider, no network, nothing outside the temporary home): the owner's routine runs now and speaks; its line in the
  * chat is closed and nothing of the run was read; opened, the app asks which run the line stands for and reads that
  * run's own conversation, which shows the routine's words as the owner's message and what the agent sent; closed
- * again, the box is gone; and the chat stays live meanwhile. At phone and desktop width. `BANDA_RUN_LINE_SHOTS=<dir>` saves a screenshot at each step.
+ * again, the box is gone; the chat stays live meanwhile; and the routine's name in the line opens the routine. At phone and desktop width. `BANDA_RUN_LINE_SHOTS=<dir>` saves a screenshot at each step.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,18 +14,31 @@ import { readDaemonFile } from "../src/home.ts";
 import type { RoutineRunsPage } from "../src/server/api.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { skipShippedSkills, tempHome, until, webServer } from "./helpers.ts";
-import { hasChrome, withPage } from "./smoke/chrome.ts";
+import { hasChrome, type Page, withPage } from "./smoke/chrome.ts";
 
 const SHOTS = process.env.BANDA_RUN_LINE_SHOTS;
 const ASK = "Tell me which pull requests need me, in a line each.";
 const SAID = "2 pull requests need you: #34 has red checks, #35 waits on a review.";
 
 /** The run's line in the chat: the routine's own, never one inside a run's box. */
-const line = `[...document.querySelectorAll('button[aria-controls]')].find((el) => el.getClientRects().length > 0 && el.innerText.includes('Morning brief') && el.closest('[data-routine-run]') === null)`;
+const line = `[...document.querySelectorAll('button[data-run-toggle]')].find((el) => el.getClientRects().length > 0 && el.getAttribute('aria-label').includes('Morning brief') && el.closest('[data-routine-run]') === null)`;
+/** The routine's name in that line: it alone opens the routine itself. */
+const name = `[...(${line}).parentElement.querySelectorAll('button:not([data-run-toggle])')].find((el) => el.innerText.trim() === 'Morning brief')`;
 const box = "document.querySelector('[data-routine-run]')";
 /** The requests the page made for transcript items, as paths under /api. */
 const read =
 	"performance.getEntriesByType('resource').map((one) => one.name.replace(/^.*\\/api/, '')).filter((path) => /^\\/chats\\/\\d+\\/items/.test(path))";
+
+/** Open or close the run as a person does who aims at the chevron: the line's end, clear of the routine's name. */
+async function toggle(page: Page) {
+	await page.until(`${line} !== undefined`);
+	await page.run(`(${line}).scrollIntoView({ block: "center" })`);
+	const point = await page.run<{ x: number; y: number }>(
+		`(() => { const el = ${line}; const r = el.getBoundingClientRect(); const x = r.right - 10, y = r.y + r.height / 2; if (document.elementFromPoint(x, y) !== el) throw new Error("the line's end is covered"); return { x, y }; })()`,
+	);
+	await page.input("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
+	await page.input("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+}
 
 for (const width of [390, 1440])
 	it.skipIf(!hasChrome())(
@@ -98,7 +111,7 @@ for (const width of [390, 1440])
 						expect((await page.run<string[]>(read)).some((path) => path.startsWith(`/chats/${run}/`))).toBe(false);
 						await shot("1-closed");
 
-						await page.click(line);
+						await toggle(page);
 						await page.until(`${box}?.innerText.includes(${JSON.stringify(SAID)}) === true`, 30_000);
 						expect(await page.run(`${line}.getAttribute('aria-expanded')`)).toBe("true");
 						// the routine's words are the owner's message there, and the agent's message follows
@@ -113,15 +126,24 @@ for (const width of [390, 1440])
 						await shot("2-open");
 
 						// the chat on screen stays live with a run open: a second run's line arrives without a reload
-						const lines = `[...document.querySelectorAll('button[aria-controls]')].filter((el) => el.innerText.includes('Morning brief') && el.closest('[data-routine-run]') === null).length`;
+						const lines = `[...document.querySelectorAll('button[data-run-toggle]')].filter((el) => el.closest('[data-routine-run]') === null).length`;
 						expect(await page.run(lines)).toBe(1);
 						await api("/routines/sancho/morning-brief/run", "POST", { key: "run-2" });
 						await page.until(`${lines} === 2`, 30_000);
 
-						await page.click(line);
+						await toggle(page);
 						await page.until(`${box} === null`, 10_000);
 						expect(await page.run(`${line}.getAttribute('aria-expanded')`)).toBe("false");
 						await shot("3-closed-again");
+
+						// the routine's name alone opens the routine itself, in the agent's panel; the run stays closed
+						await page.click(name);
+						await page.until(
+							"document.querySelectorAll('[data-run]').length > 0 || [...document.querySelectorAll('[aria-label]')].some((el) => el.getClientRects().length > 0 && el.getAttribute('aria-label') === 'Morning brief')",
+							20_000,
+						);
+						expect(await page.run(`${box} === null`)).toBe(true);
+						await shot("4-routine");
 					});
 				} finally {
 					await server.close();
