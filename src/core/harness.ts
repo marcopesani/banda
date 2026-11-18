@@ -10,6 +10,7 @@ import {
 	defineTask,
 	type Harness,
 	type JsonObject,
+	SessionFailed,
 	type TaskId,
 	type Tx,
 } from "@earendil-works/pi-durable";
@@ -1282,18 +1283,27 @@ export function defineHarnesses(options: HarnessOptions) {
 			ctx,
 		);
 		let ended = 0;
-		// each in a commit of its own: a commit reads its tasks before it makes any, and an end makes its agent's turn
+		// each in a commit of its own: a commit reads its tasks before it makes any, and an end makes its agent's turn.
+		// One that fails keeps the others from nothing: its session stays as it was, ended at the next start, and the
+		// log says which and why. The store failing, or the daemon stopping, ends them all alike: nothing commits any more
 		for (const task of open)
-			ended += await harness.commit(async (tx) => {
-				const session = (await tx.doc(Harnesses)).sessions[task];
-				if (session === undefined || session.ended !== undefined) return 0;
-				const found = await tx.task(task as TaskId);
-				if (found !== undefined && found.state.status !== "terminal") return 0;
-				const definition = options.definitions().get(session.harness);
-				killLeftovers(session);
-				await ending(tx, task, "failed", definition?.service ?? session.harness, "banda stopped while it ran");
-				return 1;
-			}, ctx);
+			try {
+				ended += await harness.commit(async (tx) => {
+					const session = (await tx.doc(Harnesses)).sessions[task];
+					if (session === undefined || session.ended !== undefined) return 0;
+					const found = await tx.task(task as TaskId);
+					if (found !== undefined && found.state.status !== "terminal") return 0;
+					const definition = options.definitions().get(session.harness);
+					killLeftovers(session);
+					await ending(tx, task, "failed", definition?.service ?? session.harness, "banda stopped while it ran");
+					return 1;
+				}, ctx);
+			} catch (error) {
+				if (error instanceof SessionFailed || ctx.abortSignal?.aborted === true) throw error;
+				options.log(
+					`coding agents: session ${task} could not end: ${(error as Error).message}; it ends at the next start`,
+				);
+			}
 		return ended;
 	}
 

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { withAbortSignal } from "@earendil-works/chord/context";
 import {
 	createModels,
 	fauxAssistantMessage,
@@ -35,6 +36,8 @@ async function setup() {
 	const logged: string[] = [];
 	/** Called with the newest input's words each time the model is asked. */
 	const asked: { model?: (input: string) => Promise<void>; system?: (words: string) => Promise<void> } = {};
+	/** Sessions (by task) whose wake fails, as a fault at that boundary: thrown before the core is asked. */
+	const faulty = new Set<number>();
 	const core = defineCore({
 		blobs: blobStore(),
 		gateway: () => gateway,
@@ -48,7 +51,10 @@ async function setup() {
 			new Map([
 				["fake", { name: "fake", service: "Fake Code", command: process.execPath, args: [FAKE], mode: "acceptEdits" }],
 			]),
-		followUp: (tx, chat, input) => core.wake(tx, chat, input),
+		followUp: (tx, chat, input) => {
+			if (faulty.has(Number(input.key.replace("harness:", "")))) throw new Error(`the wake for ${input.key} failed`);
+			return core.wake(tx, chat, input);
+		},
 		log: (line) => logged.push(line),
 		openMs: 20_000,
 	});
@@ -99,6 +105,7 @@ async function setup() {
 		gateway,
 		logged,
 		asked,
+		faulty,
 		folder,
 		run: Number(run),
 		agent: ran.agent,
@@ -261,6 +268,79 @@ describe("a start after a daemon died", () => {
 		expect(await made.reconcile(harness, context)).toBe(4);
 		for (const task of Object.values(LEFT)) expect(await session(task)).toMatchObject({ state: "failed" });
 		expect(logged).toEqual([`coding agents: session ${LEFT.gone} ended with nobody to tell in chat ${gone}`]);
+	});
+});
+
+describe("a start after a daemon died, one of the sessions it left failing to end", () => {
+	/** What a killed daemon leaves: a session recorded as running, its task gone. */
+	const left = (chat: number, agent: string, folder: string) => ({
+		chat,
+		agent,
+		harness: "fake",
+		folder,
+		prompt: "say first",
+		state: "working" as const,
+		at: Date.now(),
+		steps: [{ kind: "asked" as const, text: "say first" }],
+		dropped: 0,
+		notes: [],
+	});
+	const endedIn = async (harness: Awaited<ReturnType<typeof setup>>["harness"], chat: number) =>
+		(
+			await (await harness.conversation(chat as ConversationId, context))!.entries(
+				{ order: "ascending" },
+				1000,
+				undefined,
+				context,
+			)
+		).items
+			.filter((entry) => entry.kind === HARNESS_ENDED)
+			.map((entry) => (entry.data as { task: number }).task);
+
+	it("ends the others, says which one it could not, and ends that one at the next start, each waking its agent once", async () => {
+		const { harness, made, logged, faulty, folder, run, agent, agentChat, session } = await setup();
+		await until(async () => (await harness.snapshot(AgentChats, context))?.chats[run] === undefined);
+		// four left sessions; the second one's end fails, as a wake that throws does
+		const LEFT = { first: 999_996, failing: 999_997, run: 999_998, last: 999_999 };
+		await harness.commit(async (tx) => {
+			const doc = await tx.doc(Harnesses);
+			doc.sessions[LEFT.first] = left(agentChat, agent, folder);
+			doc.sessions[LEFT.failing] = left(agentChat, agent, folder);
+			doc.sessions[LEFT.run] = left(run, agent, folder);
+			doc.sessions[LEFT.last] = left(agentChat, agent, folder);
+		}, context);
+		faulty.add(LEFT.failing);
+		expect(await made.reconcile(harness, context)).toBe(3);
+		expect(await session(LEFT.first)).toMatchObject({ state: "failed" });
+		expect(await session(LEFT.run)).toMatchObject({ state: "failed" });
+		expect(await session(LEFT.last)).toMatchObject({ state: "failed" });
+		// the one that failed is as it was: still to end, in its chat
+		expect(await session(LEFT.failing)).toMatchObject({ state: "working", chat: agentChat });
+		expect((await session(LEFT.failing))?.ended).toBeUndefined();
+		expect(logged).toEqual([
+			`coding agents: session ${LEFT.failing} could not end: the wake for harness:${LEFT.failing} failed; it ends at the next start`,
+		]);
+		// the next start ends it, and only it: nothing already ended wakes its agent again
+		faulty.clear();
+		expect(await made.reconcile(harness, context)).toBe(1);
+		expect(await session(LEFT.failing)).toMatchObject({ state: "failed" });
+		expect(await made.reconcile(harness, context)).toBe(0);
+		await until(async () => (await endedIn(harness, agentChat)).length === 3);
+		expect((await endedIn(harness, agentChat)).sort()).toEqual([LEFT.first, LEFT.failing, LEFT.last]);
+		expect(await endedIn(harness, run)).toEqual([LEFT.run]);
+	});
+
+	it("ends none and says so when the daemon is stopping: what is left ends at the next start", async () => {
+		const { harness, made, logged, folder, agent, agentChat, session } = await setup();
+		await harness.commit(async (tx) => {
+			(await tx.doc(Harnesses)).sessions[999_998] = left(agentChat, agent, folder);
+			(await tx.doc(Harnesses)).sessions[999_999] = left(agentChat, agent, folder);
+		}, context);
+		const stopping = withAbortSignal(AbortSignal.abort(new Error("banda is stopping")), context);
+		await expect(made.reconcile(harness, stopping)).rejects.toThrow();
+		expect(await session(999_998)).toMatchObject({ state: "working" });
+		expect(await session(999_999)).toMatchObject({ state: "working" });
+		expect(logged).toEqual([]);
 	});
 });
 
