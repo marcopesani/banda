@@ -47,6 +47,7 @@ import {
 	PullRequestCard,
 } from "../../chat/Object.tsx";
 import { RoutineProposal } from "../../chat/Routine.tsx";
+import { RoutineRun, type RunRead } from "../../chat/RoutineRun.tsx";
 import { VoiceMessage } from "../../chat/Voice.tsx";
 import { Named, WatchLine, WatchProposal } from "../../chat/Watch.tsx";
 import { WorkingLine } from "../../chat/WorkingLine.tsx";
@@ -783,6 +784,38 @@ export function Parts() {
 				</div>
 			</Section>
 			<Section
+				id="routine-run"
+				note="A run's line opens its own conversation beneath it, in a box: read only when you open it, and the same parts the chat draws."
+			>
+				<div className="flex flex-col gap-6">
+					<Group label="Closed: a run that said something, your own Run now, one still going">
+						<div className="flex w-full flex-col gap-3">
+							<RunSpecimen words="Morning brief ran" time="8:00" />
+							<RunSpecimen words="You ran Morning brief" time="12:14" />
+							<RunSpecimen words="Running Morning brief…" working />
+						</div>
+					</Group>
+					<Group label="Open it: nothing was read before; it reads, then shows (try it)">
+						<RunSpecimen words="Morning brief ran" time="8:00" lazy />
+					</Group>
+					<Group label="Reading">
+						<RunSpecimen words="Morning brief ran" time="8:00" open run="reading" />
+					</Group>
+					<Group label="Read: the routine's words as your message, then what it sent; its activity opens from the message, as in a chat">
+						<RunSpecimen words="Morning brief ran" time="8:00" open />
+					</Group>
+					<Group label="Still running: the working line says what it does, and opens its activity">
+						<RunSpecimen words="Running Morning brief…" working open />
+					</Group>
+					<Group label="A run that had nothing to say: the line opens its activity">
+						<RunSpecimen words="You ran Morning brief" time="12:14" open quiet />
+					</Group>
+					<Group label="Could not be read">
+						<RunSpecimen words="Morning brief ran" time="8:00" open run={{ failed: "The run could not be loaded" }} />
+					</Group>
+				</div>
+			</Section>
+			<Section
 				id="watch-items"
 				note="Each change a kind's rules say matters is a line in the chat's own voice, the object drawn as your own references are; the eyes mark following and its end, nothing else. One line of each kind banda ships can follow."
 			>
@@ -965,5 +998,63 @@ function SteerComposer() {
 				))}
 			</ul>
 		</div>
+	);
+}
+
+/** A run's line with its conversation, as the feed will draw it; `lazy` reads only once opened, as the app does. */
+function RunSpecimen({
+	words,
+	time,
+	working = false,
+	open: opened = false,
+	run: given,
+	lazy = false,
+	quiet = false,
+}: {
+	words: string;
+	time?: string;
+	working?: boolean;
+	open?: boolean;
+	run?: RunRead;
+	lazy?: boolean;
+	quiet?: boolean;
+}) {
+	const [open, setOpen] = useState(opened);
+	const [read, setRead] = useState<RunRead>(given ?? (lazy ? "reading" : "read"));
+	return (
+		<RoutineRun
+			words={words}
+			time={time}
+			working={working}
+			open={open}
+			onOpenChange={(next) => {
+				setOpen(next);
+				if (next && lazy && read === "reading") setTimeout(() => setRead("read"), 900);
+			}}
+			run={read}
+			onTryAgain={() => setRead("read")}
+		>
+			{/* the routine's own words open its run as the owner's message: they are what the owner asks each time */}
+			<Run time={time}>
+				<Bubble>Tell me what matters today, in five lines. Skip anything that can wait.</Bubble>
+			</Run>
+			{/* its work is inspected as a chat's is: the working line, or the message's own action, opens the activity */}
+			{quiet ? (
+				<Line className="px-0" onClick={() => {}}>
+					It sent nothing: nothing was worth your attention
+				</Line>
+			) : working ? (
+				<WorkingLine who={[MARA]} text="Reading timetable.md…" onOpen={() => {}} />
+			) : (
+				<Run who={MARA} time={time} compact>
+					<Bubble
+						copy="Two things today: the Lisbon flight leaves at 9:40, and Ana moved the review to 16:00."
+						onActivity={() => {}}
+					>
+						<p>Two things today: the Lisbon flight leaves at 9:40, and Ana moved the review to 16:00.</p>
+					</Bubble>
+				</Run>
+			)}
+		</RoutineRun>
 	);
 }

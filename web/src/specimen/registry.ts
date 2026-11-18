@@ -164,6 +164,13 @@ export const SECTIONS: readonly Entry[] = [
 		sources: ["web/src/chat/Routine.tsx", LINE, EDITABLE],
 	},
 	{
+		id: "routine-run",
+		title: "A routine's run in the chat",
+		group: "chat",
+		status: "proposal",
+		sources: ["web/src/chat/RoutineRun.tsx", LINE],
+	},
+	{
 		id: "watch-items",
 		title: "Watches in the chat",
 		group: "chat",
