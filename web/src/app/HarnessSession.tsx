@@ -257,7 +257,6 @@ export function useHarnessMenu(sessions: readonly HarnessSessionView[], waiting:
 	const now = useNow(open);
 	const nameOf = (one: HarnessSessionView) => known.find((agent) => agent.id === one.agent)?.name;
 	return {
-		open: () => setOpen(true),
 		menu:
 			sessions.length === 0 ? undefined : (
 				<HarnessMenu

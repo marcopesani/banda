@@ -41,7 +41,7 @@ import { ArtifactPart } from "./ArtifactPart.tsx";
 import { whoOf } from "./band.ts";
 import { DraftApproval } from "./DraftApproval.tsx";
 import { useHarnessMenu } from "./HarnessSession.tsx";
-import { chatActivity, harnessActivity } from "./harness-activity.ts";
+import { harnessActivity } from "./harness-activity.ts";
 import { MessageObjects, MessageText } from "./Objects.tsx";
 import { useSkills } from "./Skills.tsx";
 import { noneWorking, workingMembers } from "./working-members.ts";
@@ -129,11 +129,6 @@ export function GroupChat({
 	const working = members.filter((member) => member.state === "working");
 	const executions = row?.executions ?? group?.executions ?? {};
 	const delegated = harnessActivity(shell.harnesses?.sessions ?? [], Object.values(executions));
-	const status = chatActivity(
-		(row?.asking ?? group?.asking ?? []).length ? "waiting" : working.length ? "working" : "idle",
-		undefined,
-		delegated,
-	);
 	// the working line: who works, for as long as it works; a member whose ask is open waits on the owner instead
 	const atWork = workingMembers(
 		since.current,
@@ -147,10 +142,6 @@ export function GroupChat({
 		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
 	});
 	const coding = useHarnessMenu(delegated.sessions, delegated.waiting);
-	const activityTargets = (working.length ? working : members).flatMap((member) => {
-		const chat = executions[member.id];
-		return chat === undefined ? [] : [{ chat, name: member.name, face: member.face, heading: name }];
-	});
 
 	const others = agents
 		.filter((agent) => !all.some((member) => member.id === agent.id))
@@ -178,20 +169,11 @@ export function GroupChat({
 				<Header
 					name={name}
 					faces={all.map(({ id, name, face }) => ({ id, name, face }))}
-					state={status.state}
 					delegated={coding.menu}
 					phone={phone}
-					doing={status.doing}
 					onBack={onBack}
 					panelOpen={panel}
 					onPanel={() => setPanel((open) => !open)}
-					onActivity={
-						status.delegatedPrimary
-							? coding.open
-							: activityTargets.length
-								? () => setActivity(activityTargets)
-								: undefined
-					}
 				/>
 				<Conversation className="flex flex-col">
 					<ConversationContent

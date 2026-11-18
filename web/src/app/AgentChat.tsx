@@ -32,7 +32,7 @@ import { ActivitySheet } from "./Activity.tsx";
 import { FeedView } from "./Feed.tsx";
 import { FACE_STARTER, firstStarters, firstWords } from "./first-words.ts";
 import { useHarnessMenu } from "./HarnessSession.tsx";
-import { chatActivity, harnessActivity } from "./harness-activity.ts";
+import { harnessActivity } from "./harness-activity.ts";
 import { type PendingMessage, settledByAnswer, shownMessages, stillPending } from "./outgoing.ts";
 import { useSkills } from "./Skills.tsx";
 import { useViewContext } from "./view-context.ts";
@@ -102,13 +102,10 @@ export function AgentChat({
 	/** A routine's line was tapped: open the panel on the agent's routines. */
 	onRoutine?: ((name: string) => void) | undefined;
 }) {
-	const state = row?.state === "running" ? "working" : row?.state === "waiting" ? "waiting" : "idle";
-	const [doing, setDoing] = useState<string | undefined>(undefined);
 	const [activity, setActivity] = useState<{ anchor?: number }>();
 	const shell = useShell();
 	const agents = shell.agents;
 	const delegated = harnessActivity(shell.harnesses?.sessions ?? [], row === undefined ? [] : [row.chat]);
-	const status = chatActivity(state, doing, delegated);
 	const coding = useHarnessMenu(delegated.sessions, delegated.waiting);
 	// the lead gets every tool; another agent, what its accepted file names
 	const tools =
@@ -130,14 +127,11 @@ export function AgentChat({
 			<Header
 				name={who.name}
 				face={who.face}
-				state={status.state}
-				doing={status.doing}
 				delegated={coding.menu}
 				phone={phone}
 				panelOpen={panelOpen}
 				onBack={onBack}
 				onPanel={onPanel}
-				onActivity={status.delegatedPrimary ? coding.open : row === undefined ? undefined : () => setActivity({})}
 			/>
 			{coding.details}
 			{row === undefined ? (
@@ -172,7 +166,6 @@ export function AgentChat({
 					tools={tools}
 					at={at}
 					onMissing={onMissing}
-					onDoing={setDoing}
 					onRoutine={onRoutine}
 					activity={activity}
 					onActivity={(entry) => setActivity({ anchor: entry })}
@@ -192,7 +185,6 @@ function Timeline({
 	agent,
 	tools,
 	at,
-	onDoing,
 	onRoutine,
 	activity,
 	onActivity,
@@ -209,8 +201,6 @@ function Timeline({
 	mentionables: readonly ChatAgent[];
 	read: number;
 	onRoutine?: ((name: string) => void) | undefined;
-	/** What it does now, for the header: "Using its browser…". */
-	onDoing: (doing: string | undefined) => void;
 	who: Who;
 	agent: string;
 	/** Its tools, for its first words; undefined for the lead. */
@@ -312,11 +302,6 @@ function Timeline({
 		};
 	}, [chat, transcript.loaded, through]);
 
-	const working = segments.find((segment) => segment.kind === "working");
-	const doing = working?.kind === "working" ? working.text : undefined;
-	useEffect(() => {
-		onDoing(doing);
-	}, [doing, onDoing]);
 	const ask = segments.find(
 		(segment) => (segment.kind === "question" || segment.kind === "approval") && segment.open !== undefined,
 	);

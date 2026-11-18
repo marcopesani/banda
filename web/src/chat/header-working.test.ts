@@ -6,39 +6,19 @@ import { Header } from "./Header.tsx";
 
 const text = (html: string) => html.replace(/<[^>]*>/g, " ");
 
-// work is said by the feed's working line: the header neither says it nor moves for it
-it("a chat's header shows no working state, in words or in its face", () => {
-	const html = renderToStaticMarkup(
-		createElement(Header, {
-			name: "Mara",
-			face: defaultAvatarFace(),
-			state: "working",
-			doing: "Using its browser…",
-			onActivity: () => {},
-		}),
-	);
-	expect(text(html)).not.toMatch(/Working|working|Using its browser/);
+// work and waits are said in the feed and the band's row: the header holds the name alone and never moves for them
+it("a chat's header holds its name alone, with a resting face and nothing beneath", () => {
+	const html = renderToStaticMarkup(createElement(Header, { name: "Mara", face: defaultAvatarFace() }));
 	expect(html).toMatch(/<h1[^>]*>Mara<\/h1>/);
 	expect(html).toContain('role="img" aria-label="Mara" data-state="idle"');
+	expect(text(html).replace(/\s+/g, " ").trim()).toBe("Mara");
+	expect(html).not.toMatch(/Waiting on you|Routines paused|working/i);
+	expect(html).not.toContain('aria-label="Activity');
 });
 
-it("a group's header shows no working state either", () => {
-	const html = renderToStaticMarkup(
-		createElement(Header, {
-			name: "Trip",
-			state: "working",
-			doing: "Mara and Sancho are working…",
-			onActivity: () => {},
-		}),
-	);
-	expect(text(html)).not.toMatch(/working/i);
+it("a group's header holds its name alone too", () => {
+	const html = renderToStaticMarkup(createElement(Header, { name: "Trip" }));
 	expect(html).toMatch(/<h1[^>]*>Trip<\/h1>/);
 	expect(html).toContain("lucide-users");
-});
-
-it("still says what is not work: waiting on the owner, routines paused", () => {
-	const waiting = renderToStaticMarkup(createElement(Header, { name: "Mara", state: "waiting" }));
-	expect(text(waiting)).toContain("Waiting on you");
-	const paused = renderToStaticMarkup(createElement(Header, { name: "Mara", state: "working", paused: true }));
-	expect(text(paused)).toContain("Routines paused");
+	expect(text(html).replace(/\s+/g, " ").trim()).toBe("Trip");
 });
