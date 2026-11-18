@@ -53,7 +53,8 @@ export function Reveal({ open, id, children }: { open: boolean; id: string; chil
 		const animation = resize(element, from, to, slow.current);
 		sizing.current = animation;
 		target.current = to;
-		animation.finished.then(
+		// the fade may outlast it (reduced motion: the height snaps, the fade still plays), and it leaves after both
+		Promise.all([animation.finished, fading.current?.finished]).then(
 			() => {
 				if (sizing.current !== animation) return;
 				sizing.current = undefined;
@@ -92,11 +93,19 @@ export function Reveal({ open, id, children }: { open: boolean; id: string; chil
 		const element = frame.current;
 		const content = inner.current;
 		if (!mounted || element === null || content === null || typeof ResizeObserver === "undefined") return;
+		let width = content.offsetWidth;
 		const observer = new ResizeObserver(() => {
 			if (!shown.current) return;
 			const to = content.offsetHeight;
+			// the window or a column changed width and its words wrapped anew: that is the page moving, not this opening
+			const reflowed = content.offsetWidth !== width;
+			width = content.offsetWidth;
 			const from = sizing.current === undefined ? target.current : element.getBoundingClientRect().height;
-			if (from === undefined || Math.abs(to - (target.current ?? to)) < 1) {
+			if (
+				from === undefined ||
+				Math.abs(to - (target.current ?? to)) < 1 ||
+				(reflowed && sizing.current === undefined)
+			) {
 				target.current = to;
 				return;
 			}

@@ -1,7 +1,7 @@
 /**
  * A routine's line in its agent's chat, wired: opened, it asks the daemon which run the line stands for and reads that
- * run's own conversation as any chat's is read, live while it goes. Closed, it reads nothing: the run's transcript is
- * mounted only once the owner opened the line.
+ * run's own conversation once, as it is then (opened again, it is read again). Closed, it reads nothing: the run's
+ * transcript is mounted only while the line is open.
  */
 import { useMemo, useState } from "react";
 import type { RoutineLineRun } from "../../../src/server/api.ts";
@@ -10,7 +10,7 @@ import { RoutineRun, type RunRead, RunReading } from "../chat/RoutineRun.tsx";
 import type { Who } from "../chat/Row.tsx";
 import { api, Refused } from "../lib/api.ts";
 import { view } from "../lib/chat.ts";
-import { useTranscript } from "../lib/transcript.ts";
+import { useReadTranscript } from "../lib/transcript.ts";
 import { ActivitySheet } from "./Activity.tsx";
 import { FeedView } from "./Feed.tsx";
 import { useViewContext } from "./view-context.ts";
@@ -70,7 +70,8 @@ export function RunLine({
 
 /** A run's own conversation, drawn as a chat's feed is; its activity opens as a chat's does. */
 function RunConversation({ run, who, agent }: { run: number; who: Who; agent?: string | undefined }) {
-	const transcript = useTranscript(run);
+	// read once: the page's one live stream stays with the chat on screen
+	const transcript = useReadTranscript(run);
 	const shell = useViewContext(run);
 	// a run's own wake is the routine's words, said as the owner's: only here, never in the agent's chat
 	const context = useMemo(() => ({ ...shell, run: true as const }), [shell]);

@@ -3,7 +3,7 @@
  * provider, no network, nothing outside the temporary home): the owner's routine runs now and speaks; its line in the
  * chat is closed and nothing of the run was read; opened, the app asks which run the line stands for and reads that
  * run's own conversation, which shows the routine's words as the owner's message and what the agent sent; closed
- * again, the box is gone. At phone and desktop width. `BANDA_RUN_LINE_SHOTS=<dir>` saves a screenshot at each step.
+ * again, the box is gone; and the chat stays live meanwhile. At phone and desktop width. `BANDA_RUN_LINE_SHOTS=<dir>` saves a screenshot at each step.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -111,6 +111,12 @@ for (const width of [390, 1440])
 							`${box}.getAnimations({ subtree: true }).length === 0 && ${box}.parentElement.closest('[id]').getAnimations().length === 0`,
 						);
 						await shot("2-open");
+
+						// the chat on screen stays live with a run open: a second run's line arrives without a reload
+						const lines = `[...document.querySelectorAll('button[aria-controls]')].filter((el) => el.innerText.includes('Morning brief') && el.closest('[data-routine-run]') === null).length`;
+						expect(await page.run(lines)).toBe(1);
+						await api("/routines/sancho/morning-brief/run", "POST", { key: "run-2" });
+						await page.until(`${lines} === 2`, 30_000);
 
 						await page.click(line);
 						await page.until(`${box} === null`, 10_000);

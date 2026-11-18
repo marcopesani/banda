@@ -3,7 +3,7 @@
  * entries up to there are fetched by id and everything after arrives as events, so nothing is missed or shown twice.
  * A dropped stream reopens, and its next `ready` fills the gap the same way.
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
 	api,
 	type Block,
@@ -196,4 +196,71 @@ export function useTranscript(chat: number): Transcript {
 		loaded,
 		missing,
 	};
+}
+
+/**
+ * Chat `chat`'s transcript read once, newest page first, with no live events: for a conversation shown beside the chat
+ * on screen (a routine's run, opened in its line). The page has one live stream, which follows the chat on screen
+ * (`one-stream.ts`); reading another chat live would take it away. What is read is what was there when it was opened.
+ */
+export function useReadTranscript(chat: number): Transcript {
+	const [items, setItems] = useState<readonly Item[]>([]);
+	const [next, setNext] = useState<number>();
+	const [loaded, setLoaded] = useState(false);
+	const [missing, setMissing] = useState(false);
+
+	useEffect(() => {
+		let gone = false;
+		setItems([]);
+		setNext(undefined);
+		setLoaded(false);
+		setMissing(false);
+		api<ItemPage>(`/chats/${chat}/items`).then(
+			(page) => {
+				if (gone) return;
+				setItems(page.items);
+				setNext(page.next);
+				setLoaded(true);
+			},
+			() => {
+				if (!gone) setMissing(true);
+			},
+		);
+		return () => {
+			gone = true;
+		};
+	}, [chat]);
+
+	useEffect(() => {
+		itemsByChat.set(chat, items);
+		told();
+		return () => {
+			itemsByChat.delete(chat);
+		};
+	}, [chat, items]);
+
+	const loadOlder = useCallback(async () => {
+		if (next === undefined) return;
+		const page = await api<ItemPage>(`/chats/${chat}/items?before=${next}`);
+		setItems((now) => merge(now, page.items));
+		setNext(page.next);
+	}, [chat, next]);
+
+	return useMemo(
+		() => ({
+			items,
+			waits: [],
+			queued: [],
+			busy: false,
+			input: undefined,
+			running: [],
+			partial: [],
+			thinking: false,
+			older: next !== undefined,
+			loadOlder,
+			loaded,
+			missing,
+		}),
+		[items, next, loadOlder, loaded, missing],
+	);
 }
