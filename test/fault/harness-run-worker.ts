@@ -1,5 +1,5 @@
 /**
- * The process the harness-in-a-run fault suite kills: a routine's run, in a conversation of its own, in which a coding
+ * The process the harness fault suite kills for a session in a run: a routine's run, in a conversation of its own, in which a coding
  * agent's session (the scripted fake harness) begins and ends, waking the run's agent through the core as the daemon
  * wires it (`core.wake`: the run is one of its agent's chats again until its last turn ends); and, at every start, the
  * sessions a dead daemon left (two in the agent's chat, one in the run) ended by `reconcile`, each in a commit of its
