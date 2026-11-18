@@ -92,7 +92,12 @@ const VIEW: ConnectionView = {
 	},
 	tools: TOOLS,
 	groups: GROUPS,
-	accounts: [ACCOUNT, { ...ACCOUNT, account: "work", id: "work", label: "@work", agents: [], stale: true, scopes: [] }],
+	accounts: [
+		ACCOUNT,
+		{ ...ACCOUNT, account: "work", id: "work", label: "@work", agents: [], stale: true, scopes: [] },
+		// its access ran out and the service gave nothing to renew it with
+		{ ...ACCOUNT, account: "lab", id: "lab", label: "@lab", agents: [], stale: true, expired: true },
+	],
 	draws: [
 		{
 			kind: "pull_request",

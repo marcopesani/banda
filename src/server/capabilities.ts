@@ -64,6 +64,7 @@ import {
 	credentialsOf,
 	defaultAccountLabel,
 	definitionVersion,
+	expiredAt,
 	fits,
 	givenFor,
 	grantedScopes,
@@ -440,6 +441,11 @@ export function openCapabilities(options: CapabilityOptions) {
 		const { credentials } = expected;
 		const started = (async () => {
 			if (!("oauth" in credentials)) throw new Error("the credentials are a key, which does not refresh");
+			// another call's refresh of this sign-in landed after this call read it: those tokens stand, and the refresh
+			// token this call holds may be spent (single use, rotated), so it is never sent again, which a server that
+			// detects reuse would take as theft and revoke the sign-in for
+			const current = await credentialSnapshot(connection.name, account, ctx, expected.generation);
+			if (current.credentials.revision !== credentials.revision) return current;
 			fault("credential:refresh");
 			let fresh: Awaited<ReturnType<typeof refresh>>;
 			try {
@@ -556,13 +562,13 @@ export function openCapabilities(options: CapabilityOptions) {
 			if (!(error instanceof Unauthorized) || connection.auth !== "oauth" || key === undefined) throw error;
 			const expected = attempted;
 			const credentials = expected?.credentials;
-			if (
-				expected === undefined ||
-				credentials === undefined ||
-				!("oauth" in credentials) ||
-				credentials.oauth.tokens.refresh === undefined
-			)
+			if (expected === undefined || credentials === undefined || !("oauth" in credentials)) throw error;
+			if (credentials.oauth.tokens.refresh === undefined) {
+				// refused after its time ran out, with nothing to renew it: say so, rather than that the server took nothing
+				if (expiredAt(credentials, now()))
+					throw new Unauthorized("its sign-in expired, and the server gave no refresh token to renew it");
 				throw error;
+			}
 			await refreshOnce(
 				connection,
 				key,
@@ -1592,6 +1598,7 @@ export function openCapabilities(options: CapabilityOptions) {
 			)) {
 				const credentials = await heldBy(name, key);
 				const missing = lacking(credentials);
+				const expired = expiredAt(credentials, now());
 				accounts.push({
 					account: key,
 					id: account.id,
@@ -1603,9 +1610,10 @@ export function openCapabilities(options: CapabilityOptions) {
 						.map(([agent]) => agent)
 						.sort(),
 					...(connection !== undefined &&
-					(!fits(credentials, connection) || credentials.generation !== account.generation)
+					(!fits(credentials, connection) || credentials.generation !== account.generation || expired)
 						? { stale: true }
 						: {}),
+					...(expired ? { expired: true } : {}),
 					...(credentials !== undefined && "oauth" in credentials ? { scopes: [...grantedScopes(credentials)] } : {}),
 					...(missing.length === 0 ? {} : { missing }),
 				});

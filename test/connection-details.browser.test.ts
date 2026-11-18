@@ -360,3 +360,85 @@ it.skipIf(!hasChrome())(
 	},
 	110000,
 );
+
+for (const width of [390, 1440])
+	it.skipIf(!hasChrome())(
+		`a sign-in that ran out with nothing to renew it says so and asks to sign in again, at ${width}`,
+		async () => {
+			const home = await tempHome();
+			// a server whose access tokens last no time and that gives no refresh token, whatever is asked
+			const fake = await startFakeMcp({ auth: "oauth", refreshes: "never", expiresIn: 0 });
+			await writeFile(join(home, "config.json"), JSON.stringify({ model: { provider: "faux", modelId: "faux-1" } }));
+			const shipped = join(home, "shipped");
+			await mkdir(shipped, { recursive: true });
+			await writeFile(
+				join(shipped, "cal.json"),
+				JSON.stringify({
+					service: "Cal",
+					about: "Your days",
+					url: fake.url,
+					auth: "oauth",
+					account: "get_me.login",
+					reads: ["list_events"],
+				}),
+			);
+			const models = createModels();
+			models.setProvider(fauxProvider().provider);
+			const daemon = await startDaemon({ home, port: 0, models, box: hostBox(home), shipped, log: () => {} });
+			const base = `http://127.0.0.1:${daemon.port}`;
+			const token = (await readDaemonFile(home))?.token as string;
+			await skipShippedSkills(daemon.port, token);
+			const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+			await fetch(`${base}/api/capabilities/connections/cal/add`, { method: "POST", headers, body: "{}" });
+			fake.user = "ana";
+			const started = (await (
+				await fetch(`${base}/api/capabilities/connections/cal/signin`, { method: "POST", headers, body: "{}" })
+			).json()) as { url: string };
+			const consent = await fetch(started.url, { redirect: "manual" });
+			await fetch(consent.headers.get("location") ?? "", { redirect: "manual" });
+			let vite: Awaited<ReturnType<typeof createViteServer>>;
+			const listener = createServer((req, res) => vite.middlewares(req, res));
+			vite = await createViteServer({
+				configFile: fileURLToPath(new URL("../web/vite.config.ts", import.meta.url)),
+				cacheDir: await viteCacheDir(),
+				server: {
+					middlewareMode: true,
+					hmr: { server: listener },
+					proxy: { "/api": { target: base, changeOrigin: true, headers: { origin: base } } },
+				},
+			});
+			try {
+				await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+				const address = listener.address();
+				if (!address || typeof address === "string") throw new Error("No app port");
+				await withPage(`http://127.0.0.1:${address.port}/#token=${token}`, { width, height: 900 }, async (page) => {
+					await page.until(`document.body.textContent.includes('Sancho')`);
+					await page.run(`location.hash = '#/connections?connection=cal'`);
+					const row = `document.querySelector('[data-account="ana"]')`;
+					await page.until(`${row}?.textContent.includes('expired')`);
+					const words = await page.run<string>(`${row}.textContent`);
+					expect(words).toContain("Its sign-in expired, and the service gave no way to renew it");
+					expect(words).toContain("Sign in again");
+					for (const issued of fake.tokens)
+						expect(await page.run<string>("document.body.innerHTML")).not.toContain(issued);
+					expect(await page.run(`document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(
+						true,
+					);
+					const shots = process.env.BANDA_EXPIRED_SIGNIN_SHOTS;
+					if (shots !== undefined) {
+						await page.run(`${row}.scrollIntoView({ block: 'center' })`);
+						await page.shoot(join(shots, `expired-${width}.png`));
+					}
+					// the app signs in again only when the owner asks: nothing was tried on its own
+					expect(fake.scopesAsked).toHaveLength(1);
+					expect(fake.refreshed).toHaveLength(0);
+					expect(page.errors()).toEqual([]);
+				});
+			} finally {
+				await vite.close();
+				await new Promise<void>((resolve) => listener.close(() => resolve()));
+				await daemon.close();
+				await fake.close();
+			}
+		},
+	);
