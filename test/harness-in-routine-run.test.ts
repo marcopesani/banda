@@ -11,7 +11,7 @@ import {
 import { type ConversationId, createRegistry, defineExtension, type TaskId } from "@earendil-works/pi-durable";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { LEAD } from "../src/core/agent-id.ts";
-import { Accepted, AgentChats, shaOf } from "../src/core/agents.ts";
+import { Accepted, AgentChats, acceptedAgent, agentPath, agentText, shaOf } from "../src/core/agents.ts";
 import { OWNER } from "../src/core/gateway.ts";
 import { connectHarness, defineHarnesses, HARNESS_ENDED, Harnesses } from "../src/core/harness.ts";
 import { RoutineRuns, Routines, routinePath } from "../src/core/routines.ts";
@@ -34,7 +34,7 @@ async function setup() {
 	const gateway = new FakeGateway();
 	const logged: string[] = [];
 	/** Called with the newest input's words each time the model is asked. */
-	const asked: { model?: (input: string) => Promise<void> } = {};
+	const asked: { model?: (input: string) => Promise<void>; system?: (words: string) => Promise<void> } = {};
 	const core = defineCore({
 		blobs: blobStore(),
 		gateway: () => gateway,
@@ -58,6 +58,12 @@ async function setup() {
 	// the agent tells the owner what a coding agent's session did when it hears of its end; anything else it just ends
 	const answer = async (ctx: { messages: readonly { role: string; content?: unknown }[] }) => {
 		await asked.model?.(JSON.stringify([...ctx.messages].reverse().find((one) => one.role === "user")?.content ?? ""));
+		await asked.system?.(
+			JSON.stringify([
+				(ctx as { systemPrompt?: unknown }).systemPrompt,
+				ctx.messages.filter((one) => one.role === "system"),
+			]),
+		);
 		const heard = ctx.messages.some((one) => JSON.stringify(one.content ?? "").includes("harness-result"));
 		if (heard && ctx.messages.at(-1)?.role !== "toolResult")
 			return fauxAssistantMessage([fauxToolCall("message_user", { text: "Fake Code fixed it." })], {
@@ -118,8 +124,8 @@ describe("a coding agent's session begun in its agent's chat", () => {
 describe("a coding agent's session begun in a routine's run", () => {
 	it("ends as done and wakes its agent in the run, which tells the owner in the agent's chat", async () => {
 		const { harness, made, gateway, folder, run, agent, session, outcome } = await setup();
-		// the run's first turn is over before the session ends, as the tool answers at once
-		await until(async () => (await harness.snapshot(RoutineRuns, context))?.runs[run] !== undefined);
+		// the run's first turn is over before the session ends, as the tool answers at once: it left its agent's chats
+		await until(async () => (await harness.snapshot(AgentChats, context))?.chats[run] === undefined);
 		// the coding agent's tool begins a session in the conversation its call runs in (routes/harnesses.ts): the run's
 		const task = await harness.commit(
 			(tx) => made.begin(tx, { chat: run, call: "c1", agent, harness: "fake", folder, ask: "say fixed" }),
@@ -140,6 +146,64 @@ describe("a coding agent's session begun in a routine's run", () => {
 			context,
 		);
 		expect(page.items.filter((entry) => entry.kind === HARNESS_ENDED)).toHaveLength(1);
+	});
+});
+
+describe("a session's end in a run its agent no longer runs", () => {
+	it("ends the session and wakes nobody: the run takes no turn as an agent that is not its own", async () => {
+		const { harness, made, logged, gateway, folder, run, agent, agentChat, session, outcome } = await setup();
+		await until(async () => (await harness.snapshot(AgentChats, context))?.chats[run] === undefined);
+		// the chat the run came from runs another agent now: the run has lost its principal
+		await harness.commit(async (tx) => {
+			(await tx.doc(AgentChats)).chats[agentChat] = "someone-else";
+		}, context);
+		const task = await harness.commit(
+			(tx) => made.begin(tx, { chat: run, call: "c1", agent, harness: "fake", folder, ask: "say fixed" }),
+			context,
+		);
+		expect(await until(() => outcome(task))).toMatchObject({ status: "completed" });
+		expect(await session(task)).toMatchObject({ state: "done" });
+		expect(logged).toEqual([`coding agents: session ${task} ended with nobody to tell in chat ${run}`]);
+		// no turn was queued for it, and it is not one of anybody's chats
+		const turns = await harness.commit(
+			async (tx) =>
+				(
+					await Promise.all(
+						(["pending", "running", "waiting", "sleeping", "completing"] as const).map((status) =>
+							tx.scanTasks({ kind: "banda.turn", status, conversationId: run as ConversationId }, 10, undefined),
+						),
+					)
+				).flatMap((page) => page.items),
+			context,
+		);
+		expect(turns).toEqual([]);
+		expect((await harness.snapshot(AgentChats, context))?.chats[run]).toBeUndefined();
+		expect(gateway.sent).toEqual([]);
+	});
+});
+
+describe("a run woken after its agent's definition changed", () => {
+	it("takes its turn as the agent is now, not as it was when the run began", async () => {
+		const { harness, core, asked, run, agent } = await setup();
+		await until(async () => (await harness.snapshot(AgentChats, context))?.chats[run] === undefined);
+		const WORDS = "Answer in exactly seven words, always.";
+		await harness.commit(async (tx) => {
+			const now = await acceptedAgent(tx, agent);
+			if (now === undefined) throw new Error("the run's agent has no file");
+			const text = agentText({ ...now, instructions: WORDS });
+			(await tx.doc(Accepted)).files[agentPath(agent)] = { sha: shaOf(text), text, at: Date.now() };
+			await core.agentChanged(tx, agent);
+		}, context);
+		let system = "";
+		asked.system = async (words) => {
+			system = words;
+		};
+		const turn = await harness.commit(
+			(tx) => core.followUp(tx, run, { key: "one", text: "note one", entry: { kind: "test.note", data: {} } }),
+			context,
+		);
+		await harness.waitForTask(turn as TaskId, context);
+		expect(system).toContain(WORDS);
 	});
 });
 

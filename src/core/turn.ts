@@ -31,6 +31,7 @@ import {
 } from "@earendil-works/pi-durable";
 import {
 	Accepted,
+	type Agent,
 	AgentChats,
 	acceptedAgent,
 	agentWords,
@@ -1507,6 +1508,13 @@ export function defineCore(options: CoreOptions) {
 		const followed = await followedAt(tx, chat);
 		if (followed === undefined) throw new Error(`chat ${chat} has no home origin`);
 		const { home, run } = followed;
+		if (run !== undefined) {
+			// it is one of its agent's chats again, as that agent is now: what the owner changed or took from it since the
+			// run began holds for this turn too. Before any task is made: a commit reads before it makes
+			(await tx.doc(AgentChats)).chats[chat] = run.agent;
+			const agent = await acceptedAgent(tx, run.agent);
+			if (agent !== undefined) await refreshChat(tx, chat as ConversationId, agent);
+		}
 		const input: Input = { chat, origin: home.origin, message: { id: key, text }, internal: entry };
 		const placement = {
 			ownership: { kind: "conversation" },
@@ -1520,7 +1528,6 @@ export function defineCore(options: CoreOptions) {
 		);
 		const turn = await tx.createTask(Turn, { ...input, admit: Number(admit) }, placement);
 		if (run === undefined) home.lastAdmit = Number(admit);
-		else (await tx.doc(AgentChats)).chats[chat] = run.agent;
 		return Number(turn);
 	}
 
@@ -1734,6 +1741,28 @@ export function defineCore(options: CoreOptions) {
 			runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "aborted" } }), ctx),
 	});
 
+	/**
+	 * Bring `chat` to its agent's definition as it is now: at once, or, while a run of it goes, once that run settled
+	 * (a run never changes what it was sent).
+	 */
+	async function refreshChat(tx: Tx, chat: ConversationId, agent: Agent): Promise<void> {
+		if ((await tx.doc(LiveDoc, chat)).run !== undefined) {
+			await tx.createTask(
+				RefreshAgent,
+				{ chat: Number(chat), agent: agent.id },
+				{ ownership: { kind: "conversation" }, background: true, conversationId: chat },
+			);
+			return;
+		}
+		const named = await nameOf(tx);
+		await refreshAs(tx, chat, agent, {
+			model: options.model(),
+			...(options.tools === undefined ? {} : { tools: options.tools() }),
+			...(named === undefined ? {} : { name: named }),
+			connected: await connectionToolsOf(tx, agent),
+		});
+	}
+
 	/** Write `chat`'s tools again from what is in effect now: the definition it runs, the tools installed, its connections. */
 	async function toolsNow(tx: Tx, chat: number): Promise<void> {
 		const agent = (await tx.doc(ChatAgent, chat as ConversationId)).agent;
@@ -1799,21 +1828,7 @@ export function defineCore(options: CoreOptions) {
 		for (const [id, name] of Object.entries((await tx.doc(AgentChats)).chats)) {
 			if (name !== agentName) continue;
 			const chat = Number(id) as ConversationId;
-			if ((await tx.doc(LiveDoc, chat)).run !== undefined) {
-				await tx.createTask(
-					RefreshAgent,
-					{ chat: Number(chat), agent: agentName },
-					{ ownership: { kind: "conversation" }, background: true, conversationId: chat },
-				);
-				continue;
-			}
-			const named = await nameOf(tx);
-			await refreshAs(tx, chat, agent, {
-				model: options.model(),
-				...(options.tools === undefined ? {} : { tools: options.tools() }),
-				...(named === undefined ? {} : { name: named }),
-				connected: await connectionToolsOf(tx, agent),
-			});
+			await refreshChat(tx, chat, agent);
 		}
 	}
 
