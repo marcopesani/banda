@@ -235,6 +235,11 @@ export type Scene = {
 export type ScenarioOptions = {
 	/** A hung run says what it waited on when the sweep's timeout ends it (`./diagnose.ts`): its worker only. */
 	readonly diagnose?: true;
+	/**
+	 * Retry a request the host died during at once (`retry.baseDelayMs: 0`): its worker only, whose clock stands at
+	 * the scenario's step, so pi-durable 1.5's backoff on the Harness clock would never end (backoff.faults times it).
+	 */
+	readonly retryAtOnce?: true;
 	readonly second?: boolean;
 	/** More objects Mara follows as the same account, a watch each: `banda-142-2`, `banda-142-3`, … */
 	readonly more?: readonly string[];
@@ -335,6 +340,7 @@ export async function watchScenario(
 		env: boxEnv(box),
 		now,
 		setTimer,
+		...(options.retryAtOnce ? { settings: { retry: { baseDelayMs: 0 } } } : {}),
 		wrapStorage: (storage) => faults.storage(storage),
 	});
 	if (options.diagnose) diagnoseOnTimeout(home, () => harness, faults, now);

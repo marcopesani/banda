@@ -109,6 +109,9 @@ const harness = await openStore(home, {
 	env: boxEnv(box),
 	now: () => NOW,
 	setTimer,
+	// pi-durable 1.5 retries a request the host died during after `retry.baseDelayMs` on the Harness clock, which this
+	// worker never moves: retried at once, so a kill there resumes as a retry (test/backoff.faults.test.ts times the delay)
+	settings: { retry: { baseDelayMs: 0 } },
 	wrapStorage: (storage) => faults.storage(storage),
 });
 harness.resume();
