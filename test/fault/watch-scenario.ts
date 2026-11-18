@@ -49,6 +49,7 @@ import { githubObjectDefinition } from "../fixtures/github-objects.ts";
 import { hostBox } from "../fixtures/host-box.ts";
 import { echoModels, FAUX_MODEL } from "../fixtures/models.ts";
 import { added, definition, shipping } from "../fixtures/shipped.ts";
+import { diagnoseOnTimeout } from "./diagnose.ts";
 import type { Faults } from "./faults.ts";
 
 /** Monday 2 November 2026, 09:00. */
@@ -232,6 +233,8 @@ export type Scene = {
 
 /** How a scenario differs from the pull request's life. */
 export type ScenarioOptions = {
+	/** A hung run says what it waited on when the sweep's timeout ends it (`./diagnose.ts`): its worker only. */
+	readonly diagnose?: true;
 	readonly second?: boolean;
 	/** More objects Mara follows as the same account, a watch each: `banda-142-2`, `banda-142-3`, … */
 	readonly more?: readonly string[];
@@ -334,6 +337,7 @@ export async function watchScenario(
 		setTimer,
 		wrapStorage: (storage) => faults.storage(storage),
 	});
+	if (options.diagnose) diagnoseOnTimeout(home, () => harness, faults, now);
 	harness.resume();
 	try {
 		// the connection, the agent and the account, as a signed-in connection leaves them; the watch, allowed once
