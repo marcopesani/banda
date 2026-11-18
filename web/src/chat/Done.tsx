@@ -31,6 +31,7 @@ import { cn } from "@/lib/cn";
 import { Face } from "./Face.tsx";
 import { Mention } from "./Feed.tsx";
 import { ObjectLink } from "./Object.tsx";
+import { EASE_OUT, Reveal, resize } from "./Reveal.tsx";
 import type { Who } from "./Row.tsx";
 
 export type DoneKind =
@@ -243,75 +244,6 @@ export function Done({
 /** A stretch of rows: no space between, so a run of work reads as one log. */
 export function DoneFeed({ children }: { children: ReactNode }) {
 	return <div className="flex flex-col">{children}</div>;
-}
-
-/** The design's ease-out (tokens.css `--ease-out`): quick to start, long to settle. */
-const EASE_OUT = [0.22, 1, 0.36, 1] as const;
-const EASE_OUT_CSS = `cubic-bezier(${EASE_OUT.join(", ")})`;
-
-/**
- * Height is layout: it cannot reach the compositor, and the content below has to move with it. So it runs as a native
- * Web Animation (the browser ticks it, no JavaScript each frame), only for as long as it moves, clipped only while it
- * moves; and what it holds is contained, so its insides are not laid out again on every frame.
- */
-function resize(element: HTMLElement, from: number, to: number, duration: number): Animation {
-	element.style.overflow = "hidden";
-	const animation = element.animate([{ height: `${from}px` }, { height: `${to}px` }], {
-		duration,
-		easing: EASE_OUT_CSS,
-		fill: "both",
-	});
-	return animation;
-}
-
-/**
- * What a row opens: grows from nothing as it fades in, and shrinks back as it fades out before it leaves. Reversing
- * midway starts from where it is. Reduced motion: the height snaps and only the fade remains.
- */
-function Reveal({ open, id, children }: { open: boolean; id: string; children: ReactNode }) {
-	const reduced = useReducedMotion() === true;
-	const [mounted, setMounted] = useState(open);
-	if (open && !mounted) setMounted(true);
-	const frame = useRef<HTMLDivElement>(null);
-	const running = useRef<Animation[]>([]);
-	const shown = useRef(open);
-	useLayoutEffect(() => {
-		const element = frame.current;
-		if (element === null || shown.current === open) return;
-		shown.current = open;
-		const moving = running.current.length > 0;
-		const height = element.getBoundingClientRect().height;
-		const opacity = Number(getComputedStyle(element).opacity);
-		for (const animation of running.current) animation.cancel();
-		const natural = element.scrollHeight;
-		const sized = resize(element, moving ? height : open ? 0 : natural, open ? natural : 0, reduced ? 0 : 240);
-		const faded = element.animate([{ opacity: moving ? opacity : open ? 0 : 1 }, { opacity: open ? 1 : 0 }], {
-			duration: reduced ? 150 : open ? 240 : 160,
-			easing: EASE_OUT_CSS,
-			fill: "both",
-		});
-		const now = [sized, faded];
-		running.current = now;
-		Promise.all(now.map((animation) => animation.finished)).then(
-			() => {
-				running.current = [];
-				if (!open) {
-					setMounted(false);
-					return;
-				}
-				for (const animation of now) animation.cancel();
-				element.style.overflow = "";
-			},
-			() => {
-				// Cancelled by a reversal, which took over from here.
-			},
-		);
-	}, [open, reduced]);
-	return mounted ? (
-		<div ref={frame} id={id} className="w-full">
-			<div className="[contain:layout_style]">{children}</div>
-		</div>
-	) : null;
 }
 
 /**

@@ -57,3 +57,9 @@ export type RoutineWhen = { readonly when: string; readonly sha: string };
  * sent twice runs once. Refused (409) while its last run still goes. Answers with the control view.
  */
 export type RunNow = { readonly key: string };
+
+/**
+ * The run a routine's line in a chat stands for (`GET /api/chats/:chat/items/:entry/run`): the conversation the run
+ * worked in, apart from the chat, read as any chat's items are. 404 for a line with no run of its own.
+ */
+export type RoutineLineRun = { readonly run: number };

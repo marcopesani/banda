@@ -5,15 +5,15 @@
  * a long run never pushes the chat away.
  */
 import { CalendarClockIcon, ChevronDownIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { Shimmer } from "@/components/ai-elements/shimmer";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 import { Line } from "./Line.tsx";
+import { Reveal } from "./Reveal.tsx";
 
-/** How far reading the run got: on its way, here, or failed with why. */
-export type RunRead = "reading" | "read" | { readonly failed: string };
+/** How far reading the run got: on its way, here, failed with why, or there is `none` to read and why. */
+export type RunRead = "reading" | "read" | { readonly failed: string } | { readonly none: string };
 
 export function RoutineRun({
 	words,
@@ -39,13 +39,14 @@ export function RoutineRun({
 	/** The run's conversation, as the chat draws one. Drawn only once open and read. */
 	children?: ReactNode;
 }) {
+	const id = useId();
 	return (
-		<Collapsible
-			open={open}
-			onOpenChange={onOpenChange}
-			className="mx-auto flex w-full max-w-[var(--measure)] flex-col items-center gap-2 px-4"
-		>
-			<CollapsibleTrigger
+		<div className="mx-auto flex w-full max-w-[var(--measure)] flex-col items-center gap-2 px-4">
+			<button
+				type="button"
+				aria-expanded={open}
+				aria-controls={id}
+				onClick={() => onOpenChange(!open)}
 				className={cn(
 					"group/run min-w-0 cursor-pointer rounded-field px-1 text-center text-ui text-ink-2 [overflow-wrap:anywhere]",
 					"hover:bg-paper-3 focus-visible:bg-paper-3 focus-visible:outline-none",
@@ -56,10 +57,11 @@ export function RoutineRun({
 				{time === undefined ? null : <span className="ml-1.5 whitespace-nowrap text-meta text-ink-2">{time}</span>}
 				<ChevronDownIcon
 					aria-hidden="true"
-					className="ml-1 inline-block size-3.5 shrink-0 align-[-0.1875rem] transition-transform duration-150 group-data-[state=open]/run:rotate-180 motion-reduce:transition-none"
+					// it turns with the box it opens: the same time and curve as `Reveal`
+					className="ml-1 inline-block size-3.5 shrink-0 align-[-0.1875rem] transition-transform duration-[240ms] ease-out group-aria-expanded/run:rotate-180 motion-reduce:transition-none"
 				/>
-			</CollapsibleTrigger>
-			<CollapsibleContent className="w-full">
+			</button>
+			<Reveal open={open} id={id}>
 				<section
 					aria-label={`${words}: what it did`}
 					className="flex flex-col overflow-hidden rounded-tile border border-line-soft bg-paper"
@@ -75,6 +77,8 @@ export function RoutineRun({
 							<RunReading />
 						) : run === "read" ? (
 							children
+						) : "none" in run ? (
+							<Line className="px-0">{run.none}</Line>
 						) : (
 							<Line
 								tone="danger"
@@ -86,13 +90,13 @@ export function RoutineRun({
 						)}
 					</div>
 				</section>
-			</CollapsibleContent>
-		</Collapsible>
+			</Reveal>
+		</div>
 	);
 }
 
 /** The run on its way: the shape of a short conversation, at the box's width. */
-function RunReading() {
+export function RunReading() {
 	const bone = "bg-paper-3 motion-reduce:animate-none";
 	return (
 		<div role="status" aria-label="Loading the run" className="flex flex-col gap-3 py-1">

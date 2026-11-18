@@ -609,6 +609,14 @@ export function view(
 			});
 		else if (item.role === "effect")
 			segments.push({ kind: "effect", key: `${item.id}`, label: item.label, permission: item.permission });
+		else if (item.role === "wake" && item.ask !== undefined && context.run === true)
+			segments.push({
+				kind: "owner",
+				key: `${item.id}`,
+				text: item.ask,
+				files: [],
+				...(item.at === undefined ? {} : { at: item.at }),
+			});
 		else if (item.role === "wake")
 			segments.push({
 				kind: "wake",

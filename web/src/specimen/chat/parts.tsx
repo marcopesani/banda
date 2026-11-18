@@ -810,6 +810,14 @@ export function Parts() {
 					<Group label="A run that had nothing to say: the line opens its activity">
 						<RunSpecimen words="You ran Morning brief" time="12:14" open quiet />
 					</Group>
+					<Group label="An older run, from before runs had a conversation of their own">
+						<RunSpecimen
+							words="Morning brief ran"
+							time="8:00"
+							open
+							run={{ none: "This run worked here in the chat: what it did is around this line" }}
+						/>
+					</Group>
 					<Group label="Could not be read">
 						<RunSpecimen words="Morning brief ran" time="8:00" open run={{ failed: "The run could not be loaded" }} />
 					</Group>

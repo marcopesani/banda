@@ -363,6 +363,7 @@ function Timeline({
 							location.hash = `#/artifact/${id}${n === undefined ? "" : `?v=${n}`}`;
 						}}
 						onRoutine={onRoutine}
+						runLines
 						onActivity={onActivity}
 						onWorkingLine={(line) => {
 							openedFrom.current = line;

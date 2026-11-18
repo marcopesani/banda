@@ -6,7 +6,7 @@
 import type { Context } from "@earendil-works/chord";
 import type { ConversationId, EntryId, Harness, TaskId } from "@earendil-works/pi-durable";
 import { Accepted } from "../core/agents.ts";
-import { type RoutineRunRecord, Routines, RUNS_KEPT, routinePath, routineRef } from "../core/routines.ts";
+import { type RoutineRunRecord, RoutineRuns, Routines, RUNS_KEPT, routinePath, routineRef } from "../core/routines.ts";
 import { context } from "../core/store.ts";
 import { isOwnerMessage, messageArgs } from "../core/toolsets.ts";
 import type { Item, RoutineRunsPage, RoutineRunView } from "./api.ts";
@@ -122,4 +122,20 @@ export async function routineRuns(
 		// the record keeps the newest runs only: older ones are in the chat alone
 		...((record?.runs?.length ?? 0) >= RUNS_KEPT ? { full: true as const } : {}),
 	};
+}
+
+/**
+ * The run whose line in chat `chat` is entry `entry`: the conversation it worked in. Undefined when that entry is no
+ * run's line (a wake from before runs had conversations of their own, or no wake at all).
+ */
+export async function lineRun(
+	harness: Harness,
+	chat: number,
+	entry: number,
+	ctx: Context = context,
+): Promise<number | undefined> {
+	const runs = (await harness.snapshot(RoutineRuns, ctx))?.runs ?? {};
+	for (const [run, record] of Object.entries(runs))
+		if (record.chat === chat && record.line === entry) return Number(run);
+	return undefined;
 }
