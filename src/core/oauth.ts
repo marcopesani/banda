@@ -10,7 +10,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import { REST_APIS } from "./rest.ts";
 
-/** Where the daemon signs in, as discovered: the authorization server's endpoints and the scopes the resource wants. */
+/**
+ * Where the daemon signs in, as discovered: the authorization server's endpoints, the scopes the resource wants, and
+ * whether the authorization server says it renews a sign-in offline.
+ */
 export type OAuthServer = {
 	readonly issuer: string;
 	/** RFC 9207: this issuer promises to identify itself in the authorization response. */
@@ -22,8 +25,36 @@ export type OAuthServer = {
 	readonly register?: string;
 	/** Where a sign-in by code starts (RFC 8628), when the server offers one. */
 	readonly device?: string;
+	/**
+	 * What the resource wants, as its RFC 9728 metadata lists them (else the file names them): what an account asks for
+	 * and is checked against. banda reads the metadata's list and not a 401's `scope` parameter, which MCP's scope
+	 * selection puts first; where the metadata lists none, none is named.
+	 */
 	readonly scopes?: readonly string[];
+	/**
+	 * `offline_access` is listed by the authorization server among its own `scopes_supported` (RFC 8414), or by the
+	 * resource's metadata: a sign-in that names scopes also asks for it, to be given a refresh token (OpenID Connect
+	 * Core §11; the MCP draft's "Refresh Tokens"). It asks for no access to the resource, so it is not one of `scopes`:
+	 * what fits an account and what the owner picks from stay the resource's. The server may still give no refresh
+	 * token; nothing here promises one.
+	 */
+	readonly offline?: true;
 };
+
+/** The scope that asks for a refresh token (OpenID Connect Core §11). */
+const OFFLINE = "offline_access";
+
+/**
+ * What a sign-in puts in its `scope`: the resource's scopes, and `offline_access` when the server offers it. A sign-in
+ * that names no scope gets the server's default, so it stays without one: `offline_access` alone could narrow it. A
+ * client banda ships a row for asks for renewal its server's own way (Google's `access_type`), so its row decides.
+ */
+export function scopesOfSignIn(server: OAuthServer): readonly string[] | undefined {
+	if (server.scopes === undefined) return undefined;
+	return server.offline === true && rowOf(server) === undefined
+		? [...new Set([...server.scopes, OFFLINE])]
+		: server.scopes;
+}
 
 /** The client the daemon is at that server. */
 export type OAuthClient = { readonly id: string; readonly secret?: string };
@@ -171,9 +202,20 @@ export async function discover(resource: string, fetcher: typeof fetch = fetch):
 		throw new Error("The authorization server's issuer does not match its discovery address");
 	const methods = server.code_challenge_methods_supported;
 	if (Array.isArray(methods) && !methods.includes("S256")) throw new Error(`${at.host} does not take PKCE (S256)`);
-	const scopes = Array.isArray(metadata?.scopes_supported)
+	const listed = Array.isArray(metadata?.scopes_supported)
 		? metadata.scopes_supported.filter((scope): scope is string => typeof scope === "string")
 		: undefined;
+	// offline_access asks to be renewed, not for access: the resource's own scopes are the rest. A resource that names
+	// it alone keeps it as its one scope, so its sign-in asks exactly what it asked before banda told them apart; so
+	// does a server a shipped client's row signs in to, which asks for renewal its own way.
+	const shipped = Object.values(CLIENTS).some((row) => row.server.issuer === issuer);
+	const own = shipped ? listed : listed?.filter((scope) => scope !== OFFLINE);
+	const scopes = own !== undefined && own.length > 0 ? own : listed;
+	// the authorization server's own list says only whether it renews offline: what to ask for is the resource's
+	const offline =
+		!shipped &&
+		(listed?.includes(OFFLINE) === true ||
+			(Array.isArray(server.scopes_supported) && server.scopes_supported.includes(OFFLINE)));
 	return {
 		issuer,
 		...(server.authorization_response_iss_parameter_supported === true ? { issuerParameter: true as const } : {}),
@@ -186,6 +228,7 @@ export async function discover(resource: string, fetcher: typeof fetch = fetch):
 			? {}
 			: { device: endpoint(server.device_authorization_endpoint, "device endpoint") }),
 		...(scopes === undefined || scopes.length === 0 ? {} : { scopes }),
+		...(offline ? { offline: true as const } : {}),
 	};
 }
 
@@ -235,8 +278,8 @@ export function begin(
 	url.searchParams.set("state", state);
 	if (server.resourceParameter !== false) url.searchParams.set("resource", resource);
 	for (const [key, value] of Object.entries(row?.authorizeParams(again) ?? {})) url.searchParams.set(key, value);
-	if (server.scopes !== undefined)
-		url.searchParams.set(row?.scopeParam ?? "scope", server.scopes.join(row?.scopeSeparator ?? " "));
+	const scopes = scopesOfSignIn(server);
+	if (scopes !== undefined) url.searchParams.set(row?.scopeParam ?? "scope", scopes.join(row?.scopeSeparator ?? " "));
 	return {
 		pending: {
 			connection,
@@ -424,7 +467,8 @@ export async function startDevice(
 ): Promise<Device> {
 	if (server.device === undefined) throw new Error("the server offers no sign-in by code");
 	const params = new URLSearchParams({ client_id: client.id, resource });
-	if (server.scopes !== undefined) params.set("scope", server.scopes.join(" "));
+	const scopes = scopesOfSignIn(server);
+	if (scopes !== undefined) params.set("scope", scopes.join(" "));
 	const body = await json(fetcher, server.device, {
 		method: "POST",
 		headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },

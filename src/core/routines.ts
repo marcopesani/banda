@@ -439,7 +439,7 @@ export async function troubleIn(tx: Tx, chat: number, data: TroubleData): Promis
 }
 
 /** What the model reads when a routine wakes it; `owner`, when the owner ran it now. */
-function wakeText(routine: Routine, due: number, owner = false): string {
+export function wakeText(routine: Routine, due: number, owner = false): string {
 	const zone = "every" in routine.when ? hostZone() : (routine.when.zone ?? hostZone());
 	const words = whenWords(routine.when);
 	const when = `${localTime(due, zone)} ${zone}`;
@@ -452,8 +452,21 @@ function wakeText(routine: Routine, due: number, owner = false): string {
 		`${routine.description}. ${owner ? "" : "Nobody is waiting on this run, and "}` +
 		`${owner ? "The owner" : "the owner"} sees nothing you do not send with message_user.\n\n` +
 		routine.ask +
-		"\n\nSend only what is worth their attention: most runs need to say nothing."
+		WAKE_END
 	);
+}
+
+/** What every wake ends with, after the routine's own words. */
+const WAKE_END = "\n\nSend only what is worth their attention: most runs need to say nothing.";
+
+/**
+ * The routine's own words in a wake's text, as `wakeText` put them: what follows its first paragraph (one line: a
+ * description is one), up to what every wake ends with. Undefined for text that is no wake's.
+ */
+export function wakeAsk(text: string): string | undefined {
+	const start = text.indexOf("\n\n");
+	if (start < 0 || !text.endsWith(WAKE_END) || start + 2 > text.length - WAKE_END.length) return undefined;
+	return text.slice(start + 2, text.length - WAKE_END.length);
 }
 
 export type RoutinesOptions = {

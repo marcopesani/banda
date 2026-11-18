@@ -105,7 +105,7 @@ export function WatchDetail({
 		if (wakes === undefined) return;
 		setEdit({ step: "saving", ...draft });
 		watchActions
-			.edit(watch.name, sha, {
+			.edit(watch.id, sha, {
 				...(draft.until === until ? {} : { until: draft.until }),
 				...(wakes === (file.wakesADay ?? DEFAULT_WAKES_A_DAY) ? {} : { wakesADay: wakes }),
 				...(draft.ask === file.ask ? {} : { ask: draft.ask }),
@@ -126,6 +126,17 @@ export function WatchDetail({
 				<Facts
 					rows={[
 						["Follows", title],
+						...(watch.twins === undefined || watch.twins.length === 0
+							? []
+							: ([
+									[
+										"Twice",
+										`${watch.twins.length === 1 ? "Another watch" : `${watch.twins.length} other watches`} of ${agent.name} follow it too, as the same account: each wakes on its own`,
+									],
+								] as const)),
+						...(watch.shared === true
+							? ([["File", `watches/${watch.name}.md, shared by no agent's folder: it wakes ${agent.name}`]] as const)
+							: []),
 						...(edit.step !== "closed"
 							? []
 							: ([
@@ -274,12 +285,12 @@ export function WatchDetail({
 							</Button>
 						)}
 						{watch.done !== undefined ? null : (
-							<Button variant="outline" size="sm" onClick={() => void watchActions.check(watch.name)}>
+							<Button variant="outline" size="sm" onClick={() => void watchActions.check(watch.id)}>
 								Check now
 							</Button>
 						)}
 						{watch.done !== undefined ? null : (
-							<Button variant="outline" size="sm" onClick={() => void watchActions.pause(watch.name, !paused)}>
+							<Button variant="outline" size="sm" onClick={() => void watchActions.pause(watch.id, !paused)}>
 								{paused ? "Resume" : "Pause"}
 							</Button>
 						)}
@@ -291,7 +302,7 @@ export function WatchDetail({
 								action="Stop"
 								keep="Keep following"
 								onConfirm={() =>
-									void watchActions.remove(watch.name).then(() => {
+									void watchActions.remove(watch.id).then(() => {
 										onDone();
 									})
 								}
@@ -305,7 +316,7 @@ export function WatchDetail({
 								variant="destructive"
 								size="sm"
 								onClick={() =>
-									void watchActions.remove(watch.name).then(() => {
+									void watchActions.remove(watch.id).then(() => {
 										onDone();
 									})
 								}

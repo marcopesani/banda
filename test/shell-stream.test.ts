@@ -209,7 +209,9 @@ describe("the shell stream", () => {
 						shell: async () => {
 							shown++;
 							const names = Object.keys((await harness.snapshot(Watches, context))?.watches ?? {});
-							return [{ type: "watches", watches: names.map((name) => ({ name, agent: "mara", state: "active" })) }];
+							return [
+								{ type: "watches", watches: names.map((name) => ({ id: name, name, agent: "mara", state: "active" })) },
+							];
 						},
 					},
 				],
@@ -239,8 +241,8 @@ describe("the shell stream", () => {
 			expect(of("watches")[1]).toEqual({
 				type: "watches",
 				watches: [
-					{ name: "banda-141", agent: "mara", state: "active" },
-					{ name: "banda-142", agent: "mara", state: "active" },
+					{ id: "banda-141", name: "banda-141", agent: "mara", state: "active" },
+					{ id: "banda-142", name: "banda-142", agent: "mara", state: "active" },
 				],
 			});
 			await new Promise((r) => setTimeout(r, 250));

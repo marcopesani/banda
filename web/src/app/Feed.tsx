@@ -52,6 +52,7 @@ import { FilePart } from "./FilePart.tsx";
 import { HarnessSessionPart } from "./HarnessSession.tsx";
 import { LiveView } from "./LiveBrowser.tsx";
 import { FollowedObject, MessageObjects, MessageText } from "./Objects.tsx";
+import { RunLine } from "./RunLine.tsx";
 import { AskRef, approvalKind, didNotWords, didWords, sawFold, sawOpen, wasOpen } from "./Settled.tsx";
 import { approvalState, notDoneKind, questionState } from "./settled-states.ts";
 import { routineTitle } from "./titles.ts";
@@ -344,19 +345,24 @@ function WatchCallLine({
 	agent: { readonly id: string; readonly name: string } | undefined;
 	segment: Extract<Segment, { kind: "watchCall" }>;
 }) {
-	const { watch, state, name } = segment;
+	const { watch, state, id } = segment;
+	const shell = useShell();
 	const change = watch?.change;
 	// the object as the owner's references draw it: by its key once the daemon resolved it, else by the file's link
 	const what = watchObject(segment);
 	const inline = (
 		<FollowedObject chat={chat} agent={agent} reference={watch?.object?.ref ?? what} fallback={what} strong />
 	);
-	if (state === "pending" && watch !== undefined && name !== undefined && change !== undefined) {
+	if (state === "pending" && watch !== undefined && id !== undefined && change !== undefined) {
 		const shown = change.kind === "removed" ? watch.accepted?.watch : change.watch;
 		return (
 			<WatchProposal
 				watch={{
 					agent: who.name,
+					// whom it wakes: the agent its folder (or, shared, its record) names, whose chat this need not be
+					runsAs: agentNameOf(shell, watch.agent),
+					shared: watch.shared === true,
+					twin: (watch.twins?.length ?? 0) > 0,
 					title: what,
 					object: inline,
 					kind: change.kind === "added" ? "new" : change.kind,
@@ -372,12 +378,12 @@ function WatchCallLine({
 					ask: shown?.ask ?? "",
 				}}
 				onAllow={() =>
-					void actOnWatch(name, {
+					void actOnWatch(id, {
 						action: "accept",
 						sha: change.kind === "removed" ? null : (change.sha ?? null),
 					}).then(showWatching)
 				}
-				onDecline={() => void actOnWatch(name, { action: "decline" }).then(showWatching)}
+				onDecline={() => void actOnWatch(id, { action: "decline" }).then(showWatching)}
 			/>
 		);
 	}
@@ -442,6 +448,7 @@ export function FeedView({
 	onRoutine,
 	onActivity,
 	onWorkingLine,
+	runLines = false,
 	outgoing = [],
 	onRetry,
 }: {
@@ -463,6 +470,8 @@ export function FeedView({
 	onActivity?: ((entry: number) => void) | undefined;
 	/** The working line was tapped: open the work's activity, and hand focus back to the line after. */
 	onWorkingLine?: ((line: HTMLElement) => void) | undefined;
+	/** A routine's line opens its run's own conversation beneath it: in an agent's chat, never inside a run. */
+	runLines?: boolean;
 	outgoing?: readonly { id: string; text: string; files: readonly File[]; state: "sending" | "failed" }[];
 	onRetry?: (pending: { id: string; text: string; files: readonly File[]; state: "sending" | "failed" }) => void;
 }) {
@@ -546,9 +555,19 @@ export function FeedView({
 				</Line>
 			) : again && segment.kind === "companion" ? (
 				// not delivered: the message as it was, then the way on
-				partOf(chat, who, { ...segment, undelivered: false }, onOpenArtifact, agent, onRoutine, inspect, messageAuthor)
+				partOf(
+					chat,
+					who,
+					{ ...segment, undelivered: false },
+					onOpenArtifact,
+					agent,
+					onRoutine,
+					inspect,
+					messageAuthor,
+					runLines,
+				)
 			) : (
-				partOf(chat, who, segment, onOpenArtifact, agent, onRoutine, inspect, messageAuthor)
+				partOf(chat, who, segment, onOpenArtifact, agent, onRoutine, inspect, messageAuthor, runLines)
 			);
 		if (again && segment.kind === "companion") {
 			flush();
@@ -682,6 +701,7 @@ function partOf(
 	onRoutine?: (name: string) => void,
 	onActivity?: () => void,
 	messageAuthor?: (id: string) => Who & { readonly id: string },
+	runLines = false,
 ): ReactNode {
 	const routine = "routine" in segment && typeof segment.routine === "string" ? segment.routine : undefined;
 	const openRoutine = routine === undefined || onRoutine === undefined ? undefined : () => onRoutine(routine);
@@ -851,7 +871,19 @@ function partOf(
 				<AgentMessage author={messageAuthor(segment.from)} text={segment.text} time={time(segment.at)} />
 			);
 		case "wake":
-			return (
+			// a line in a run's own conversation opens nothing further: a run holds no runs
+			return runLines ? (
+				<RunLine
+					chat={chat}
+					entry={Number(segment.key)}
+					words={segment.text}
+					name={segment.title}
+					onRoutine={openRoutine}
+					time={time(segment.at)}
+					who={who}
+					agent={agent}
+				/>
+			) : (
 				<Line icon={CalendarClockIcon} time={time(segment.at)} onClick={openRoutine}>
 					{segment.text}
 				</Line>

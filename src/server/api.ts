@@ -86,6 +86,8 @@ export type Receipt =
 	/** A `watch` call's file: the watch, its hash, and whether it made, changed or kept one. */
 	| {
 			readonly kind: "watch";
+			/** The watch's id (`WatchView.id`); `name` is its file's name. */
+			readonly id: string;
 			readonly name: string;
 			readonly sha: string;
 			readonly change: "added" | "changed" | "same";
@@ -262,6 +264,8 @@ export type Item =
 			readonly routine: string;
 			readonly text: string;
 			readonly owner?: true;
+			/** In the run's own conversation: the routine's words, as the run read them. */
+			readonly ask?: string;
 			readonly at?: number;
 	  }
 	/**
@@ -697,10 +701,41 @@ export type WatchState = "allow" | "active" | "paused" | "failing" | "done";
  * /api/watches/:name/accept` and the `sha` shown, or null for a removal), what it follows as the store resolved it,
  * and how it stands. `POST /api/watches/:name/check` looks now; `/pause`, `/resume` and `/remove` as routines.
  */
+/** What a watch file follows, to show: the object in words, its card's reference when known, and the account. */
+export type WatchTargetView = { readonly name: string; readonly ref?: string; readonly account?: string };
+
 export type WatchView = {
+	/**
+	 * Which watch: `<agent>/<name>` for one in its agent's folder (`agents/<agent>/watches/<name>.md`), `<name>` for a
+	 * shared one (`watches/<name>.md`). Every action on it, its wakes and its history name it by this.
+	 */
+	readonly id: string;
+	/** Its file's name, which two agents' watches, or an agent's and a shared one, may share. */
 	readonly name: string;
+	/** It is in the shared `watches/`, in no agent's folder; it runs as `agent` all the same. */
+	readonly shared?: true;
 	readonly accepted?: WatchFileView;
-	readonly change?: ({ readonly kind: "added" | "changed" } & Partial<WatchFileView>) | { readonly kind: "removed" };
+	/**
+	 * The change the box holds, waiting for the owner. `asked` when its agent's own `watch` tool wrote exactly these
+	 * bytes; without it, something else wrote them (a command, another agent writing into this folder), and nobody may
+	 * be said to have asked: it would still wake `agent`.
+	 */
+	readonly change?:
+		| ({
+				readonly kind: "added" | "changed";
+				readonly asked?: true;
+				/**
+				 * The change would make it follow another object, or as another account: what it follows now and what it
+				 * would, each by its card's name, else its canonical id (never a label every object of its kind shares).
+				 */
+				readonly retarget?: { readonly from: WatchTargetView; readonly to: WatchTargetView };
+		  } & Partial<WatchFileView>)
+		| { readonly kind: "removed" };
+	/**
+	 * Other watches of the same agent that follow the same object as the same account, by id: each wakes on its own, so
+	 * the owner is told rather than one hiding another.
+	 */
+	readonly twins?: readonly string[];
 	readonly state: WatchState;
 	/** The agent it belongs to, by id: its wakes happen in that agent's chat. */
 	readonly agent: string;
@@ -899,7 +934,8 @@ export type ConnectionView = {
 
 /**
  * An account of a connection: one sign-in, named by what the service calls the owner ("@bandarra"), the agents that may
- * use it, and whether its credentials no longer fit the connection's definition (it signs in again).
+ * use it, and whether it signs in again: its credentials no longer fit the connection's definition, or they ran out
+ * with nothing to renew them.
  */
 export type AccountView = {
 	/** Its key in the API's paths. */
@@ -911,6 +947,8 @@ export type AccountView = {
 	readonly at: number;
 	readonly agents: readonly string[];
 	readonly stale?: boolean;
+	/** Why it is stale: its access token's time is past and the server gave no refresh token to renew it. */
+	readonly expired?: boolean;
 	/** The scopes this account was given (as the service said, else as it asked): its own, whatever the others'. */
 	readonly scopes?: readonly string[];
 	/** Scopes it may ask for that a tool needs and it was not given, one per tool: "needs Send email". */

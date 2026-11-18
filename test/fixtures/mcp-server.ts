@@ -72,6 +72,8 @@ export type FakeMcp = {
 	readonly tokens: Set<string>;
 	/** Pause a refresh while the owner revokes a tool. */
 	onRefresh?: () => Promise<void>;
+	/** Hold back a refusal of the MCP endpoint (401) until it resolves: a request that was sent before a refresh. */
+	onUnauthorized?: () => Promise<void>;
 	/** Answer tool calls as an event stream rather than JSON. */
 	stream: boolean;
 	/** The server's own notes (`instructions` in its initialize answer); tests change them. */
@@ -95,6 +97,8 @@ export type FakeMcp = {
 	user: string;
 	/** `get_me` answers with no login, as a server that does not say who you are. */
 	anonymous: boolean;
+	/** The owner revokes every refresh token the server gave: a refresh after this is refused (invalid_grant). */
+	revokeRefresh(): void;
 	close(): Promise<void>;
 };
 
@@ -109,6 +113,12 @@ export async function startFakeMcp({
 	issuerParameter = false,
 	redirectTo,
 	answerBytes,
+	authScopes,
+	refreshes: giving = "always",
+	rotate = true,
+	expiresIn = 3600,
+	challengeScope,
+	resourceMetadata = true,
 }: {
 	auth?: "none" | "key" | "oauth";
 	key?: string;
@@ -122,6 +132,20 @@ export async function startFakeMcp({
 	issuerParameter?: boolean;
 	redirectTo?: string;
 	answerBytes?: number;
+	/** The authorization server's own `scopes_supported` (RFC 8414); unsaid when undefined. */
+	authScopes?: string[];
+	/**
+	 * When it gives a refresh token: with every token, only to a sign-in that asked for `offline_access`, or never.
+	 */
+	refreshes?: "always" | "offline" | "never";
+	/** Whether a refresh gives a new refresh token and retires the one used; else the one used goes on working. */
+	rotate?: boolean;
+	/** The access token's `expires_in`, in seconds. */
+	expiresIn?: number;
+	/** The `scope` its 401 challenge names (RFC 6750 §3); none when undefined. */
+	challengeScope?: string;
+	/** Whether it serves its resource metadata (RFC 9728) at all. */
+	resourceMetadata?: boolean;
 } = {}): Promise<FakeMcp> {
 	const calls: { tool: string; args: unknown }[] = [];
 	const authorizations: string[] = [];
@@ -150,6 +174,9 @@ export async function startFakeMcp({
 		codes: userCodes,
 		user: "owner",
 		anonymous: false,
+		revokeRefresh() {
+			refreshes.clear();
+		},
 		typeCode(code, consent = true) {
 			const waiting = userCodes.get(code);
 			if (waiting !== undefined) waiting.approved = consent ? true : "denied";
@@ -175,20 +202,23 @@ export async function startFakeMcp({
 	};
 
 	const users = new Map<string, string>();
-	const issue = (scope = "", user = state.user) => {
+	/** New tokens for `scope`; `kept` is a refresh token that stays and now renews these, given no new one. */
+	const issue = (scope = "", user = state.user, kept?: string) => {
 		const access = `at-${randomBytes(16).toString("hex")}`;
 		users.set(access, user);
 		granted.set(access, scope.split(" ").filter(Boolean));
-		const refresh = `rt-${randomBytes(16).toString("hex")}`;
 		tokens.add(access);
-		refreshes.set(refresh, access);
 		const given = (granted.get(access) ?? []).filter((each) => !state.withheld.includes(each));
 		granted.set(access, given);
+		const offered = giving === "always" || (giving === "offline" && given.includes("offline_access"));
+		const refresh = kept === undefined && offered ? `rt-${randomBytes(16).toString("hex")}` : undefined;
+		if (kept !== undefined) refreshes.set(kept, access);
+		if (refresh !== undefined) refreshes.set(refresh, access);
 		return {
 			access_token: access,
-			refresh_token: refresh,
+			...(refresh === undefined ? {} : { refresh_token: refresh }),
 			token_type: "Bearer",
-			expires_in: 3600,
+			expires_in: expiresIn,
 			...(scope === "" ? {} : { scope: given.join(",") }),
 		};
 	};
@@ -208,15 +238,17 @@ export async function startFakeMcp({
 			const url = new URL(req.url ?? "/", origin);
 			if (url.pathname === "/mcp" && req.method === "POST") {
 				const text = await body(req);
-				if (!authorized(req))
+				if (!authorized(req)) {
+					await state.onUnauthorized?.();
 					return json(
 						res,
 						401,
 						{ error: "unauthorized" },
 						{
-							"www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
+							"www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"${challengeScope === undefined ? "" : `, scope="${challengeScope}"`}`,
 						},
 					);
+				}
 				if (redirectTo !== undefined) return res.writeHead(302, { location: redirectTo }).end();
 				const message = JSON.parse(text) as { id?: unknown; method: string; params?: Record<string, unknown> };
 				if (message.id === undefined) return res.writeHead(202).end();
@@ -295,7 +327,7 @@ export async function startFakeMcp({
 				}
 				return json(res, 200, { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "no such method" } });
 			}
-			if (url.pathname.startsWith("/.well-known/oauth-protected-resource") && auth === "oauth")
+			if (url.pathname.startsWith("/.well-known/oauth-protected-resource") && auth === "oauth" && resourceMetadata)
 				return json(res, 200, {
 					resource: `${origin}/mcp`,
 					authorization_servers: [origin],
@@ -311,6 +343,7 @@ export async function startFakeMcp({
 					...(device ? { device_authorization_endpoint: `${origin}/device/code` } : {}),
 					response_types_supported: ["code"],
 					code_challenge_methods_supported: ["S256"],
+					...(authScopes === undefined ? {} : { scopes_supported: authScopes }),
 				});
 			if (url.pathname === "/register" && req.method === "POST") {
 				const asked = JSON.parse(await body(req)) as { redirect_uris?: string[] };
@@ -372,11 +405,13 @@ export async function startFakeMcp({
 				if (form.get("grant_type") === "refresh_token") {
 					await state.onRefresh?.();
 					refreshed.push({ client: form.get("client_id") ?? "", secret: form.has("client_secret") });
-					const was = refreshes.get(form.get("refresh_token") ?? "");
+					const used = form.get("refresh_token") ?? "";
+					const was = refreshes.get(used);
 					if (was === undefined) return json(res, 400, { error: "invalid_grant" });
-					refreshes.delete(form.get("refresh_token") ?? "");
+					refreshes.delete(used);
 					tokens.delete(was);
-					return json(res, 200, issue((granted.get(was) ?? []).join(" "), users.get(was)));
+					const scope = (granted.get(was) ?? []).join(" ");
+					return json(res, 200, rotate ? issue(scope, users.get(was)) : issue(scope, users.get(was), used));
 				}
 				if (form.get("grant_type") === "urn:ietf:params:oauth:grant-type:device_code") {
 					const typed = deviceCodes.get(form.get("device_code") ?? "");

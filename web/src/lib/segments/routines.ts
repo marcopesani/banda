@@ -41,6 +41,8 @@ declare module "./types.ts" {
 	interface ViewContext {
 		/** The routines, as the control room last said. */
 		readonly routines?: readonly RoutineView[];
+		/** These items are a routine's run's own conversation: its wake is the routine's words, said as the owner's. */
+		readonly run?: true;
 	}
 }
 

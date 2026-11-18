@@ -1,6 +1,6 @@
 /**
  * Watches in full: the owner follows an object (`POST /api/watches`), allows or declines the box's change to one
- * (`POST /api/watches/:name/accept` with the `sha` shown or null, `/decline`), changes what ends one, its wakes a day
+ * (`POST /api/watches/:id/accept`, its id `<agent>/<name>` or a shared one's `<name>`, with the `sha` shown or null, `/decline`), changes what ends one, its wakes a day
  * and what matters (`/edit` with the `sha` shown; `until: null` is any end), pauses, resumes or removes one, and looks
  * now (`/check`), each in effect at once and answered with the control view. On start it finishes an owner's edit a restart cut
  * short, so the box holds what the store accepted.
@@ -21,7 +21,8 @@ import {
 } from "../watches.ts";
 import type { AreaModule } from "./area.ts";
 
-const PATH = /^\/watches\/([a-z0-9-]+)\/(accept|decline|edit|pause|resume|remove|check)$/;
+/** A watch's action, by its id: `<agent>/<name>` for one in its agent's folder, `<name>` for a shared one. */
+const PATH = /^\/watches\/((?:[a-z0-9-]+\/)?[a-z0-9-]+)\/(accept|decline|edit|pause|resume|remove|check)$/;
 const SHA = /^[0-9a-f]{64}$/;
 
 /** An optional string field of a body, at most `max` long. */

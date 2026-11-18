@@ -64,6 +64,7 @@ import {
 	type TroubleData,
 	WAKE,
 	type WakeData,
+	wakeAsk,
 } from "../core/routines.ts";
 import { type RunEntry, startsRun } from "../core/runs.ts";
 import { localTime } from "../core/schedule.ts";
@@ -88,6 +89,7 @@ import {
 	WAKE as WATCH_WAKE,
 	type WatchTroubleData,
 	type WatchWakeData,
+	watchRef,
 } from "../core/watches.ts";
 import type {
 	AgentView,
@@ -235,9 +237,9 @@ export function receiptOf(tool: string, isError: boolean, details: unknown): Rec
 		(receipt.change === "added" || receipt.change === "changed" || receipt.change === "same")
 	) {
 		const { name, sha, change } = receipt;
-		if (kind === "watch") return { kind, name, sha, change };
-		// a receipt with no id is from before agents had folders, when every routine a call wrote was a shared one
+		// a receipt with no id is from before agents had folders, when every file a call wrote was a shared one
 		const id = typeof receipt.id === "string" ? receipt.id : name;
+		if (kind === "watch") return watchRef(id) === undefined ? undefined : { kind, id, name, sha, change };
 		return routineRef(id) === undefined ? undefined : { kind, id, name, sha, change };
 	}
 	return undefined;
@@ -351,12 +353,15 @@ export function itemOf(entry: EntryRecord): Item | undefined {
 		};
 	if (entry.kind === WAKE) {
 		const data = entry.data as unknown as WakeData;
+		const ask = message === undefined ? undefined : wakeAsk(textOf(message.content));
 		return {
 			id,
 			role: "wake",
 			routine: data.routine,
 			text: data.description,
 			...(data.owner === true ? { owner: true as const } : {}),
+			// in its run's own conversation the wake is what the model read: the routine's words are in it
+			...(ask === undefined ? {} : { ask }),
 			// a run apart from the chat draws its line with no model message: it says when it was due
 			at: message ? message.timestamp : data.due,
 		};

@@ -12,10 +12,12 @@ Entry points: ../src/core/watches.ts (the file, the task, the looks), ../src/ser
 
 ## Work and acceptance
 
-**The watch.** `watches/<name>.md` is a "before" file: the object (a link), the account, `until`,
+**The watch.** `agents/<agent>/watches/<name>.md` (or a shared `watches/<name>.md`) is a "before" file: the object (a link), the account, `until`,
 `wakes_a_day` and a body the agent gets at every wake. The `watch` tool writes one as a card ("Follow banda#142 until merged?"); Follow on an object's
 card and the panel's Add write the owner's own, accepted in the commit that stores them. The store holds the watch's
-task only: its reading, its health, its wakes.
+task only: its reading, its health, its wakes. Its identity is its agent, connection, canonical object and resolved
+account (DESIGN.md "Watches"); the file's name is its connection, kind and that identity's hash, and its id
+(`<agent>/<name>`, a shared one's `<name>`) names it in the store, the API, its wakes and its card.
 
 **The task.** The first look happens before the watch is live and is its baseline; a failed first look makes no
 watch. Each look reads with the account's credentials in the daemon, diffs against the reading before and sorts the
@@ -47,10 +49,15 @@ returned to and merged, at desktop and phone width.
 
 ## Open work
 
-- [ ] A watch's file name comes from its object's words (`watchNameFor`), and `watch` steps the number only past
-  another agent's accepted file: one agent following two objects of the same words (three Slack channels, each
-  `a-channel-in-slack`) writes each over the last, and the chat folds their cards into one. Name it by what it follows
-  (connection, object and account), the same object again changing it
+- [ ] Watches by identity through the app against a daemon at desktop and phone width: three Slack channels of one
+  agent, each card allowed alone; one channel for two agents and two accounts; a change written into an agent's folder
+  by another (said to be nobody's ask); a shared watch and an agent's own on one object (each says it is followed
+  twice)
+- [ ] Watches lost before identities (one file written over another) are not restored: nothing records what they
+  followed, and none is guessed from a label; the agent asks again, or the owner follows them again
+- [ ] A change written into another agent's folder is shown as nobody's ask and the owner's to allow, not refused:
+  who wrote it is known only for the `watch` tool's own bytes. Who ran the command that wrote it is the box's
+  ingestion to record, shared with routines' cards
 
 - [ ] Slice 3 through the app against a daemon: a burst, a limit and an issue against real GitHub (the pass followed
   a pull request alone) (#35)

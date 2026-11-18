@@ -857,6 +857,16 @@ export function fits(credentials: Credentials | undefined, connection: Connectio
 	return requiredOf(connection).every((scope) => asked.includes(scope));
 }
 
+/**
+ * Whether a sign-in has run out at `at` with nothing to renew it: its access token's time, as the server said, is past
+ * and the server gave no refresh token. Only the owner signing in again brings it back; the daemon never does it alone.
+ */
+export function expiredAt(credentials: Credentials | undefined, at: number): boolean {
+	if (credentials === undefined || !("oauth" in credentials)) return false;
+	const { refresh, expires } = credentials.oauth.tokens;
+	return refresh === undefined && expires !== undefined && expires <= at;
+}
+
 /** The scopes a sign-in was given: as the server said when it granted them, else as they were asked for. */
 export const grantedScopes = (credentials: Credentials): readonly string[] =>
 	"oauth" in credentials ? (credentials.oauth.tokens.scopes ?? credentials.oauth.server.scopes ?? []) : [];

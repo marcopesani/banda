@@ -21,7 +21,7 @@ const object = {
 
 describe("watches in the app", () => {
 	const idle: Live = { busy: false, running: [], thinking: false };
-	const wrote = { kind: "watch" as const, name: "banda-142", sha: SHA, change: "added" as const };
+	const wrote = { kind: "watch" as const, id: "banda-142", name: "banda-142", sha: SHA, change: "added" as const };
 	const call = (
 		id: number,
 		args: object,
@@ -40,17 +40,35 @@ describe("watches in the app", () => {
 		const line = (watches: WatchView[], removed?: { [path: string]: number }) =>
 			view(items, [], idle, { watches, ...(removed === undefined ? {} : { removed }) }).flatMap(shown);
 		expect(
-			line([{ agent: "mara", name: "banda-142", state: "allow", change: { kind: "added", sha: SHA, watch: summary } }]),
+			line([
+				{
+					agent: "mara",
+					id: "banda-142",
+					name: "banda-142",
+					state: "allow",
+					change: { kind: "added", sha: SHA, watch: summary },
+				},
+			]),
 		).toEqual(["Wants to follow https://github.com/acme/banda/pull/142"]);
 		const accepted = { sha: SHA, watch: summary };
-		expect(line([{ agent: "mara", name: "banda-142", state: "active", accepted, object }])).toEqual([
+		expect(line([{ agent: "mara", id: "banda-142", name: "banda-142", state: "active", accepted, object }])).toEqual([
 			"Followed acme/banda #142",
 		]);
-		expect(line([{ agent: "mara", name: "banda-142", state: "paused", accepted, object, paused: "owner" }])).toEqual([
-			"Paused following acme/banda #142",
-		]);
 		expect(
-			line([{ agent: "mara", name: "banda-142", state: "done", accepted, object, done: { at: NOW, why: "merged" } }]),
+			line([{ agent: "mara", id: "banda-142", name: "banda-142", state: "paused", accepted, object, paused: "owner" }]),
+		).toEqual(["Paused following acme/banda #142"]);
+		expect(
+			line([
+				{
+					agent: "mara",
+					id: "banda-142",
+					name: "banda-142",
+					state: "done",
+					accepted,
+					object,
+					done: { at: NOW, why: "merged" },
+				},
+			]),
 		).toEqual(["Finished following acme/banda #142: merged"]);
 		expect(line([])).toEqual(["Isn't following banda-142"]);
 		expect(line([], { "watches/banda-142.md": NOW })).toEqual(["Stopped following banda-142"]);
@@ -138,6 +156,7 @@ describe("watches in the app", () => {
 			[
 				{
 					agent: "mara",
+					id: "banda-142",
 					name: "banda-142",
 					state: "active",
 					accepted,
@@ -147,9 +166,16 @@ describe("watches in the app", () => {
 					saw: ["ana approved"],
 					sawAt: NOW - 60_000,
 				},
-				{ agent: "mara", name: "banda-150", state: "allow", change: { kind: "added", sha: SHA, watch: summary } },
 				{
 					agent: "mara",
+					id: "banda-150",
+					name: "banda-150",
+					state: "allow",
+					change: { kind: "added", sha: SHA, watch: summary },
+				},
+				{
+					agent: "mara",
+					id: "banda-98",
 					name: "banda-98",
 					state: "failing",
 					accepted,
@@ -157,9 +183,18 @@ describe("watches in the app", () => {
 					looked: NOW,
 					failed: { at: NOW, why: "GitHub did not answer", since: NOW - 50 * 60_000 },
 				},
-				{ agent: "mara", name: "banda-77", state: "done", accepted, object, done: { at: NOW, why: "merged" } },
 				{
 					agent: "mara",
+					id: "banda-77",
+					name: "banda-77",
+					state: "done",
+					accepted,
+					object,
+					done: { at: NOW, why: "merged" },
+				},
+				{
+					agent: "mara",
+					id: "banda-60",
 					name: "banda-60",
 					state: "done",
 					accepted,
@@ -167,9 +202,10 @@ describe("watches in the app", () => {
 					failed: { at: NOW, why: "GitHub is not connected for Mara", since: NOW },
 					done: { at: NOW, why: "GitHub as @bandarra was switched off for Mara", authority: true },
 				},
-				{ agent: "otto", name: "other", state: "active", accepted, object },
+				{ agent: "otto", id: "other", name: "other", state: "active", accepted, object },
 				{
 					agent: "mara",
+					id: "banda-150b",
 					name: "banda-150b",
 					state: "active",
 					accepted,
@@ -209,6 +245,7 @@ describe("watches in the app", () => {
 			sawWords(
 				{
 					agent: "mara",
+					id: "x",
 					name: "x",
 					state: "paused",
 					accepted: { sha: SHA, watch: { ...summary, wakesADay: 24 } },
@@ -223,7 +260,7 @@ describe("watches in the app", () => {
 		expect(rows[0]?.behind).toBe(false);
 		expect(rows[5]?.behind).toBe(true);
 		expect(rows[5]?.saw).toMatch(/^Saw today 09:00.*: lint failed; some changes may be missing$/);
-		expect(sawWords({ agent: "mara", name: "x", state: "active", looked: NOW }, NOW)).toMatch(
+		expect(sawWords({ agent: "mara", id: "x", name: "x", state: "active", looked: NOW }, NOW)).toMatch(
 			/^Looked today 09:00.*, nothing new$/,
 		);
 		// stopped by the owner's switch: it says so in those words, never "can't reach"
@@ -231,6 +268,7 @@ describe("watches in the app", () => {
 			sawWords(
 				{
 					agent: "mara",
+					id: "x",
 					name: "x",
 					state: "failing",
 					failed: { at: NOW, since: NOW, off: true, why: 'You turned off "issue read" for GitHub.' },
@@ -239,7 +277,7 @@ describe("watches in the app", () => {
 			),
 		).toBe('Stopped: You turned off "issue read" for GitHub.');
 		// reading behind: a walk of pages is open, and the row says since when until it reaches what it kept
-		const walking = { agent: "mara", name: "x", state: "active" as const, looked: NOW, pages: { since: NOW } };
+		const walking = { agent: "mara", id: "x", name: "x", state: "active" as const, looked: NOW, pages: { since: NOW } };
 		expect(sawWords(walking, NOW)).toMatch(/^Behind since today 09:00.*: more came than a page holds/);
 		expect(watchRows([{ ...walking, accepted: { sha: SHA, watch: summary } }], "mara", NOW)[0]?.behind).toBe(true);
 	});

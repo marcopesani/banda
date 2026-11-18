@@ -167,7 +167,8 @@ export const ROUTINES: readonly RoutineRowView[] = [
 ];
 
 /**
- * What Mara watches: a pull request until it merges, one waiting for the owner, one it cannot reach, one behind (its
+ * What Mara watches: a pull request until it merges, one waiting for the owner, one waiting that she did not ask for,
+ * a shared one following what her own does, one it cannot reach, one behind (its
  * newest wake had a gap), one that paused itself at its wakes a day, one done, and one ended when its account was
  * switched off.
  */
@@ -181,6 +182,34 @@ export const WATCHES: readonly WatchRowView[] = [
 		saw: "Saw today 09:10: ana approved, lint failed",
 	},
 	{ id: "banda-150", name: "purrgrammer/banda #150", service: "GitHub", until: "until closed", waiting: "set up" },
+	// written into Mara's folder by a command or another agent, not by her own watch tool: nobody is said to ask
+	{
+		id: "mara/banda-151-0c1d2e3f4a5b",
+		name: "purrgrammer/banda #151",
+		service: "GitHub",
+		until: "until merged",
+		waiting: "set up",
+		unasked: true,
+	},
+	// a change written into her folder that would make her watch on #ops-b follow another channel: both are named
+	{
+		id: "mara/slack-channel-0c1d2e3f4a5b6c7d8e9f0a1b",
+		name: "#ops-b",
+		service: "Slack",
+		waiting: "change",
+		unasked: true,
+		retarget: { from: "#ops-b as U0MARA", to: "slack/C0TESTOPSC as U0MARA" },
+	},
+	// a shared watch from before agents had folders and her own follow #142 as the same account: each wakes alone
+	{
+		id: "banda-142-shared",
+		name: "purrgrammer/banda #142",
+		service: "GitHub",
+		until: "until merged",
+		next: "today 09:40",
+		twins: 1,
+		shared: true,
+	},
 	{
 		id: "banda-98",
 		name: "purrgrammer/banda #98",
@@ -237,6 +266,7 @@ export const WATCHES: readonly WatchRowView[] = [
 
 /** Mara's watch on #142 as the daemon sends it, which its detail opens on. */
 export const WATCH_VIEW: WatchView = {
+	id: "mara/banda-142",
 	name: "banda-142",
 	accepted: {
 		sha: "0".repeat(64),
@@ -262,6 +292,7 @@ export const WATCH_VIEW: WatchView = {
 
 /** Mara's watch on a contact, which nothing ends: its detail says so and its editor has no end to pick. */
 export const WATCH_CONTACT_VIEW: WatchView = {
+	id: "mara/ana-garcia",
 	name: "ana-garcia",
 	accepted: {
 		sha: "1".repeat(64),

@@ -41,7 +41,7 @@ export async function retire(tx: Tx, id: string, now: number): Promise<void> {
 	// its watches too: paused as the owner's own pause, so restoring brings none back unasked
 	const { watches } = await tx.doc(Watches);
 	for (const [watch, record] of Object.entries(watches))
-		if (record.paused === undefined && record.done === undefined && watchAgent(record) === id) {
+		if (record.paused === undefined && record.done === undefined && watchAgent(watch, record) === id) {
 			record.paused = "owner";
 			await log(tx, { at: now, watch, what: `paused: you archived ${name}` });
 		}

@@ -231,7 +231,7 @@ const watchesMoved = (shell: Shell) =>
 		generationOf(shell.capabilities),
 		generationOf(shell.agents),
 		(shell.watches ?? []).map((watch) => [
-			watch.name,
+			watch.id,
 			watch.object?.ref,
 			watch.object?.version,
 			watch.accepted?.watch?.until,
