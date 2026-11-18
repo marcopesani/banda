@@ -11,6 +11,7 @@ import {
 	type Item,
 	type ItemPage,
 	type Queued,
+	Refused,
 	type RunningTool,
 	type ShownWait,
 	Unauthorized,
@@ -198,23 +199,34 @@ export function useTranscript(chat: number): Transcript {
 	};
 }
 
+/** A transcript read once: `missing` when the daemon said there is no such chat, `failed` when the read got no answer. */
+export type ReadTranscript = Transcript & {
+	/** Why the read did not get the daemon's answer (it did not answer, or hit a problem); `retry` reads again. */
+	readonly failed: Error | undefined;
+	readonly retry: () => void;
+};
+
 /**
  * Chat `chat`'s transcript read once, newest page first, with no live events: for a conversation shown beside the chat
  * on screen (a routine's run, opened in its line). The page has one live stream, which follows the chat on screen
  * (`one-stream.ts`); reading another chat live would take it away. What is read is what was there when it was opened.
  */
-export function useReadTranscript(chat: number): Transcript {
+export function useReadTranscript(chat: number): ReadTranscript {
 	const [items, setItems] = useState<readonly Item[]>([]);
 	const [next, setNext] = useState<number>();
 	const [loaded, setLoaded] = useState(false);
 	const [missing, setMissing] = useState(false);
+	const [failed, setFailed] = useState<Error>();
+	const [attempt, setAttempt] = useState(0);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` counts the reads asked for; each reads again
 	useEffect(() => {
 		let gone = false;
 		setItems([]);
 		setNext(undefined);
 		setLoaded(false);
 		setMissing(false);
+		setFailed(undefined);
 		api<ItemPage>(`/chats/${chat}/items`).then(
 			(page) => {
 				if (gone) return;
@@ -222,14 +234,21 @@ export function useReadTranscript(chat: number): Transcript {
 				setNext(page.next);
 				setLoaded(true);
 			},
-			() => {
-				if (!gone) setMissing(true);
+			(error: unknown) => {
+				if (gone) return;
+				// a lost sign-in is the page's to say (App), as the live transcript leaves it
+				if (error instanceof Unauthorized) return;
+				// only the daemon's own word makes it gone; anything else may pass when read again
+				if (error instanceof Refused && error.status === 404) setMissing(true);
+				else setFailed(error instanceof Error ? error : new Error(String(error)));
 			},
 		);
 		return () => {
 			gone = true;
 		};
-	}, [chat]);
+	}, [chat, attempt]);
+
+	const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
 	useEffect(() => {
 		itemsByChat.set(chat, items);
@@ -260,7 +279,9 @@ export function useReadTranscript(chat: number): Transcript {
 			loadOlder,
 			loaded,
 			missing,
+			failed,
+			retry,
 		}),
-		[items, next, loadOlder, loaded, missing],
+		[items, next, loadOlder, loaded, missing, failed, retry],
 	);
 }

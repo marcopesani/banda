@@ -9,6 +9,7 @@ import { Line } from "../chat/Line.tsx";
 import { RoutineRun, type RunRead, RunReading } from "../chat/RoutineRun.tsx";
 import type { Who } from "../chat/Row.tsx";
 import { api, Refused } from "../lib/api.ts";
+import { failureWords } from "../lib/attempt.ts";
 import { view } from "../lib/chat.ts";
 import { useReadTranscript } from "../lib/transcript.ts";
 import { ActivitySheet } from "./Activity.tsx";
@@ -107,12 +108,30 @@ function RunConversation({ run, who, agent }: { run: number; who: Who; agent?: s
 	);
 	const [activity, setActivity] = useState<{ anchor?: number }>();
 	const [from, setFrom] = useState<HTMLElement>();
+	// an earlier page that could not be read: said in its place, with Try again; what was read stays
+	const [olderFailed, setOlderFailed] = useState<Error>();
+	const earlier = () => {
+		void transcript.loadOlder().then(
+			() => setOlderFailed(undefined),
+			(error: unknown) => setOlderFailed(error instanceof Error ? error : new Error(String(error))),
+		);
+	};
 	if (transcript.missing) return <Line className="px-0">This run's conversation is gone</Line>;
+	if (transcript.failed !== undefined)
+		return (
+			<Line tone="danger" className="px-0" action={{ label: "Try again", onClick: transcript.retry }}>
+				The run could not be read: {failureWords(transcript.failed)}
+			</Line>
+		);
 	if (!transcript.loaded) return <RunReading />;
 	return (
 		<>
-			{transcript.older ? (
-				<Line className="px-0" action={{ label: "Show earlier", onClick: () => void transcript.loadOlder() }}>
+			{olderFailed !== undefined ? (
+				<Line tone="danger" className="px-0" action={{ label: "Try again", onClick: earlier }}>
+					Earlier messages could not be read: {failureWords(olderFailed)}
+				</Line>
+			) : transcript.older ? (
+				<Line className="px-0" action={{ label: "Show earlier", onClick: earlier }}>
 					This is the end of a long run
 				</Line>
 			) : null}
