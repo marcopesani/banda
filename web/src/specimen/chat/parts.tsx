@@ -17,6 +17,7 @@ import { ApprovalCard, ChangeCard, Details, Facts, WaitingPill } from "../../cha
 import {
 	ArtifactCard,
 	ArtifactImage,
+	ArtifactLink,
 	Browsed,
 	QuestionCard,
 	type QuestionState,
@@ -354,6 +355,21 @@ export function Parts() {
 			<Section id="cards" note="What an agent made, sees, asks, or hands you.">
 				<div className="flex max-w-2xl flex-col gap-3">
 					<ArtifactCard title="Lisbon long weekend" kind="Plan" version="3 versions · you edited the last" />
+					<Group label="An artifact a message's words link: its icon and its title in the Library, opening it; no card">
+						<p className="text-ui text-ink">
+							The plan is in <ArtifactLink title="Lisbon long weekend" kind="Document" href="#/specimen" />, and the
+							budget in{" "}
+							<ArtifactLink
+								title="A budget with a title long enough to be cut short on a phone"
+								kind="Table"
+								href="#/specimen"
+							/>
+							.
+						</p>
+						<p className="text-ui text-ink">
+							Removed since: <ArtifactLink title="the old notes" kind="Artifact" unavailable />.
+						</p>
+					</Group>
 					<Group label="An artifact that is an image: the image, as an attached one shows; a tap opens the artifact">
 						<ArtifactImage src={PAGE} title="Lisbon coast" versions={3} onOpen={() => {}} />
 						<ArtifactImage

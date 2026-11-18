@@ -28,7 +28,8 @@ export type MessagePart = {
 	readonly said?: (args: JsonObject) => string | undefined;
 	/**
 	 * Run before the message is queued, under the same lock as its files (`BlobStore.exclusive`), so no sweep comes
-	 * between: why it cannot be sent, an optional UI receipt published only on successful delivery, or undefined.
+	 * between: why it cannot be sent; or an optional UI receipt published only on successful delivery, and what the
+	 * owner sees of the part once it is, which the call's result tells the model (`seen`); or undefined.
 	 * A rerun after a crash runs it again: it must find what it did.
 	 */
 	readonly prepare?: (
@@ -36,5 +37,5 @@ export type MessagePart = {
 		api: ToolExecutionApi,
 		ctx: Context,
 		store: PartStore,
-	) => Promise<string | undefined | { readonly receipt: JsonObject }>;
+	) => Promise<string | undefined | { readonly receipt?: JsonObject; readonly seen?: string }>;
 };

@@ -50,8 +50,22 @@ async function daemon() {
 		Array.from({ length: 200 }, () => (ctx: { messages: readonly Said[] }) => {
 			contexts.push([...ctx.messages]);
 			const last = ctx.messages.at(-1);
+			// `publish+show <path>`: one run publishes, then shows by its id what that publish just drew
+			const asked = [...ctx.messages].reverse().find((message) => message.role === "user");
+			const again = /^publish\+show /.test(textOf(asked?.content));
+			const made = /its id is ([0-9a-f]{16})/.exec(textOf(last?.content))?.[1];
+			if (last?.role === "toolResult" && again && made !== undefined)
+				return fauxAssistantMessage([fauxToolCall("message_user", { text: "Here it is.", artifacts: [made] })], {
+					stopReason: "toolUse",
+				});
 			if (last?.role !== "user") return fauxAssistantMessage("done");
-			const said = textOf(last.content);
+			const said = textOf(last.content).replace(/^publish\+show /, "publish ");
+			// a message as the model wrote it, its arguments whole
+			const whole = /^say (\{.*\})$/s.exec(said);
+			if (whole !== null)
+				return fauxAssistantMessage([fauxToolCall("message_user", JSON.parse(whole[1] ?? "{}"))], {
+					stopReason: "toolUse",
+				});
 			const shown = /^show (.+)$/.exec(said);
 			if (shown !== null)
 				return fauxAssistantMessage(
@@ -86,7 +100,7 @@ async function daemon() {
 		if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
 		return (await response.json()) as T;
 	};
-	const thread = randomUUID();
+	let thread = randomUUID();
 	let chat: number | undefined;
 	/** Say `text` in the one chat and wait for its run to end. */
 	const say = async (text: string) => {
@@ -101,10 +115,25 @@ async function daemon() {
 				contexts.length > before && (await api<ChatRow[]>("/chats")).find((row) => row.chat === chat)?.state === "idle",
 		);
 	};
-	const items = async () => (await api<{ items: Item[] }>(`/chats/${chat}/items?after=0`)).items as readonly Item[];
+	/** The chat's whole transcript, page after page. */
+	const items = async () => {
+		const all: Item[] = [];
+		let after: number | undefined = 0;
+		while (after !== undefined) {
+			const page: { items: Item[]; next?: number } = await api(`/chats/${chat}/items?after=${after}`);
+			all.push(...page.items);
+			after = page.next;
+		}
+		return all as readonly Item[];
+	};
 	const library = () => api<ArtifactView[]>("/artifacts");
 	const box = (path: string) => join(home, "workspace", path);
-	return { home, api, call, say, items, library, box, contexts, close: () => running.close() };
+	/** Talk in another chat from now on. */
+	const elsewhere = () => {
+		thread = randomUUID();
+		chat = undefined;
+	};
+	return { home, api, call, say, elsewhere, items, library, box, contexts, close: () => running.close() };
 }
 
 describe("artifacts in the daemon", () => {
@@ -116,7 +145,10 @@ describe("artifacts in the daemon", () => {
 			await d.say("publish plan.md Trip");
 			const id = artifactId(d.box("plan.md"));
 			const result = (await d.items()).find((item) => item.role === "tool" && item.name === "publish");
-			expect(result).toMatchObject({ error: false, text: `Published as version 1; its id is ${id}.` });
+			expect(result).toMatchObject({ error: false });
+			expect(result?.role === "tool" && result.text).toMatch(
+				new RegExp(`^Published as version 1; its id is ${id}\\. `),
+			);
 			await d.say(`show ${id}`);
 			const shownResult = () =>
 				d.items().then((items) => items.filter((item) => item.role === "tool" && item.name === "message_user"));
@@ -139,6 +171,174 @@ describe("artifacts in the daemon", () => {
 			await d.close();
 		}
 	});
+
+	it("tells the model what the owner sees: a publish's card, the same bytes as no new version, and an artifact linked in its words or shown as a card", async () => {
+		const d = await daemon();
+		try {
+			await mkdir(join(d.home, "workspace"), { recursive: true });
+			await writeFile(d.box("plan.md"), "# Friday\n");
+			await writeFile(d.box("old.md"), "# Old\n");
+			const id = artifactId(d.box("plan.md"));
+			const results = async (name: string) =>
+				(await d.items()).flatMap((item) => (item.role === "tool" && item.name === name ? [item] : []));
+			const last = async (name: string) => (await results(name)).at(-1);
+			// a first publish: the version it made, that the card shows now, and how to show or name it later
+			await d.say("publish plan.md Trip plan");
+			expect((await last("publish"))?.text).toBe(
+				`Published as version 1; its id is ${id}. The owner sees “Trip plan” here now, as its card at version 1; ` +
+					`showing it again in this run adds nothing. Later, \`artifacts: ["${id}"]\` in a message shows its card ` +
+					`again; \`[words](artifact:${id})\` in its text links it by its title.`,
+			);
+			// the same bytes again make no version, and the model is not told it made one
+			await d.say("publish plan.md");
+			expect((await last("publish"))?.text).toMatch(
+				new RegExp(`^Unchanged: the file holds version 1's bytes, so no new version; its id is ${id}\\. `),
+			);
+			await writeFile(d.box("plan.md"), "# Friday\n\nback at six\n");
+			await d.say("publish plan.md | back at six");
+			expect((await last("publish"))?.text).toMatch(/^Published as version 2; .* as its card at version 2;/);
+
+			// linked in the words and shown as a card, side by side: both, each said
+			await d.say(`say ${JSON.stringify({ text: `See [my notes](artifact:${id}).`, artifacts: [id] })}`);
+			expect(await last("message_user")).toMatchObject({
+				error: false,
+				text: "Sent. The owner sees “Trip plan” as its card, at version 2; “Trip plan” as a link in your words.",
+				receipt: { kind: "artifacts", artifacts: [{ id, n: 2 }] },
+			});
+			// linked alone: no card, no receipt
+			await d.say(`say ${JSON.stringify({ text: `Read [this](artifact:${id}) first.` })}`);
+			const linked = await last("message_user");
+			expect(linked).toMatchObject({ error: false, text: "Sent. The owner sees “Trip plan” as a link in your words." });
+			expect(linked?.role === "tool" && linked.receipt).toBeFalsy();
+			const sent = (await d.items()).filter((item) => item.role === "assistant");
+			expect(JSON.stringify(sent)).toContain(`Read [this](artifact:${id}) first.`);
+
+			// an id the Library does not hold, or one it held and the owner removed: nothing is sent, and the model
+			// hears this chat's ids
+			const count = (await results("message_user")).length;
+			await d.say(`say ${JSON.stringify({ text: "See [it](artifact:0123456789abcdef)." })}`);
+			await d.say("publish old.md Old notes");
+			const old = artifactId(d.box("old.md"));
+			expect((await d.call(`/artifacts/${old}`, { method: "DELETE" })).ok).toBe(true);
+			await d.say(`say ${JSON.stringify({ text: `See [the old one](artifact:${old}).` })}`);
+			// not an artifact link: the scheme in another case, or no id
+			await d.say(`say ${JSON.stringify({ text: `See [x](Artifact:${id}).` })}`);
+			await d.say(`say ${JSON.stringify({ text: "Run [x](artifact:javascript:alert(1))." })}`);
+			const refused = (await results("message_user")).slice(count).map((item) => item.role === "tool" && item);
+			expect(refused.map((item) => item && [item.error, item.text])).toEqual([
+				[true, `Not sent: no artifact 0123456789abcdef in the Library; this chat's are ${id} (Trip plan).`],
+				[true, `Not sent: no artifact ${old} in the Library; this chat's are ${id} (Trip plan).`],
+				[
+					true,
+					`Not sent: "Artifact:${id}" is no artifact link: link one as [words](artifact:<id>), its id as \`publish\` returned it.`,
+				],
+				[
+					true,
+					'Not sent: "artifact:javascript:alert(1)" is no artifact link: link one as [words](artifact:<id>), its id as `publish` returned it.',
+				],
+			]);
+		} finally {
+			await d.close();
+		}
+	}, 60_000);
+
+	it("says a card is not drawn again when a publish of the same run drew it, and names another chat's artifact by its id", async () => {
+		const d = await daemon();
+		try {
+			await mkdir(join(d.home, "workspace"), { recursive: true });
+			await writeFile(d.box("plan.md"), "# Friday\n");
+			const id = artifactId(d.box("plan.md"));
+			const shownResults = async () =>
+				(await d.items()).filter((item) => item.role === "tool" && item.name === "message_user");
+			// one run: publish, then show it by its id; the app draws that version once, and the result says so
+			await d.say("publish+show plan.md Trip plan");
+			const same = (await shownResults()).at(-1);
+			expect(same).toMatchObject({
+				error: false,
+				text: "Sent. The owner sees “Trip plan” at version 1 as the card your publish drew in this run, not a second one.",
+				// the receipt is what was asked: the app's once-per-run rule is what leaves the card out
+				receipt: { kind: "artifacts", artifacts: [{ id, n: 1 }] },
+			});
+			// a later run shows it again: its own card
+			await d.say(`show ${id}`);
+			expect((await shownResults()).at(-1)).toMatchObject({
+				error: false,
+				text: "Sent. The owner sees “Trip plan” as its card, at version 1.",
+			});
+			// from another chat: the same artifact, shown or linked, named by its id, never its title from there
+			d.elsewhere();
+			await d.say(`say ${JSON.stringify({ text: `See [it](artifact:${id}).`, artifacts: [id] })}`);
+			expect((await shownResults()).at(-1)).toMatchObject({
+				error: false,
+				text: `Sent. The owner sees the artifact ${id} as its card, at version 1; the artifact ${id} as a link in your words.`,
+			});
+		} finally {
+			await d.close();
+		}
+	}, 60_000);
+
+	it("reads artifact links as the app draws them: entities, escapes, references and titles count; code and escaped brackets do not", async () => {
+		const d = await daemon();
+		try {
+			await mkdir(join(d.home, "workspace"), { recursive: true });
+			await writeFile(d.box("plan.md"), "# Friday\n");
+			const id = artifactId(d.box("plan.md"));
+			await d.say("publish plan.md Trip plan");
+			const said = async (text: string) => {
+				const words = `say ${JSON.stringify({ text })}`;
+				await d.say(words);
+				// this message's call's result: the first after the owner's words that asked for it, once its run ended (a
+				// refused one is nudged, then noticed)
+				const result = await until(async () => {
+					const items = await d.items();
+					const asked = items.map((item) => item.role === "user" && item.text === words).lastIndexOf(true);
+					const after = asked < 0 ? [] : items.slice(asked);
+					const found = after.find((item) => item.role === "tool" && item.name === "message_user");
+					// its run ended: the chat idle once it went, and noticed once it was refused (and nudged)
+					const idle = (await d.api<ChatRow[]>("/chats")).every((row) => row.state === "idle");
+					const ended = found?.role === "tool" && (found.error ? after.at(-1)?.role === "notice" : idle);
+					return ended ? found : undefined;
+				});
+				return result.role === "tool" ? [result.error, result.text] : undefined;
+			};
+			const never = "0123456789abcdef";
+			const missing = `Not sent: no artifact ${never} in the Library; this chat's are ${id} (Trip plan).`;
+			const linked = "Sent. The owner sees “Trip plan” as a link in your words.";
+			const noLink = (href: string) =>
+				`Not sent: ${JSON.stringify(href)} is no artifact link: link one as [words](artifact:<id>), its id as \`publish\` returned it.`;
+			// what the app draws as a link to an id the Library never held is refused, however it is written
+			expect(await said(`[x](&#97;rtifact:${never})`)).toEqual([true, missing]);
+			expect(await said(`[x](&#x61;rtifact:${never})`)).toEqual([true, missing]);
+			expect(await said(`[x](artifact\\:${never})`)).toEqual([true, missing]);
+			expect(await said(`[x][r]\n\n[r]:\n  artifact:${never}`)).toEqual([true, missing]);
+			expect(await said(`[x][r]\n\n[r]:\n  artifact:javascript:alert(1)`)).toEqual([
+				true,
+				noLink("artifact:javascript:alert(1)"),
+			]);
+			// a destination in brackets keeps its space, as the app's href does: no artifact link
+			expect(await said(`[x](<artifact:${id} >)`)).toEqual([true, noLink(`artifact:${id}%20`)]);
+			// what the app draws as a link to it: sent, and said
+			expect(await said(`[x](&#97;rtifact:${id})`)).toEqual([false, linked]);
+			expect(await said(`[x](artifact:${id} "its title")`)).toEqual([false, linked]);
+			expect(await said(`[x][plan]\n\n[plan]: artifact:${id}`)).toEqual([false, linked]);
+			// what the app draws as no link at all: sent as words, and nothing said of an artifact
+			expect(await said("Write `[words](artifact:<id>)` to link one.")).toEqual([false, "Sent."]);
+			expect(await said("```\n[x](artifact:nope)\n```")).toEqual([false, "Sent."]);
+			expect(await said("\\[x\\](artifact:nope)")).toEqual([false, "Sent."]);
+			expect(await said(`[unused]: artifact:${never}`)).toEqual([false, "Sent."]);
+			// nor as an image, nor in raw HTML, which the app parses too
+			expect(await said(`![x](artifact:${id})`)).toEqual([
+				true,
+				"Not sent: an artifact is linked, [words](artifact:<id>), never shown as an image.",
+			]);
+			expect(await said(`<a href="&#97;rtifact:${id}">x</a>`)).toEqual([
+				true,
+				"Not sent: link an artifact in markdown, [words](artifact:<id>), not in HTML.",
+			]);
+		} finally {
+			await d.close();
+		}
+	}, 60_000);
 
 	it("publishes versions, keeps the same bytes as one, and the owner's edit and restore reach the box and the chat", async () => {
 		const d = await daemon();

@@ -99,6 +99,9 @@ export const artifactId = (path: string) => createHash("sha256").update(path).di
 
 export const ARTIFACT_ID = /^[0-9a-f]{16}$/;
 
+/** The scheme an artifact is linked by in a message's text, `[words](artifact:<id>)`, as a blob is by `sha256:`. */
+export const ARTIFACT_SCHEME = "artifact:";
+
 const KINDS: { readonly [mimeType: string]: ArtifactKind } = {
 	"text/markdown": "markdown",
 	"text/plain": "text",

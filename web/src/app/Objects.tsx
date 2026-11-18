@@ -29,12 +29,13 @@ import {
 	SlackFileLine,
 } from "../chat/Object.tsx";
 import { Named } from "../chat/Watch.tsx";
-import { Markdown, MarkdownLinks } from "../components/Markdown.tsx";
+import { Markdown, MarkdownArtifacts, MarkdownLinks } from "../components/Markdown.tsx";
 import { api, gmailAttachment, objectAttachment } from "../lib/api.ts";
 import { sharedReads } from "../lib/object-reads.ts";
 import { githubKey, idLinks, idOfLink, objectAsks } from "../lib/objects.ts";
 import { type Shell, useShellPick } from "../lib/shell.ts";
 import { sizeOf } from "../lib/size.ts";
+import { ArtifactReference } from "./ArtifactPart.tsx";
 import { ConnectFlowCard } from "./ConnectFlow.tsx";
 import { FilePart } from "./FilePart.tsx";
 import { watchActions } from "./watches.tsx";
@@ -116,9 +117,13 @@ export function MessageObjects({
 const wordsOfIds = (href: string, children: ReactNode) =>
 	href.startsWith("object:") ? <span>{children}</span> : undefined;
 
+/** An artifact a message's prose links: its icon and its title in the Library, opening it (`ArtifactReference`). */
+const artifactReference = (id: string | undefined, words: ReactNode) => <ArtifactReference id={id} words={words} />;
+
 /**
  * A message's prose, anyone's: an object it names stays inside the words as its icon and name, and opens its card when
- * clicked. Unreadable or unknown links remain usable; an id that names nothing readable is its words.
+ * clicked. Unreadable or unknown links remain usable; an id that names nothing readable is its words. An artifact it
+ * links is its icon and title, and opens it; it draws no card, and one the message shows as a card stays a link too.
  */
 export function MessageText({
 	chat,
@@ -134,19 +139,23 @@ export function MessageText({
 }) {
 	const asks = objectAsks(text).filter((ask) => !("ref" in ask) || !shown.includes(ask.ref));
 	const request = JSON.stringify(asks.map((ask) => ({ ...ask, ...(agent === undefined ? {} : { agent: agent.id }) })));
-	return asks.length === 0 ? (
-		<MarkdownLinks.Provider value={wordsOfIds}>
-			<Markdown>{idLinks(text)}</Markdown>
-		</MarkdownLinks.Provider>
-	) : (
-		<ReadObjects
-			key={`${chat}:${request}`}
-			chat={chat}
-			request={request}
-			agent={agent}
-			explicit={[]}
-			inlineText={text}
-		/>
+	return (
+		<MarkdownArtifacts.Provider value={artifactReference}>
+			{asks.length === 0 ? (
+				<MarkdownLinks.Provider value={wordsOfIds}>
+					<Markdown>{idLinks(text)}</Markdown>
+				</MarkdownLinks.Provider>
+			) : (
+				<ReadObjects
+					key={`${chat}:${request}`}
+					chat={chat}
+					request={request}
+					agent={agent}
+					explicit={[]}
+					inlineText={text}
+				/>
+			)}
+		</MarkdownArtifacts.Provider>
 	);
 }
 

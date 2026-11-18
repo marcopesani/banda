@@ -1,9 +1,9 @@
 {
 	"lead": {
 		"system": {
-			"total": 2106,
+			"total": 2203,
 			"sections": {
-				"speaking": 969,
+				"speaking": 1066,
 				"roster": 95,
 				"avatar_design": 0,
 				"computer": 138,
@@ -14,12 +14,12 @@
 			}
 		},
 		"tools": {
-			"total": 22855,
+			"total": 23016,
 			"tools": {
-				"message_user": 1947,
+				"message_user": 2085,
 				"ask_user": 1550,
 				"react": 424,
-				"publish": 903,
+				"publish": 926,
 				"tool_search": 615,
 				"search": 1034,
 				"read_search_result": 979,
@@ -44,9 +44,9 @@
 	},
 	"helper": {
 		"system": {
-			"total": 2151,
+			"total": 2248,
 			"sections": {
-				"speaking": 969,
+				"speaking": 1066,
 				"roster": 387,
 				"avatar_design": 0,
 				"computer": 138,
@@ -57,12 +57,12 @@
 			}
 		},
 		"tools": {
-			"total": 22855,
+			"total": 23016,
 			"tools": {
-				"message_user": 1947,
+				"message_user": 2085,
 				"ask_user": 1550,
 				"react": 424,
-				"publish": 903,
+				"publish": 926,
 				"tool_search": 615,
 				"search": 1034,
 				"read_search_result": 979,
@@ -98,12 +98,12 @@
 			}
 		},
 		"tools": {
-			"total": 17879,
+			"total": 18040,
 			"tools": {
-				"message_group": 1928,
+				"message_group": 2066,
 				"ask_user": 1550,
 				"react": 424,
-				"publish": 903,
+				"publish": 926,
 				"tool_search": 615,
 				"search": 1034,
 				"read_search_result": 979,

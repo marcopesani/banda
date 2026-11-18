@@ -58,6 +58,7 @@ import { slackBlocks, slackEmoji, slackLine } from "../lib/slack-text.ts";
 import { Tile } from "./Cards.tsx";
 import { Bubble } from "./Feed.tsx";
 import { PlainFile } from "./Files.tsx";
+import { INLINE_LINK, INLINE_TEXT } from "./inline.ts";
 
 export type PullRequest = {
 	readonly repo: string;
@@ -518,9 +519,6 @@ export function slackUrl(value: string | undefined): string | undefined {
  * subtle underline that darkens on hover; without an address, the words alone.
  */
 // a title's width is capped short of a phone's screen, so what follows it on a line (a colon, a time) stays beside it
-const INLINE_LINK =
-	"min-w-0 max-w-[min(20rem,calc(100vw-6rem))] truncate underline decoration-line underline-offset-2 hover:decoration-ink";
-const INLINE_TEXT = "min-w-0 max-w-[min(20rem,calc(100vw-6rem))] truncate";
 
 /** A reference in the owner's words, not another card. Inherit the bubble's ink in either theme. */
 export function ObjectLink({

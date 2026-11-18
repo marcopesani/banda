@@ -6,6 +6,7 @@
  * (memory, the agents, the routines, the connections, the chats, the Library), never from the model's
  * arguments or words: a change that failed, was declined or never committed never reads as done. Pure, like `chat.ts`.
  */
+import { startsRun } from "../../../src/core/runs.ts";
 import type { Item, ToolCall } from "../../../src/server/api.ts";
 import type { Segment } from "./chat.ts";
 
@@ -83,15 +84,8 @@ export function refusalWhy(result: Pick<ToolResult, "text"> | undefined): string
 	return plain.length > MAX_WHY ? `${plain.slice(0, MAX_WHY - 1).trimEnd()}…` : plain;
 }
 
-/**
- * Whether `item` starts a run: the owner's message, another agent's (DESIGN.md: it gets a turn), a routine's wake, or a
- * watch's (not what it only tells).
- */
-export const startsRun = (item: Item): item is Extract<Item, { role: "user" | "agentMessage" | "wake" | "watch" }> =>
-	item.role === "user" ||
-	item.role === "agentMessage" ||
-	item.role === "wake" ||
-	(item.role === "watch" && item.tell === undefined);
+/** Whether `item` starts a run: one rule, the daemon's too (`src/core/runs.ts`). */
+export { startsRun };
 
 /** The id of the item that started the run item `id` is in (`startsRun`); 0 before any. */
 export function runOf(items: readonly Item[], id: number): number {

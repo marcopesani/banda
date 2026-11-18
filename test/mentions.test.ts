@@ -126,4 +126,51 @@ describe("a group message's mentions, shown", () => {
 			{ text: "```\nRosa\n```" },
 		]);
 	});
+
+	it("never stands inside a link, its words or its destination, a reference or a definition: a link in a link breaks it", async () => {
+		const { mentionParts } = await import("../web/src/lib/mentions.ts");
+		const id = "0123456789abcdef";
+		// named only inside the link: the link stays whole and the mention goes before the words
+		expect(mentionParts(`[@Sancho see](artifact:${id})`, ["sancho"], agents)).toEqual([
+			{ mention: "sancho" },
+			{ text: " " },
+			{ text: `[@Sancho see](artifact:${id})` },
+		]);
+		expect(mentionParts(`[Sancho's plan](artifact:${id}) is ready`, ["sancho"], agents)).toEqual([
+			{ mention: "sancho" },
+			{ text: " " },
+			{ text: `[Sancho's plan](artifact:${id}) is ready` },
+		]);
+		expect(mentionParts("See https://example.com/Rosa/x", ["rosa"], agents)).toEqual([
+			{ mention: "rosa" },
+			{ text: " " },
+			{ text: "See https://example.com/Rosa/x" },
+		]);
+		expect(mentionParts(`[@Rosa][r]\n\n[r]: artifact:${id}`, ["rosa"], agents)).toEqual([
+			{ mention: "rosa" },
+			{ text: " " },
+			{ text: `[@Rosa][r]\n\n[r]: artifact:${id}` },
+		]);
+		// named outside the link too: the mention stands there, the link untouched
+		expect(mentionParts(`[@Sancho see](artifact:${id}), @Sancho`, ["sancho"], agents)).toEqual([
+			{ text: `[@Sancho see](artifact:${id}), ` },
+			{ mention: "sancho" },
+		]);
+	});
+});
+
+describe("an owner's mentions, linked", () => {
+	it("links an @Name outside links only, so a link the words hold stays one", () => {
+		const id = "0123456789abcdef";
+		expect(linkMentions(`[@Writer see](artifact:${id}) and @Writer`, ["writer"], [writer])).toBe(
+			`[@Writer see](artifact:${id}) and [@Writer](#/a/writer)`,
+		);
+		// a link's title is the link's too; words that are no link (a space in the destination) are linked as words
+		expect(linkMentions('[x](https://e.com "by @Writer")', ["writer"], [writer])).toBe(
+			'[x](https://e.com "by @Writer")',
+		);
+		expect(linkMentions("[x](https://e.com/ @Writer)", ["writer"], [writer])).toBe(
+			"[x](https://e.com/ [@Writer](#/a/writer))",
+		);
+	});
 });

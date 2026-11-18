@@ -66,6 +66,7 @@ import {
 	type WakeData,
 	wakeAsk,
 } from "../core/routines.ts";
+import { type RunEntry, startsRun } from "../core/runs.ts";
 import { localTime } from "../core/schedule.ts";
 import { openWaits, status } from "../core/status.ts";
 import { context } from "../core/store.ts";
@@ -258,6 +259,13 @@ export function turnUsage(usage: Usage | undefined): TurnUsage {
 		...(usage?.reasoning === undefined ? {} : { reasoning: usage.reasoning }),
 		cost: usage?.cost?.total ?? 0,
 	};
+}
+
+/** What an entry of a chat says of its runs, as the app draws it: an item that starts one (`startsRun`), its calls. */
+export function chatRunEntry(entry: EntryRecord): RunEntry | undefined {
+	const item = itemOf(entry);
+	if (item === undefined) return undefined;
+	return { starts: startsRun(item), calls: item.role === "assistant" ? (item.calls ?? []).map((call) => call.id) : [] };
 }
 
 export function itemOf(entry: EntryRecord): Item | undefined {

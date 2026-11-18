@@ -7,6 +7,7 @@
  */
 import type { Context } from "@earendil-works/chord";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
+import type { EntryRecord } from "@earendil-works/pi-durable";
 import {
 	AssistantEntry,
 	CompactionEntry,
@@ -33,6 +34,7 @@ import { type Attachment, blobLink, hold } from "./blobs.ts";
 import { nameOf } from "./companion.ts";
 import { connectionToolsOf } from "./connections.ts";
 import { CUT_OFF, cutOff } from "./cut-off.ts";
+import type { RunEntry } from "./runs.ts";
 import { skillTokens } from "./skill-tokens.ts";
 import { acceptedSkills, ownerSkillEntry, type Skill } from "./skills.ts";
 import { context } from "./store.ts";
@@ -424,6 +426,16 @@ function rowOf(
 		};
 	if (message?.role === "toolResult") return { role: "tool", call: message.toolCallId, error: message.isError };
 	return undefined;
+}
+
+/** What an entry of a member's execution says of its runs, as `runsOf` counts them: an input starts one; its calls. */
+export function groupRunEntry(entry: EntryRecord): RunEntry | undefined {
+	const row = rowOf(entry, false);
+	if (row === undefined) return undefined;
+	return {
+		starts: row.role === "user" || row.role === "other",
+		calls: row.role === "assistant" ? row.calls.map((call) => call.id) : [],
+	};
 }
 
 /**

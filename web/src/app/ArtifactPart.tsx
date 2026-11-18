@@ -3,12 +3,32 @@
  * an attached one shows, captioned. The version's bytes and how many versions there are now come from the Library the
  * shell holds; until it names the version, or when its bytes cannot be read, the card stands in, and still opens it.
  */
-import { ArtifactCard, ArtifactImage } from "../chat/Cards.tsx";
+import type { ReactNode } from "react";
+import { ArtifactCard, ArtifactImage, ArtifactLink } from "../chat/Cards.tsx";
 import { ImageLoading } from "../chat/Files.tsx";
 import { blobFile } from "../lib/api.ts";
 import { useShellPick } from "../lib/shell.ts";
 import { kindWords } from "./ArtifactPage.tsx";
 import { useLoad } from "./FilePart.tsx";
+import { hrefOf } from "./where.ts";
+
+/**
+ * An artifact a message's words link, `[words](artifact:<id>)` (DESIGN.md "Messages"): drawn by what the Library holds,
+ * its title and kind there, never the words, which only the model wrote; a link that opens it as its card does. Until
+ * the shell has the Library, the words; once it has, an id it does not hold (removed since, or never one) is the words,
+ * marked unavailable.
+ */
+export function ArtifactReference({ id, words }: { id: string | undefined; words: ReactNode }) {
+	const held = useShellPick((shell) => {
+		if (shell.artifacts === undefined) return "";
+		const artifact = id === undefined ? undefined : shell.artifacts.find((one) => one.id === id);
+		return JSON.stringify(artifact === undefined ? null : [artifact.title, artifact.kind]);
+	});
+	if (held === "") return <span data-artifact-link="loading">{words}</span>;
+	const found = JSON.parse(held) as [string, string] | null;
+	if (found === null || id === undefined) return <ArtifactLink title={words} kind="Artifact" unavailable />;
+	return <ArtifactLink title={found[0]} kind={kindWords(found[1])} href={hrefOf({ name: "artifact", id })} />;
+}
 
 export function ArtifactPart({
 	id,

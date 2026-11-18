@@ -53,7 +53,15 @@ describe("groups", () => {
 					: "lead";
 			const last = ctx.messages.filter((m) => m.role !== "system").at(-1);
 			if (last?.role === "toolResult") {
-				results.push(textOf(last.content));
+				const said = textOf(last.content);
+				results.push(said);
+				// asked to publish and show it in one turn: it shows by its id what that publish just drew
+				const asked = textOf(ctx.messages.filter((m) => m.role === "user").at(-1)?.content);
+				const made = /^(?:Published|Unchanged).*its id is ([0-9a-f]{16})/.exec(said)?.[1];
+				if (asked.includes("PUBLISH SHOW") && made !== undefined)
+					return fauxAssistantMessage([fauxToolCall("message_group", { text: "Here it is.", artifacts: [made] })], {
+						stopReason: "toolUse",
+					});
 				return fauxAssistantMessage("done");
 			}
 			const text = textOf(last?.content);
@@ -67,7 +75,7 @@ describe("groups", () => {
 			// a file the owner sent: the agent sends it back, from where the turn says it is in its box (first: a turn
 			// reads every message since it last worked, an earlier FAIL ME among them)
 			// publishing to the Library from the room (first, like a file: a turn reads every message since it last worked)
-			if (text.includes("PUBLISH IT"))
+			if (text.includes("PUBLISH IT") || text.includes("PUBLISH SHOW"))
 				return fauxAssistantMessage([fauxToolCall("publish", { path: "draft.md", title: "Launch post" })], {
 					stopReason: "toolUse",
 				});
@@ -81,6 +89,17 @@ describe("groups", () => {
 				return fauxAssistantMessage([fauxToolCall("ask_user", { question: "Which one?" })], { stopReason: "toolUse" });
 			// showing again what it published, by the id publish returned
 			const published = results.map((result) => /its id is ([0-9a-f]{16})/.exec(result)?.[1]).find(Boolean);
+			// naming it in the words, by a link to its id; or by one the Library does not hold
+			if (text.includes("LINK IT") && published !== undefined)
+				return fauxAssistantMessage(
+					[fauxToolCall("message_group", { text: `Read [my draft](artifact:${published}).` })],
+					{ stopReason: "toolUse" },
+				);
+			if (text.includes("LINK BAD"))
+				return fauxAssistantMessage(
+					[fauxToolCall("message_group", { text: "Read [it](artifact:0123456789abcdef)." })],
+					{ stopReason: "toolUse" },
+				);
 			if (text.includes("SHOW IT") && published !== undefined)
 				return fauxAssistantMessage(
 					[fauxToolCall("message_group", { text: "Here it is again.", artifacts: [published] })],
@@ -295,6 +314,40 @@ describe("groups", () => {
 				return view.messages.find((m) => m.text === "Here it is again.");
 			});
 			expect(again.artifacts).toMatchObject([{ id: card.artifacts?.[0]?.id, title: "Launch post", n: 1 }]);
+			// published and shown in one turn: the room draws that version once, and the member is told so, not of a
+			// second card
+			await post(room, { key: randomUUID(), text: "PUBLISH SHOW", mentions: ["researcher"] });
+			const once = await until(async () => {
+				const view = await api<GroupView>(`/groups/${room}`);
+				return view.messages.find((m) => m.text === "Here it is.");
+			});
+			expect(once.artifacts ?? []).toEqual([]);
+			await until(() =>
+				results.includes(
+					"Posted to the group. The owner sees “Launch post” at version 1 as the card your publish drew in this run, not a second one.",
+				),
+			);
+			// the publish told the member the room sees its card, and how to name it later
+			expect(results.find((result) => result.startsWith("Published as version 1"))).toMatch(
+				/The owner sees “Launch post” here now, as its card at version 1; .*\[words\]\(artifact:[0-9a-f]{16}\)/,
+			);
+			// named in the words by its id: posted as written, with no card, and the member told what the room sees
+			await post(room, { key: randomUUID(), text: "LINK IT", mentions: ["researcher"] });
+			const linked = await until(async () => {
+				const view = await api<GroupView>(`/groups/${room}`);
+				return view.messages.find((m) => m.text.startsWith("Read [my draft]"));
+			});
+			expect(linked.text).toBe(`Read [my draft](artifact:${card.artifacts?.[0]?.id}).`);
+			expect(linked.artifacts ?? []).toEqual([]);
+			await until(() => results.includes("Posted to the group. The owner sees “Launch post” as a link in your words."));
+			// an id the Library does not hold: nothing posts, and the member hears which ids there are
+			await post(room, { key: randomUUID(), text: "LINK BAD", mentions: ["researcher"] });
+			await until(() => results.some((result) => result.includes("no artifact 0123456789abcdef in the Library")));
+			expect(
+				(await api<GroupView>(`/groups/${room}`)).messages.some(
+					(m) => m.text === "Read [it](artifact:0123456789abcdef).",
+				),
+			).toBe(false);
 
 			// a reply cut off mid call fails its run and says so in the room; the half message never posts
 			await post(room, { key: randomUUID(), text: "CUT ME", mentions: ["writer"] });

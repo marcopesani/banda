@@ -595,7 +595,16 @@ either. In a group the same holds for a member's turn that an owner's message as
 that went through in the room, or it is nudged once in the group's words, and then the room says "<name> didn't
 answer". Routines' and watches' runs and a member's turn another member asked for may stay silent. What a message
 carries:
-- **text**, markdown; a link the daemon recognises as an object draws its card beneath;
+- **text**, markdown; a link the daemon recognises as an object draws its card beneath. An artifact is named in the
+  words by a link to its id, `[words](artifact:<id>)`: checked against the Library before anything is sent like
+  `artifacts`, it is drawn inline as the artifact's icon and its title in the Library, never the words written (only
+  the model wrote them), a link that opens it; it draws no card, and beside a card the same message shows, each is
+  drawn. One the Library no longer holds, or a link in that scheme that names no id, is its words, marked
+  unavailable, opening nothing. The daemon reads the links with the parser the app draws with (CommonMark and GFM),
+  so what it checks is what is drawn: a reference, an entity or an escape counts, code does not; an artifact in an
+  image or in raw HTML is refused. A file's name or path in the words shows the owner nothing: what they see of an
+  artifact is its card or this link. The call's result says which they see, a card left out as already drawn in the
+  run included, naming by title only this chat's artifacts (another's by its id, as the refusal lists them);
 - **file**: a path in the box, sent as an attachment and shown inline where it can be;
 - **artifacts**: ids of artifacts in the Library (`publish` returns its id), each drawn as its card at the version
   current when it was sent; an id the Library does not hold is refused before anything is sent. An artifact is shown
@@ -608,7 +617,8 @@ carries:
 The other acts: **question** (`ask_user`): choices, a form or free text; the call opens a Wait and returns its answer;
 in a group, options alone. **reaction** (`react`): one emoji on the owner's message the run answers; alone, it is the
 whole reply ("got it"). A routine's or a watch's run answers no one's message, so it has none. **artifact**
-(`publish`): a path in the box published as its next version (see "The app"), a card in the app.
+(`publish`): a path in the box published as its next version (see "The app"), a card in the app, where the call
+was made (a chat, a group's room); it returns the id, the version and whether the bytes were already the newest's.
 
 A call returns once its message is delivered, or with why it was not; a question returns its answer. Calls in one
 round run one after another, so messages go in the order the model wrote them. A message is sent by the tool's own

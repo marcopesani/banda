@@ -19,13 +19,37 @@ import { SourceReference } from "./SourceLink.tsx";
 export const MarkdownLinks = createContext<((href: string, children: ReactNode) => ReactNode) | undefined>(undefined);
 
 /**
- * A link: one to a blob (`[name](sha256:<hex>)`) is the file itself; a mention of a known agent its chip; any other
- * opens in a tab, except an app source reference, which opens in place.
+ * How a message's text draws a link to an artifact, `[words](artifact:<id>)`: `id` undefined when the link names none.
+ * Only a message's own text gives one (`MessageText`); anywhere else (a skill, a file, an artifact's own text) such a
+ * link is its words, never a way into the Library.
+ */
+export const MarkdownArtifacts = createContext<((id: string | undefined, words: ReactNode) => ReactNode) | undefined>(
+	undefined,
+);
+
+/** A link's target in the artifact scheme, whatever follows: drawn by `Link` as an artifact or its words, never navigated. */
+const ARTIFACT_HREF = /^artifact:/i;
+
+/** The artifact a link names, `artifact:<id>`, or undefined when it names none. */
+export const linkedArtifact = (href: string | undefined) =>
+	href === undefined ? undefined : /^artifact:([0-9a-f]{16})$/.exec(href)?.[1];
+
+/**
+ * A link: one to a blob (`[name](sha256:<hex>)`) is the file itself; a mention of a known agent its chip; one to an
+ * artifact (`[words](artifact:<id>)`) what the message's text makes of it (`MarkdownArtifacts`), else its words; any
+ * other opens in a tab, except an app source reference, which opens in place.
  */
 function Link({ href, children, node: _node, ...props }: ComponentProps<"a"> & { node?: unknown }) {
 	const richLink = useContext(MarkdownLinks);
+	const artifactLink = useContext(MarkdownArtifacts);
 	const mentioned = useMentioned(href);
 	if (mentioned !== undefined) return <MentionChip agent={mentioned} />;
+	if (href !== undefined && ARTIFACT_HREF.test(href))
+		return artifactLink === undefined ? (
+			<span data-artifact-link="words">{children}</span>
+		) : (
+			artifactLink(linkedArtifact(href), children)
+		);
 	const sha = linkedBlob(href);
 	if (sha !== undefined)
 		return <BlobFile sha={sha} name={typeof children === "string" ? children : "file"} download="right" />;
@@ -56,15 +80,21 @@ const Streamdown = lazy(async () => {
 		...defaultRehypePlugins,
 		sanitize: [
 			sanitize,
-			{ ...schema, protocols: { ...schema.protocols, href: [...(schema.protocols?.href ?? []), "object"] } },
+			{
+				...schema,
+				protocols: { ...schema.protocols, href: [...(schema.protocols?.href ?? []), "object", "artifact"] },
+			},
 		],
 	};
 	const rehypePlugins = [...Object.values(plugins), blocksApart] as NonNullable<
 		Parameters<typeof Streamdown>[0]["rehypePlugins"]
 	>;
-	// a blob link and a link to an object's id survive; every other URL is made safe as Streamdown makes it
+	// a blob link, a link to an object's id and a link's artifact (drawn by `Link`, never navigated) survive; every
+	// other URL is made safe as Streamdown makes it
 	const urlTransform: typeof defaultUrlTransform = (url, key, node) =>
-		linkedBlob(url) !== undefined || /^object:[a-z][a-z0-9-]{0,63}\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,399}$/.test(url)
+		linkedBlob(url) !== undefined ||
+		/^object:[a-z][a-z0-9-]{0,63}\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,399}$/.test(url) ||
+		(key === "href" && ARTIFACT_HREF.test(url))
 			? url
 			: defaultUrlTransform(url, key, node);
 	return {
