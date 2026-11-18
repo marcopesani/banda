@@ -99,7 +99,7 @@ export function SettingsPage({
 					</Button>
 				}
 			/>
-			<div className="min-h-0 flex-1 overflow-y-auto">
+			<div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
 				<div
 					className={cn("mx-auto flex flex-col gap-8 px-4 py-6", wide ? "w-full max-w-none md:px-8" : "max-w-[34rem]")}
 				>
