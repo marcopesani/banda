@@ -2,6 +2,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { createRegistry, UsageDoc } from "@earendil-works/pi-durable";
 import { expect, it } from "vitest";
 import { AgentChats } from "../src/core/agents.ts";
+import { RoutineRuns } from "../src/core/routines.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { SystemUsage } from "../src/core/system-usage.ts";
 import { readUsage } from "../src/core/usage.ts";
@@ -62,6 +63,35 @@ it("adds the model ledgers once by agent and provider, and can read only one age
 		expect(mara.total.estimatedUsd).toBe(3);
 		expect(mara.total.cacheReadRate).toBe(0.55);
 		expect(mara.system.estimatedUsd).toBe(0);
+	} finally {
+		await harness.close(context);
+	}
+});
+
+it("counts a routine's run for its agent, once, while its turn goes and after it ended", async () => {
+	const harness = await openStore(await tempHome(), { models: createModels(), registry: createRegistry() });
+	try {
+		await harness.commit(async (tx) => {
+			const agents = await tx.doc(AgentChats);
+			const runs = await tx.doc(RoutineRuns);
+			const chat = await tx.createConversation({ ownership: { kind: "ownerless" } });
+			agents.chats[Number(chat.id)] = "mara";
+			(await tx.doc(UsageDoc, chat.id)).models["anthropic/claude"] = recorded(10, 0, 0, 1);
+			const wake = { routine: "tea", due: 1, description: "Tea" };
+			// a run leaves its agent's chats when its turn ends; its ledger stays
+			const ended = await tx.createConversation({ ownership: { kind: "ownerless" } });
+			runs.runs[Number(ended.id)] = { agent: "mara", routine: "tea", chat: Number(chat.id), wake };
+			(await tx.doc(UsageDoc, ended.id)).models["anthropic/claude"] = recorded(10, 0, 0, 2);
+			const going = await tx.createConversation({ ownership: { kind: "ownerless" } });
+			runs.runs[Number(going.id)] = { agent: "mara", routine: "tea", chat: Number(chat.id), wake };
+			agents.chats[Number(going.id)] = "mara";
+			(await tx.doc(UsageDoc, going.id)).models["openai/gpt"] = recorded(10, 0, 0, 4);
+		}, context);
+		const band = await readUsage(harness, context);
+		expect(band.total.estimatedUsd).toBe(7);
+		expect(band.byAgent.map(({ id, estimatedUsd }) => [id, estimatedUsd])).toEqual([["mara", 7]]);
+		expect((await readUsage(harness, context, "mara")).total.estimatedUsd).toBe(7);
+		expect((await readUsage(harness, context, "sancho")).total.estimatedUsd).toBe(0);
 	} finally {
 		await harness.close(context);
 	}

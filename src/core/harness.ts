@@ -10,6 +10,7 @@ import {
 	defineTask,
 	type Harness,
 	type JsonObject,
+	SessionFailed,
 	type TaskId,
 	type Tx,
 } from "@earendil-works/pi-durable";
@@ -686,11 +687,12 @@ export type HarnessOptions = {
 	/** The home this daemon serves: only processes its own sessions recorded here are ever killed. */
 	readonly home: string;
 	readonly definitions: () => ReadonlyMap<string, HarnessDefinition>;
+	/** Wake the session's agent in `chat`; undefined when nobody is there to wake, and the session ends all the same. */
 	readonly followUp: (
 		tx: Tx,
 		chat: number,
 		input: { key: string; text: string; entry: { kind: string; data: JsonObject } },
-	) => Promise<number>;
+	) => Promise<number | undefined>;
 	readonly log: (line: string) => void;
 	readonly now?: () => number;
 	/** A fault point, named; tests throw or kill there. */
@@ -750,7 +752,7 @@ export function defineHarnesses(options: HarnessOptions) {
 				.replace(/\*\*|__|`/g, "")
 				.trim()
 				.slice(0, 300);
-		await options.followUp(tx, session.chat, {
+		const woke = await options.followUp(tx, session.chat, {
 			key: `harness:${task}`,
 			text,
 			entry: {
@@ -758,6 +760,8 @@ export function defineHarnesses(options: HarnessOptions) {
 				data: { task, harness: session.harness, service, folder: session.folder, state, at: session.ended },
 			},
 		});
+		if (woke === undefined)
+			options.log(`coding agents: session ${task} ended with nobody to tell in chat ${session.chat}`);
 		const ended = Object.entries(doc.sessions)
 			.filter(([, one]) => one.ended !== undefined)
 			.sort(([, a], [, b]) => (b.ended ?? 0) - (a.ended ?? 0));
@@ -1271,20 +1275,36 @@ export function defineHarnesses(options: HarnessOptions) {
 	 * and what its harness left running killed. Run when the daemon starts.
 	 */
 	async function reconcile(harness: { commit: Harness["commit"] }, ctx: Context): Promise<number> {
-		return harness.commit(async (tx) => {
-			const doc = await tx.doc(Harnesses);
-			let ended = 0;
-			for (const [task, session] of Object.entries(doc.sessions)) {
-				if (session.ended !== undefined) continue;
-				const found = await tx.task(Number(task) as TaskId);
-				if (found !== undefined && found.state.status !== "terminal") continue;
-				const definition = options.definitions().get(session.harness);
-				killLeftovers(session);
-				await ending(tx, Number(task), "failed", definition?.service ?? session.harness, "banda stopped while it ran");
-				ended++;
+		const open = await harness.commit(
+			async (tx) =>
+				Object.entries((await tx.doc(Harnesses)).sessions)
+					.filter(([, session]) => session.ended === undefined)
+					.map(([task]) => Number(task)),
+			ctx,
+		);
+		let ended = 0;
+		// each in a commit of its own: a commit reads its tasks before it makes any, and an end makes its agent's turn.
+		// One that fails keeps the others from nothing: its session stays as it was, ended at the next start, and the
+		// log says which and why. The store failing, or the daemon stopping, ends them all alike: nothing commits any more
+		for (const task of open)
+			try {
+				ended += await harness.commit(async (tx) => {
+					const session = (await tx.doc(Harnesses)).sessions[task];
+					if (session === undefined || session.ended !== undefined) return 0;
+					const found = await tx.task(task as TaskId);
+					if (found !== undefined && found.state.status !== "terminal") return 0;
+					const definition = options.definitions().get(session.harness);
+					killLeftovers(session);
+					await ending(tx, task, "failed", definition?.service ?? session.harness, "banda stopped while it ran");
+					return 1;
+				}, ctx);
+			} catch (error) {
+				if (error instanceof SessionFailed || ctx.abortSignal?.aborted === true) throw error;
+				options.log(
+					`coding agents: session ${task} could not end: ${(error as Error).message}; it ends at the next start`,
+				);
 			}
-			return ended;
-		}, ctx);
+		return ended;
 	}
 
 	return { Session, begin, reconcile };

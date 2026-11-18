@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { AgentChats, LEAD } from "./agents.ts";
 import { backendOf } from "./provider-accounts.ts";
+import { RoutineRuns } from "./routines.ts";
 import { SystemUsage } from "./system-usage.ts";
 import { READ_USAGE } from "./toolsets.ts";
 
@@ -75,7 +76,11 @@ export async function readUsage(
 	const byAgent = new Map<string, UsageNumbers>();
 	const byProvider = new Map<string, UsageNumbers>();
 	const byModel = new Map<string, UsageNumbers>();
-	const byChat = (await reader.snapshot(AgentChats, ctx))?.chats ?? {};
+	// every conversation an agent worked in: its chats, and each routine's run, which leaves them when its turn ends
+	const byChat: { [chat: string]: string } = {};
+	for (const [chat, run] of Object.entries((await reader.snapshot(RoutineRuns, ctx))?.runs ?? {}))
+		byChat[chat] = run.agent;
+	Object.assign(byChat, (await reader.snapshot(AgentChats, ctx))?.chats ?? {});
 	const count = (model: string, usage: Recorded, target: UsageNumbers) => {
 		add(total, usage);
 		const slash = model.indexOf("/");

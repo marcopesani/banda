@@ -293,7 +293,7 @@ export const harnessesArea: AreaModule = {
 		harnesses = defineHarnesses({
 			home: boot.home,
 			definitions,
-			followUp: (tx, chat, input) => boot.core.followUp(tx, chat, input),
+			followUp: (tx, chat, input) => boot.core.wake(tx, chat, input),
 			log: boot.log,
 		});
 		made = harnesses;

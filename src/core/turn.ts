@@ -31,6 +31,7 @@ import {
 } from "@earendil-works/pi-durable";
 import {
 	Accepted,
+	type Agent,
 	AgentChats,
 	acceptedAgent,
 	agentWords,
@@ -143,6 +144,8 @@ export const bounded = (_value: unknown, _ops: unknown, info: { deltasSinceBase:
  * the newest message to it, which the next one there is sent after, and the input (its message key) the last message
  * answering one answered.
  */
+/** The task that watches one input of a chat until its answer. */
+const TURN = "banda.turn";
 /**
  * The input that goes on with a task whose run left the owner unanswered (`unanswered.ts`): the daemon's words, asking
  * for an answer. It belongs to the task it nudges.
@@ -1184,8 +1187,21 @@ export function defineCore(options: CoreOptions) {
 			runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "aborted" } }), ctx),
 	});
 
+	/** Whether `chat` has a turn other than `except` that has not ended: a run woken again while one still goes. Reads only. */
+	async function turnsLeft(tx: Tx, chat: number, except: number): Promise<boolean> {
+		for (const status of ["pending", "running", "waiting", "sleeping", "completing"] as const) {
+			let cursor: Parameters<Tx["scanTasks"]>[2];
+			do {
+				const page = await tx.scanTasks({ kind: TURN, status, conversationId: chat as ConversationId }, 100, cursor);
+				if (page.items.some((one) => Number(one.id) !== except)) return true;
+				cursor = page.next;
+			} while (cursor !== undefined);
+		}
+		return false;
+	}
+
 	const Turn = defineTask<TurnInput, TurnState, TurnResult>({
-		name: "banda.turn",
+		name: TURN,
 		version: 1,
 		initial: () => ({ phase: "answer", invocation: 0 }),
 		phases: {
@@ -1237,7 +1253,8 @@ export function defineCore(options: CoreOptions) {
 					const { internal } = task.input;
 					const chat = ran?.chat ?? task.input.chat;
 					// its run is over: it is no longer one of the agent's chats, which a definition's change reaches
-					if (ran !== undefined) delete agents[task.input.chat];
+					if (ran !== undefined && !(await turnsLeft(tx, task.input.chat, Number(task.id))))
+						delete agents[task.input.chat];
 					const wake = internal?.kind === WAKE ? (internal.data as WakeData) : undefined;
 					const routine = wake === undefined ? undefined : (await tx.doc(Routines)).routines[wake.routine];
 					// the run's history says how it ended, and where its wake and answer are in the chat
@@ -1305,7 +1322,8 @@ export function defineCore(options: CoreOptions) {
 		abort: (task, runtime, ctx) =>
 			runtime.commit(async (tx) => {
 				const ran = (await tx.doc(RoutineRuns)).runs[task.input.chat];
-				if (ran !== undefined) delete (await tx.doc(AgentChats)).chats[task.input.chat];
+				if (ran !== undefined && !(await turnsLeft(tx, task.input.chat, Number(task.id))))
+					delete (await tx.doc(AgentChats)).chats[task.input.chat];
 				return { status: "terminal", outcome: { status: "aborted", reason: "aborted" } };
 			}, ctx),
 	});
@@ -1463,14 +1481,40 @@ export function defineCore(options: CoreOptions) {
 		});
 	}
 
-	/** Queue an input nobody wrote to `chat`, after its other inputs, watched by a Turn. */
+	/**
+	 * Where an input nobody wrote to `chat` is answered: the chat's home, or, for a routine's run (routed nowhere), its
+	 * agent's chat's, while that agent is still the run's principal. Undefined when nobody is there. Reads only.
+	 */
+	async function followedAt(tx: Tx, chat: number) {
+		const routes = (await tx.doc(Routes)).chats;
+		const home = routes[chat];
+		if (home !== undefined) return { home };
+		const ran = (await tx.doc(RoutineRuns)).runs[chat];
+		if (ran === undefined || (await agentOfChat(tx, chat)) !== ran.agent) return undefined;
+		const parent = routes[ran.chat];
+		return parent === undefined ? undefined : { home: parent, run: ran };
+	}
+
+	/**
+	 * Queue an input nobody wrote to `chat`, after its other inputs, watched by a Turn. A routine's run takes it in its
+	 * own conversation, at once as its wake was, though its first turn is over: it is one of its agent's chats again
+	 * until its last turn ends.
+	 */
 	async function followUp(
 		tx: Tx,
 		chat: number,
 		{ key, text, entry }: { key: string; text: string; entry: { kind: string; data: JsonObject } },
 	): Promise<number> {
-		const home = (await tx.doc(Routes)).chats[chat];
-		if (home === undefined) throw new Error(`chat ${chat} has no home origin`);
+		const followed = await followedAt(tx, chat);
+		if (followed === undefined) throw new Error(`chat ${chat} has no home origin`);
+		const { home, run } = followed;
+		if (run !== undefined) {
+			// it is one of its agent's chats again, as that agent is now: what the owner changed or took from it since the
+			// run began holds for this turn too. Before any task is made: a commit reads before it makes
+			(await tx.doc(AgentChats)).chats[chat] = run.agent;
+			const agent = await acceptedAgent(tx, run.agent);
+			if (agent !== undefined) await refreshChat(tx, chat as ConversationId, agent);
+		}
 		const input: Input = { chat, origin: home.origin, message: { id: key, text }, internal: entry };
 		const placement = {
 			ownership: { kind: "conversation" },
@@ -1479,12 +1523,17 @@ export function defineCore(options: CoreOptions) {
 		} as const;
 		const admit = await tx.createTask(
 			Admit,
-			{ ...input, ...(home.lastAdmit === undefined ? {} : { after: home.lastAdmit }) },
+			{ ...input, ...(run !== undefined || home.lastAdmit === undefined ? {} : { after: home.lastAdmit }) },
 			placement,
 		);
 		const turn = await tx.createTask(Turn, { ...input, admit: Number(admit) }, placement);
-		home.lastAdmit = Number(admit);
+		if (run === undefined) home.lastAdmit = Number(admit);
 		return Number(turn);
+	}
+
+	/** `followUp`, or nothing when nobody is there to wake: the chat is gone, or its run's agent no longer runs it. */
+	async function wake(tx: Tx, chat: number, input: Parameters<typeof followUp>[2]): Promise<number | undefined> {
+		return (await followedAt(tx, chat)) === undefined ? undefined : followUp(tx, chat, input);
 	}
 
 	/**
@@ -1692,6 +1741,28 @@ export function defineCore(options: CoreOptions) {
 			runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "aborted" } }), ctx),
 	});
 
+	/**
+	 * Bring `chat` to its agent's definition as it is now: at once, or, while a run of it goes, once that run settled
+	 * (a run never changes what it was sent).
+	 */
+	async function refreshChat(tx: Tx, chat: ConversationId, agent: Agent): Promise<void> {
+		if ((await tx.doc(LiveDoc, chat)).run !== undefined) {
+			await tx.createTask(
+				RefreshAgent,
+				{ chat: Number(chat), agent: agent.id },
+				{ ownership: { kind: "conversation" }, background: true, conversationId: chat },
+			);
+			return;
+		}
+		const named = await nameOf(tx);
+		await refreshAs(tx, chat, agent, {
+			model: options.model(),
+			...(options.tools === undefined ? {} : { tools: options.tools() }),
+			...(named === undefined ? {} : { name: named }),
+			connected: await connectionToolsOf(tx, agent),
+		});
+	}
+
 	/** Write `chat`'s tools again from what is in effect now: the definition it runs, the tools installed, its connections. */
 	async function toolsNow(tx: Tx, chat: number): Promise<void> {
 		const agent = (await tx.doc(ChatAgent, chat as ConversationId)).agent;
@@ -1757,21 +1828,7 @@ export function defineCore(options: CoreOptions) {
 		for (const [id, name] of Object.entries((await tx.doc(AgentChats)).chats)) {
 			if (name !== agentName) continue;
 			const chat = Number(id) as ConversationId;
-			if ((await tx.doc(LiveDoc, chat)).run !== undefined) {
-				await tx.createTask(
-					RefreshAgent,
-					{ chat: Number(chat), agent: agentName },
-					{ ownership: { kind: "conversation" }, background: true, conversationId: chat },
-				);
-				continue;
-			}
-			const named = await nameOf(tx);
-			await refreshAs(tx, chat, agent, {
-				model: options.model(),
-				...(options.tools === undefined ? {} : { tools: options.tools() }),
-				...(named === undefined ? {} : { name: named }),
-				connected: await connectionToolsOf(tx, agent),
-			});
+			await refreshChat(tx, chat, agent);
 		}
 	}
 
@@ -1888,6 +1945,8 @@ export function defineCore(options: CoreOptions) {
 		reconcileTools: (harness: Harness, ctx: Context = context) => reconcileTools(harness, ctx),
 		/** Queue an input nobody wrote to a chat, after its other inputs, watched by a Turn: in the caller's commit. */
 		followUp,
+		/** `followUp` for a chat that may be gone: nothing is queued when nobody is there to wake. */
+		wake,
 		/** Tell the agent the owner decided its proposal, in the caller's commit with the decision; it starts no turn. */
 		proposalDecided,
 		routineEdited,

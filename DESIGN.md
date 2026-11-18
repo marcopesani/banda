@@ -667,7 +667,9 @@ gives it, the open asks it covers, and an ask a permission covers by the time it
   no tool.
 - **Each run starts fresh**: a conversation of its own, started as its agent (instructions, memory, connections,
   permissions), holding the wake and nothing of the chat's history. The chat's length never reaches a run, and a run's
-  work never reaches the chat; only what it sends does. Its usage is its own, counted per routine.
+  work never reaches the chat; only what it sends does. Its usage is its own, counted per routine. What a run started
+  that ends after it (a coding agent's session) is told to the run, which takes another turn in its own conversation
+  while its agent still runs it.
 - **A wake is an event in the chat**: a line with the routine's name and when it fired, and then what the run sent
   as the agent's message, which the chat's model also reads at its next turn. The line opens its run beneath it, in a
   box of its own within the chat: the run's conversation as a chat draws one, the routine's words as the owner's
