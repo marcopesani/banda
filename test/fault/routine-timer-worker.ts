@@ -19,10 +19,17 @@ import { stuck } from "../../src/core/status.ts";
 import { context, openStore } from "../../src/core/store.ts";
 import { defineCore, Routes, type TurnResult } from "../../src/core/turn.ts";
 import { echoModels, FAUX_MODEL } from "../fixtures/models.ts";
+import { diagnoseOnTimeout } from "./diagnose.ts";
 import { type Fault, Faults } from "./faults.ts";
 
 const [home, scheduleJson] = process.argv.slice(2) as [string, string];
 const faults = new Faults(JSON.parse(scheduleJson) as Fault[]);
+// a hung run says what it waited on when the sweep's timeout ends it
+diagnoseOnTimeout(
+	() => harness,
+	faults,
+	() => now,
+);
 
 const MINUTE = 60_000;
 const START = new Date(2026, 10, 2, 8, 0).getTime();

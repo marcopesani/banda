@@ -26,10 +26,17 @@ import type { Workspace } from "../../src/server/agents.ts";
 import { changeWhen, createRoutine, finishEdits } from "../../src/server/routines.ts";
 import { hostBox } from "../fixtures/host-box.ts";
 import { echoModels, FAUX_MODEL } from "../fixtures/models.ts";
+import { diagnoseOnTimeout } from "./diagnose.ts";
 import { type Fault, Faults } from "./faults.ts";
 
 const [home, scheduleJson] = process.argv.slice(2) as [string, string];
 const faults = new Faults(JSON.parse(scheduleJson) as Fault[]);
+// a hung run says what it waited on when the sweep's timeout ends it
+diagnoseOnTimeout(
+	() => harness,
+	faults,
+	() => NOW,
+);
 
 /** Monday 2 November 2026, 09:00: the routine's next 16:00 is today, the edited one's 08:00 tomorrow. */
 const NOW = new Date(2026, 10, 2, 9, 0).getTime();
