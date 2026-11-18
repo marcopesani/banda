@@ -143,6 +143,8 @@ export const bounded = (_value: unknown, _ops: unknown, info: { deltasSinceBase:
  * the newest message to it, which the next one there is sent after, and the input (its message key) the last message
  * answering one answered.
  */
+/** The task that watches one input of a chat until its answer. */
+const TURN = "banda.turn";
 /**
  * The input that goes on with a task whose run left the owner unanswered (`unanswered.ts`): the daemon's words, asking
  * for an answer. It belongs to the task it nudges.
@@ -1184,8 +1186,21 @@ export function defineCore(options: CoreOptions) {
 			runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: "aborted" } }), ctx),
 	});
 
+	/** Whether `chat` has a turn other than `except` that has not ended: a run woken again while one still goes. Reads only. */
+	async function turnsLeft(tx: Tx, chat: number, except: number): Promise<boolean> {
+		for (const status of ["pending", "running", "waiting", "sleeping", "completing"] as const) {
+			let cursor: Parameters<Tx["scanTasks"]>[2];
+			do {
+				const page = await tx.scanTasks({ kind: TURN, status, conversationId: chat as ConversationId }, 100, cursor);
+				if (page.items.some((one) => Number(one.id) !== except)) return true;
+				cursor = page.next;
+			} while (cursor !== undefined);
+		}
+		return false;
+	}
+
 	const Turn = defineTask<TurnInput, TurnState, TurnResult>({
-		name: "banda.turn",
+		name: TURN,
 		version: 1,
 		initial: () => ({ phase: "answer", invocation: 0 }),
 		phases: {
@@ -1237,7 +1252,8 @@ export function defineCore(options: CoreOptions) {
 					const { internal } = task.input;
 					const chat = ran?.chat ?? task.input.chat;
 					// its run is over: it is no longer one of the agent's chats, which a definition's change reaches
-					if (ran !== undefined) delete agents[task.input.chat];
+					if (ran !== undefined && !(await turnsLeft(tx, task.input.chat, Number(task.id))))
+						delete agents[task.input.chat];
 					const wake = internal?.kind === WAKE ? (internal.data as WakeData) : undefined;
 					const routine = wake === undefined ? undefined : (await tx.doc(Routines)).routines[wake.routine];
 					// the run's history says how it ended, and where its wake and answer are in the chat
@@ -1305,7 +1321,8 @@ export function defineCore(options: CoreOptions) {
 		abort: (task, runtime, ctx) =>
 			runtime.commit(async (tx) => {
 				const ran = (await tx.doc(RoutineRuns)).runs[task.input.chat];
-				if (ran !== undefined) delete (await tx.doc(AgentChats)).chats[task.input.chat];
+				if (ran !== undefined && !(await turnsLeft(tx, task.input.chat, Number(task.id))))
+					delete (await tx.doc(AgentChats)).chats[task.input.chat];
 				return { status: "terminal", outcome: { status: "aborted", reason: "aborted" } };
 			}, ctx),
 	});
@@ -1470,16 +1487,17 @@ export function defineCore(options: CoreOptions) {
 	async function followedAt(tx: Tx, chat: number) {
 		const routes = (await tx.doc(Routes)).chats;
 		const home = routes[chat];
-		if (home !== undefined) return { home, run: false };
+		if (home !== undefined) return { home };
 		const ran = (await tx.doc(RoutineRuns)).runs[chat];
 		if (ran === undefined || (await agentOfChat(tx, chat)) !== ran.agent) return undefined;
 		const parent = routes[ran.chat];
-		return parent === undefined ? undefined : { home: parent, run: true };
+		return parent === undefined ? undefined : { home: parent, run: ran };
 	}
 
 	/**
 	 * Queue an input nobody wrote to `chat`, after its other inputs, watched by a Turn. A routine's run takes it in its
-	 * own conversation, at once as its wake was, though its first turn is over.
+	 * own conversation, at once as its wake was, though its first turn is over: it is one of its agent's chats again
+	 * until its last turn ends.
 	 */
 	async function followUp(
 		tx: Tx,
@@ -1497,11 +1515,12 @@ export function defineCore(options: CoreOptions) {
 		} as const;
 		const admit = await tx.createTask(
 			Admit,
-			{ ...input, ...(run || home.lastAdmit === undefined ? {} : { after: home.lastAdmit }) },
+			{ ...input, ...(run !== undefined || home.lastAdmit === undefined ? {} : { after: home.lastAdmit }) },
 			placement,
 		);
 		const turn = await tx.createTask(Turn, { ...input, admit: Number(admit) }, placement);
-		if (!run) home.lastAdmit = Number(admit);
+		if (run === undefined) home.lastAdmit = Number(admit);
+		else (await tx.doc(AgentChats)).chats[chat] = run.agent;
 		return Number(turn);
 	}
 
