@@ -669,7 +669,9 @@ gives it, the open asks it covers, and an ask a permission covers by the time it
   permissions), holding the wake and nothing of the chat's history. The chat's length never reaches a run, and a run's
   work never reaches the chat; only what it sends does. Its usage is its own, counted per routine.
 - **A wake is an event in the chat**: a line with the routine's name and when it fired, and then what the run sent
-  as the agent's message, which the chat's model also reads at its next turn. A wake draws its line only when the run
+  as the agent's message, which the chat's model also reads at its next turn. The line opens its run beneath it, in a
+  box of its own within the chat: the run's conversation as a chat draws one, the routine's words as the owner's
+  message, read only when the owner opens it and as it is then. A wake draws its line only when the run
   sent something or failed, so a quiet run leaves no trace in the chat. A run that failed, stalled or ran the most it
   may today draws an error line and marks the chat unread. The panel's row says the rest ("last ran 8:00, nothing to
   say").

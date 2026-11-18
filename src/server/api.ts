@@ -264,6 +264,8 @@ export type Item =
 			readonly routine: string;
 			readonly text: string;
 			readonly owner?: true;
+			/** In the run's own conversation: the routine's words, as the run read them. */
+			readonly ask?: string;
 			readonly at?: number;
 	  }
 	/**

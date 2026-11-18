@@ -2,18 +2,20 @@
  * Routines in full: the owner makes one (`POST /api/routines`), changes one (`POST /api/routines/:id/edit`, or its
  * schedule alone with `/when`) and runs one now (`POST /api/routines/:id/run`), each in effect at once and answered
  * with the control view. On start it finishes an owner's edit a restart cut short, so the box holds what the store
- * accepted. Its history (`GET /api/routines/:id/runs?before=`) reads the runs its record keeps, a page at a time. A
+ * accepted. Its history (`GET /api/routines/:id/runs?before=`) reads the runs its record keeps, a page at a time; a
+ * run's line in a chat names its run's conversation (`GET /api/chats/:chat/items/:entry/run`). A
  * routine's id is `<agent>/<name>` for one in its agent's folder, `<name>` for a shared one.
  */
 
 import { routineName } from "../../core/routines.ts";
 import { BadRequest } from "../http.ts";
-import { routineRuns } from "../routine-runs.ts";
+import { lineRun, routineRuns } from "../routine-runs.ts";
 import { changeRoutine, createRoutine, finishEdits, runNow } from "../routines.ts";
 import type { AreaModule } from "./area.ts";
 
 const PATH = /^\/routines\/((?:[a-z0-9-]+\/)?[a-z0-9-]+)\/(when|edit|run)$/;
 const RUNS = /^\/routines\/((?:[a-z0-9-]+\/)?[a-z0-9-]+)\/runs$/;
+const LINE = /^\/chats\/(\d+)\/items\/(\d+)\/run$/;
 
 const SHA = /^[0-9a-f]{64}$/;
 
@@ -61,6 +63,14 @@ export const routines: AreaModule = {
 					if (before !== undefined && !Number.isSafeInteger(before)) throw new BadRequest("before is when a run was");
 					const page = await routineRuns(deps.harness, history[1] ?? "", before);
 					return page === undefined ? { status: 404, body: { error: "no such routine" } } : { body: page };
+				}
+				const line = LINE.exec(request.path);
+				if (line !== null) {
+					if (request.method !== "GET") return { status: 405, body: { error: "method not allowed" } };
+					const run = await lineRun(deps.harness, Number(line[1]), Number(line[2]));
+					return run === undefined
+						? { status: 404, body: { error: "this line has no run of its own" } }
+						: { body: { run } };
 				}
 				const match = PATH.exec(request.path);
 				if (match === null) return undefined;

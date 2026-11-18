@@ -64,6 +64,7 @@ import {
 	type TroubleData,
 	WAKE,
 	type WakeData,
+	wakeAsk,
 } from "../core/routines.ts";
 import { localTime } from "../core/schedule.ts";
 import { openWaits, status } from "../core/status.ts";
@@ -344,12 +345,15 @@ export function itemOf(entry: EntryRecord): Item | undefined {
 		};
 	if (entry.kind === WAKE) {
 		const data = entry.data as unknown as WakeData;
+		const ask = message === undefined ? undefined : wakeAsk(textOf(message.content));
 		return {
 			id,
 			role: "wake",
 			routine: data.routine,
 			text: data.description,
 			...(data.owner === true ? { owner: true as const } : {}),
+			// in its run's own conversation the wake is what the model read: the routine's words are in it
+			...(ask === undefined ? {} : { ask }),
 			// a run apart from the chat draws its line with no model message: it says when it was due
 			at: message ? message.timestamp : data.due,
 		};
