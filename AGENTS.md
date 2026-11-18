@@ -137,6 +137,12 @@ A banda daemon may be running from another checkout, possibly the one you are ru
   8 MB) for an interaction. Record on a throwaway home with invented data and the faux provider, never
   a `home:fork`: the repo is public. Media go on the orphan branch `pr-proof` under `pr-<N>/` and are linked
   as `https://raw.githubusercontent.com/purrgrammer/banda/pr-proof/pr-<N>/<file>`.
+- What a home holds stays on the machine: the repo is public, and so is everything written into it. A commit
+  message, a pull request, an issue, a comment and a test never carry what was read from the owner's home or a
+  `home:fork` of it: no routine's, chat's or agent's name, no id of a conversation, task or session, no time
+  something ran, no usage or cost figure, no line of a log or a transcript. Say what was found in general words ("a
+  routine's run started a session", "the report fell short by its runs"), give numbers only from a throwaway home or
+  a test, and read the message again for these before every commit and before every post.
 - Push to GitHub only (`git push https://github.com/purrgrammer/banda <branch>`): `origin` also pushes to
   a nostr mirror that rejects force pushes.
 - An upgrade keeps the owner's home: a home made by 0.1.0-alpha.14 (format 3) or any later build opens in every later
