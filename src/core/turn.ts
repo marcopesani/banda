@@ -1463,14 +1463,32 @@ export function defineCore(options: CoreOptions) {
 		});
 	}
 
-	/** Queue an input nobody wrote to `chat`, after its other inputs, watched by a Turn. */
+	/**
+	 * Where an input nobody wrote to `chat` is answered: the chat's home, or, for a routine's run (routed nowhere), its
+	 * agent's chat's, while that agent is still the run's principal. Undefined when nobody is there. Reads only.
+	 */
+	async function followedAt(tx: Tx, chat: number) {
+		const routes = (await tx.doc(Routes)).chats;
+		const home = routes[chat];
+		if (home !== undefined) return { home, run: false };
+		const ran = (await tx.doc(RoutineRuns)).runs[chat];
+		if (ran === undefined || (await agentOfChat(tx, chat)) !== ran.agent) return undefined;
+		const parent = routes[ran.chat];
+		return parent === undefined ? undefined : { home: parent, run: true };
+	}
+
+	/**
+	 * Queue an input nobody wrote to `chat`, after its other inputs, watched by a Turn. A routine's run takes it in its
+	 * own conversation, at once as its wake was, though its first turn is over.
+	 */
 	async function followUp(
 		tx: Tx,
 		chat: number,
 		{ key, text, entry }: { key: string; text: string; entry: { kind: string; data: JsonObject } },
 	): Promise<number> {
-		const home = (await tx.doc(Routes)).chats[chat];
-		if (home === undefined) throw new Error(`chat ${chat} has no home origin`);
+		const followed = await followedAt(tx, chat);
+		if (followed === undefined) throw new Error(`chat ${chat} has no home origin`);
+		const { home, run } = followed;
 		const input: Input = { chat, origin: home.origin, message: { id: key, text }, internal: entry };
 		const placement = {
 			ownership: { kind: "conversation" },
@@ -1479,12 +1497,17 @@ export function defineCore(options: CoreOptions) {
 		} as const;
 		const admit = await tx.createTask(
 			Admit,
-			{ ...input, ...(home.lastAdmit === undefined ? {} : { after: home.lastAdmit }) },
+			{ ...input, ...(run || home.lastAdmit === undefined ? {} : { after: home.lastAdmit }) },
 			placement,
 		);
 		const turn = await tx.createTask(Turn, { ...input, admit: Number(admit) }, placement);
-		home.lastAdmit = Number(admit);
+		if (!run) home.lastAdmit = Number(admit);
 		return Number(turn);
+	}
+
+	/** `followUp`, or nothing when nobody is there to wake: the chat is gone, or its run's agent no longer runs it. */
+	async function wake(tx: Tx, chat: number, input: Parameters<typeof followUp>[2]): Promise<number | undefined> {
+		return (await followedAt(tx, chat)) === undefined ? undefined : followUp(tx, chat, input);
 	}
 
 	/**
@@ -1888,6 +1911,8 @@ export function defineCore(options: CoreOptions) {
 		reconcileTools: (harness: Harness, ctx: Context = context) => reconcileTools(harness, ctx),
 		/** Queue an input nobody wrote to a chat, after its other inputs, watched by a Turn: in the caller's commit. */
 		followUp,
+		/** `followUp` for a chat that may be gone: nothing is queued when nobody is there to wake. */
+		wake,
 		/** Tell the agent the owner decided its proposal, in the caller's commit with the decision; it starts no turn. */
 		proposalDecided,
 		routineEdited,

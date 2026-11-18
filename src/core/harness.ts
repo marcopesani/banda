@@ -686,11 +686,12 @@ export type HarnessOptions = {
 	/** The home this daemon serves: only processes its own sessions recorded here are ever killed. */
 	readonly home: string;
 	readonly definitions: () => ReadonlyMap<string, HarnessDefinition>;
+	/** Wake the session's agent in `chat`; undefined when nobody is there to wake, and the session ends all the same. */
 	readonly followUp: (
 		tx: Tx,
 		chat: number,
 		input: { key: string; text: string; entry: { kind: string; data: JsonObject } },
-	) => Promise<number>;
+	) => Promise<number | undefined>;
 	readonly log: (line: string) => void;
 	readonly now?: () => number;
 	/** A fault point, named; tests throw or kill there. */
@@ -750,7 +751,7 @@ export function defineHarnesses(options: HarnessOptions) {
 				.replace(/\*\*|__|`/g, "")
 				.trim()
 				.slice(0, 300);
-		await options.followUp(tx, session.chat, {
+		const woke = await options.followUp(tx, session.chat, {
 			key: `harness:${task}`,
 			text,
 			entry: {
@@ -758,6 +759,7 @@ export function defineHarnesses(options: HarnessOptions) {
 				data: { task, harness: session.harness, service, folder: session.folder, state, at: session.ended },
 			},
 		});
+		if (woke === undefined) options.log(`coding agents: session ${task} ended with nobody to tell in chat ${session.chat}`);
 		const ended = Object.entries(doc.sessions)
 			.filter(([, one]) => one.ended !== undefined)
 			.sort(([, a], [, b]) => (b.ended ?? 0) - (a.ended ?? 0));
