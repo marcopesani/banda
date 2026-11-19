@@ -1,12 +1,12 @@
 {
 	"lead": {
 		"system": {
-			"total": 2860,
+			"total": 2868,
 			"sections": {
 				"speaking": 1066,
 				"roster": 95,
 				"avatar_design": 0,
-				"skills": 655,
+				"skills": 663,
 				"computer": 138,
 				"memory": 37,
 				"now": 265,
@@ -45,12 +45,12 @@
 	},
 	"helper": {
 		"system": {
-			"total": 2905,
+			"total": 2913,
 			"sections": {
 				"speaking": 1066,
 				"roster": 387,
 				"avatar_design": 0,
-				"skills": 655,
+				"skills": 663,
 				"computer": 138,
 				"memory": 37,
 				"now": 265,
@@ -89,10 +89,10 @@
 	},
 	"group": {
 		"system": {
-			"total": 2360,
+			"total": 2368,
 			"sections": {
 				"group": 914,
-				"skills": 655,
+				"skills": 663,
 				"computer": 138,
 				"memory": 37,
 				"now": 267,
