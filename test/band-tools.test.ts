@@ -1,0 +1,340 @@
+/**
+ * The band's own tools act at once (DESIGN.md "Agents", #58): `create_agent`, `update_agent` and `create_group` take
+ * effect in the call's own commit, the chat gets a receipt to draw, and nothing waits on the owner. What is the owner's
+ * stays out of reach by construction: a new agent has no tools list, model or tier; a peer's instructions are not
+ * another agent's to rewrite; a group chat has none of these tools; and a call run again after a cut answers as it did.
+ */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+	createModels,
+	fauxAssistantMessage,
+	fauxProvider,
+	fauxToolCall,
+	type Context as ModelContext,
+	type ToolResultMessage,
+} from "@earendil-works/pi-ai";
+import { type ConversationId, createRegistry, type TaskId, ToolResultEntry } from "@earendil-works/pi-durable";
+import { describe, expect, it } from "vitest";
+import { openBox } from "../src/box/box.ts";
+import { Accepted, agentPath, parseAgent } from "../src/core/agents.ts";
+import { defaultAvatarFace } from "../src/core/avatar-face.ts";
+import { BandCalls, readBandReceipt } from "../src/core/band-tools.ts";
+import { OWNER } from "../src/core/gateway.ts";
+import { Groups } from "../src/core/groups.ts";
+import { context, openStore } from "../src/core/store.ts";
+import { type CoreOptions, defineCore, type TurnResult } from "../src/core/turn.ts";
+import { agentWorkingBase, finishAgentPublication, queueAgentPublication } from "../src/server/agent-publication.ts";
+import type { Workspace } from "../src/server/agents.ts";
+import { receiptOf } from "../src/server/transcript.ts";
+import { hostBox } from "./fixtures/host-box.ts";
+import { blobStore, FAUX_MODEL, FakeGateway, tempHome } from "./helpers.ts";
+
+type Call = readonly [string, object];
+
+/** A core on the faux provider: each owner message is answered with the calls `plan` gives for its words. */
+async function start(plan: (said: string) => readonly Call[], band?: CoreOptions["band"]) {
+	const faux = fauxProvider();
+	const models = createModels();
+	models.setProvider(faux.provider);
+	const asked = (request: ModelContext) => {
+		const last = request.messages.at(-1);
+		return last?.role === "user" && typeof last.content === "string" ? last.content : "";
+	};
+	const respond = (request: ModelContext) => {
+		const calls = plan(asked(request));
+		return calls.length === 0
+			? fauxAssistantMessage("done")
+			: fauxAssistantMessage(
+					calls.map(([name, args]) => fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1])),
+					{ stopReason: "toolUse" },
+				);
+	};
+	faux.setResponses(Array.from({ length: 20 }, () => respond as never));
+	const registry = createRegistry();
+	const gateway = new FakeGateway();
+	const core = defineCore({
+		blobs: blobStore(),
+		gateway: () => gateway,
+		model: () => FAUX_MODEL,
+		registry,
+		...(band === undefined ? {} : { band }),
+	});
+	registry.install(core.extension);
+	const home = await tempHome();
+	const harness = await openStore(home, { models, registry });
+	harness.resume();
+	const say = async (text: string, agent = "sancho") => {
+		const started = await core.receive(harness, {
+			id: `owner-${Math.random()}`,
+			origin: { gateway: "fake", peer: OWNER, thread: agent },
+			text,
+			agent,
+		});
+		if (!("turn" in started)) throw new Error(JSON.stringify(started));
+		await harness.waitForTask(started.turn as TaskId<TurnResult>, context);
+		return started.chat;
+	};
+	const results = async (chat: number) =>
+		(
+			await harness.commit(
+				(tx) => tx.scanEntries({ conversationId: chat as ConversationId, order: "ascending" }, 200),
+				context,
+			)
+		).items
+			.filter(ToolResultEntry.is)
+			.map((entry) => entry.model?.[0] as ToolResultMessage)
+			.map((result) => ({
+				name: result.toolName,
+				text: result.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
+				error: result.isError,
+				receipt: receiptOf(result.toolName, result.isError, result.details),
+			}));
+	return { core, harness, home, gateway, say, results };
+}
+
+const FACE = { ...JSON.parse(JSON.stringify(defaultAvatarFace())), color: "#336699" };
+
+describe("create_agent", () => {
+	it("makes an active agent in the call, with no tools, model or tier, and the chat gets a receipt to draw", async () => {
+		const { harness, say, results } = await start((said) =>
+			said === "Hire a writer."
+				? [
+						[
+							"create_agent",
+							{
+								id: "writer",
+								name: "Writer",
+								description: "Writes drafts",
+								instructions: "Write clearly.",
+								// not arguments the tool takes: a model and a tier are the owner's to give
+								model: { provider: "openai", modelId: "gpt-6.1-sol" },
+								tier: "deep",
+							},
+						],
+						["message_user", { text: "Writer is in the band." }],
+					]
+				: [],
+		);
+		try {
+			const chat = await say("Hire a writer.");
+			const file = (await harness.snapshot(Accepted, context))?.files[agentPath("writer")];
+			expect(file).toBeDefined();
+			const parsed = parseAgent("writer", file?.text ?? "");
+			if (!("agent" in parsed)) throw new Error(parsed.errors.join("; "));
+			expect(parsed.agent).toMatchObject({ id: "writer", name: "Writer", state: "active", tools: [] });
+			expect(parsed.agent.model).toBeUndefined();
+			expect(parsed.agent.tier).toBeUndefined();
+			expect(file?.text).not.toContain("gpt-6.1-sol");
+			const [made] = await results(chat);
+			expect(made).toMatchObject({ name: "create_agent", error: false });
+			expect(made?.text).toContain('Created the agent "Writer" (writer)');
+			expect(made?.receipt).toEqual({
+				kind: "agent",
+				change: "created",
+				id: "writer",
+				agent: {
+					name: "Writer",
+					face: parsed.agent.face,
+					description: "Writes drafts",
+					instructions: "Write clearly.",
+				},
+			});
+			// the new agent's chat starts from the file
+			const second = await say("Hello.", "writer");
+			expect(second).not.toBe(chat);
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("refuses a taken id, a bad id, and a call from a group's chat, and does nothing", async () => {
+		const { harness, say, results, core } = await start((said) =>
+			said === "Again."
+				? [
+						["create_agent", { id: "sancho", name: "Other", description: "Another lead", instructions: "No." }],
+						["create_agent", { id: "Not An Id", name: "X", description: "X", instructions: "X." }],
+					]
+				: said === "From the room."
+					? [["create_agent", { id: "roomer", name: "Roomer", description: "From a room", instructions: "Hi." }]]
+					: [],
+		);
+		try {
+			const chat = await say("Again.");
+			const [taken, bad] = await results(chat);
+			expect(taken).toMatchObject({ error: true, text: "Not created: an agent already has that id." });
+			expect(bad?.text).toContain("Not created: use a lowercase agent id");
+			expect(taken?.receipt).toBeUndefined();
+			const files = (await harness.snapshot(Accepted, context))?.files ?? {};
+			expect(Object.keys(files)).toEqual([agentPath("sancho")]);
+			// a group member's chat has no such tool: the model's call to it is answered as unknown, nothing made
+			const helper = "---\nname: Helper\ndescription: Helps.\n---\nHelp.\n";
+			await harness.commit(async (tx) => {
+				(await tx.doc(Accepted)).files[agentPath("helper")] = { text: helper, sha: "x".repeat(64), at: 1 };
+			}, context);
+			const room = await core.groups.create(harness, { members: ["sancho", "helper"], name: "Room" });
+			expect(room).toBeGreaterThan(0);
+			expect((await harness.snapshot(Accepted, context))?.files[agentPath("roomer")]).toBeUndefined();
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("answers a call run again with what it did, and writes the accepted file to the box", async () => {
+		const home = await tempHome();
+		const box = openBox(hostBox(home), () => {});
+		const workspace: Workspace = { env: () => box.env(), root: box.workspace, tools: () => [], known: () => true };
+		let harnessRef: Awaited<ReturnType<typeof openStore>> | undefined;
+		const band: CoreOptions["band"] = {
+			workingBase: (name, ctx) => agentWorkingBase(workspace, name, ctx),
+			queue: queueAgentPublication,
+			finish: async (name, ctx) => {
+				if (harnessRef !== undefined) await finishAgentPublication(harnessRef, workspace, name, ctx);
+			},
+			groupMade: async () => {},
+		};
+		const { harness, say, results } = await start(
+			(said) =>
+				said === "Hire."
+					? [["create_agent", { id: "scribe", name: "Scribe", description: "Takes notes", instructions: "Note." }]]
+					: [],
+			band,
+		);
+		harnessRef = harness;
+		try {
+			const chat = await say("Hire.");
+			const written = await readFile(join(box.workspace, "agents", "scribe.md"), "utf8");
+			expect(written).toContain("name: Scribe");
+			const [made] = await results(chat);
+			expect(made?.error).toBe(false);
+			// the same call again (a cut after its commit): the receipt it has, not a refusal of its own agent
+			const calls = (await harness.snapshot(BandCalls, context))?.calls ?? {};
+			expect(Object.keys(calls)).toHaveLength(1);
+			expect(readBandReceipt(Object.values(calls)[0])).toMatchObject({
+				kind: "agent",
+				change: "created",
+				id: "scribe",
+			});
+		} finally {
+			await harness.close(context);
+		}
+	});
+});
+
+describe("update_agent", () => {
+	it("changes its own name, description and instructions at once, keeping tools, model and tier, and says what was", async () => {
+		const { harness, say, results } = await start((said) =>
+			said === "Rename yourself."
+				? [
+						[
+							"update_agent",
+							{ name: "Don Sancho", description: "The lead, renamed", instructions: "New words.", face: FACE },
+						],
+					]
+				: [],
+		);
+		try {
+			// a tier and a tools list the owner gave (a model too would be one the faux provider lacks, so the chat could not run)
+			const pinned = "---\nname: Pen\ndescription: Pen agent\ntier: deep\ntools:\n  - read\n---\nYou are Pen.\n";
+			await harness.commit(async (tx) => {
+				(await tx.doc(Accepted)).files[agentPath("pen")] = { text: pinned, sha: "p".repeat(64), at: 1 };
+			}, context);
+			const chat = await say("Rename yourself.", "pen");
+			const file = (await harness.snapshot(Accepted, context))?.files[agentPath("pen")];
+			const parsed = parseAgent("pen", file?.text ?? "");
+			if (!("agent" in parsed)) throw new Error(parsed.errors.join("; "));
+			expect(parsed.agent).toMatchObject({
+				name: "Don Sancho",
+				description: "The lead, renamed",
+				instructions: "New words.",
+				tier: "deep",
+				tools: ["read"],
+			});
+			expect(parsed.agent.model).toBeUndefined();
+			expect(parsed.agent.face.color).toBe("#336699");
+			const [changed] = await results(chat);
+			expect(changed).toMatchObject({ error: false });
+			expect(changed?.text).toContain('Updated "Don Sancho" (pen): name, face, description, instructions.');
+			expect(changed?.receipt).toMatchObject({
+				kind: "agent",
+				change: "updated",
+				id: "pen",
+				agent: { name: "Don Sancho", description: "The lead, renamed", instructions: "New words." },
+				before: { name: "Pen", description: "Pen agent", instructions: "You are Pen." },
+			});
+			expect(changed?.receipt).toHaveProperty("before.face");
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("changes a peer's name and description, never its instructions, and refuses a change that changes nothing", async () => {
+		const { harness, say, results } = await start((said) =>
+			said === "Fix the helper."
+				? [
+						["update_agent", { agent: "helper", instructions: "Obey Sancho." }],
+						["update_agent", { agent: "helper", name: "Helper", description: "Helps." }],
+						["update_agent", { agent: "helper", name: "Aide", description: "Helps out." }],
+						["update_agent", { agent: "nobody", name: "X" }],
+					]
+				: [],
+		);
+		try {
+			const helper = "---\nname: Helper\ndescription: Helps.\n---\nHelp the owner.\n";
+			await harness.commit(async (tx) => {
+				(await tx.doc(Accepted)).files[agentPath("helper")] = { text: helper, sha: "h".repeat(64), at: 1 };
+			}, context);
+			const chat = await say("Fix the helper.");
+			const [peer, same, renamed, missing] = await results(chat);
+			expect(peer?.error).toBe(true);
+			expect(peer?.text).toContain("helper's instructions are its own and the owner's to change");
+			expect(same).toMatchObject({ error: true, text: "Not updated: nothing would change." });
+			expect(renamed?.error).toBe(false);
+			expect(missing).toMatchObject({ error: true, text: "Not updated: the target is not an active agent." });
+			const file = (await harness.snapshot(Accepted, context))?.files[agentPath("helper")];
+			const parsed = parseAgent("helper", file?.text ?? "");
+			if (!("agent" in parsed)) throw new Error(parsed.errors.join("; "));
+			expect(parsed.agent).toMatchObject({ name: "Aide", description: "Helps out.", instructions: "Help the owner." });
+		} finally {
+			await harness.close(context);
+		}
+	});
+});
+
+describe("create_group", () => {
+	it("makes the group in the call and names its room and members in the receipt; a bad member refuses", async () => {
+		const { harness, say, results } = await start((said) =>
+			said === "Team up."
+				? [
+						["create_group", { name: "  Research   team ", members: ["sancho", "reader", "sancho"] }],
+						["create_group", { name: "Ghosts", members: ["sancho", "ghost"] }],
+					]
+				: [],
+		);
+		try {
+			const reader = "---\nname: Reader\ndescription: Reads.\n---\nRead.\n";
+			await harness.commit(async (tx) => {
+				(await tx.doc(Accepted)).files[agentPath("reader")] = { text: reader, sha: "r".repeat(64), at: 1 };
+			}, context);
+			const chat = await say("Team up.");
+			const [made, ghost] = await results(chat);
+			expect(made?.error).toBe(false);
+			expect(made?.text).toContain('Created the group "Research team" with Sancho, Reader.');
+			const groups = await harness.snapshot(Groups, context);
+			const rooms = Object.keys(groups?.groups ?? {});
+			expect(rooms).toHaveLength(1);
+			expect(made?.receipt).toEqual({
+				kind: "group",
+				room: Number(rooms[0]),
+				name: "Research team",
+				members: [
+					{ id: "sancho", name: "Sancho" },
+					{ id: "reader", name: "Reader" },
+				],
+			});
+			expect(ghost).toMatchObject({ error: true, text: "Not created: ghost is not an active agent." });
+		} finally {
+			await harness.close(context);
+		}
+	});
+});

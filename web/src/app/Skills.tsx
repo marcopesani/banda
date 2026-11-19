@@ -193,7 +193,8 @@ export function SkillsPage({
 				</>
 			) : accepted === undefined ? (
 				<p className="text-ui text-ink-2">
-					No accepted skill named /{name}. A proposed file needs review before it can load.
+					No skill named /{name} is in effect. A file an agent wrote with its write tool is in effect at once; one that
+					got here another way waits for you below.
 				</p>
 			) : (
 				<SkillDetail skill={accepted} showTitle={false} />

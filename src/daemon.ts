@@ -75,7 +75,12 @@ import { CliGateway } from "./gateways/cli.ts";
 import { WebGateway } from "./gateways/web.ts";
 import { daemonFile, egressCredentials, keepEgressCredential, maxFileBytes, ownerToken, readConfig } from "./home.ts";
 
-import { publicationHistory } from "./server/agent-publication.ts";
+import {
+	agentWorkingBase,
+	finishAgentPublication,
+	publicationHistory,
+	queueAgentPublication,
+} from "./server/agent-publication.ts";
 import { accept, agents, decline, retryPublication, save, seed, type Workspace } from "./server/agents.ts";
 import type { ComputerView, OwnerInput, Posted, PostMessage, ViewEvent } from "./server/api.ts";
 import { acceptedIconFace } from "./server/avatar-icon-face.ts";
@@ -305,6 +310,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			box: attachmentsIn(agentBox),
 
 			workspace: () => agentBox.workspace,
+			// what an agent's create_agent or update_agent put in effect is written to the box as the owner's save is
+			band: {
+				workingBase: (name, ctx) => agentWorkingBase(workspace, name, ctx),
+				queue: queueAgentPublication,
+				finish: async (name, ctx) => {
+					if (harness !== undefined) await finishAgentPublication(harness, workspace, name, ctx);
+				},
+				groupMade: async (ctx) => {
+					if (harness !== undefined) await core.groups.asks(harness, ctx);
+				},
+			},
 			gateway: (name) => gateways.get(name),
 			model: () => config.model,
 			// every tool installed, which the lead's new chats get

@@ -25,11 +25,13 @@ import {
 	createWriteTool,
 	type ImageProcessor,
 } from "@earendil-works/pi-durable/tools";
-import { Accepted, AGENT_NAME } from "../core/agents.ts";
+import { Accepted, AGENT_NAME, shaOf } from "../core/agents.ts";
 import { type HoldingEgress, intake, withIntake } from "../core/egress.ts";
 
+import { MAX_SKILL_BYTES, parseSkill, SKILL_FILE, SKILL_NAME } from "../core/skill-file.ts";
 import { context } from "../core/store.ts";
 import type { CoreOptions } from "../core/turn.ts";
+import { hiddenError } from "../core/visible.ts";
 import { ansiStripper } from "./ansi.ts";
 import type { Box } from "./box.ts";
 
@@ -211,8 +213,11 @@ async function beforeFiles(
 	ctx: Context,
 ): Promise<Map<string, string> | undefined> {
 	const found = new Map<string, string>();
-	const look = async (path: string, info: { kind: string; size: number; mtimeMs: number }) => {
-		const relative = beforeFile(workspace, path);
+	const look = async (
+		path: string,
+		info: { kind: string; size: number; mtimeMs: number },
+		relative = beforeFile(workspace, path),
+	) => {
 		if (relative === undefined) return;
 		if (info.kind !== "file") return found.set(relative, info.kind);
 		if (info.size > HASHED) return found.set(relative, `${info.size}:${info.mtimeMs}`);
@@ -243,6 +248,14 @@ async function beforeFiles(
 			await look(`${workspace}/${folder}/${entry.name}`, entry);
 		}
 	}
+	// each skill's instructions: a file a command changed is not one the model wrote, so it waits too
+	const skills = await env.listDir(`${workspace}/skills`, ctx);
+	if (!skills.ok) return skills.error.code === "not_found" ? found : undefined;
+	for (const entry of skills.value) {
+		if (entry.kind !== "directory" || !SKILL_NAME.test(entry.name)) continue;
+		const file = await env.fileInfo(`${workspace}/${SKILL_FILE(entry.name)}`, ctx);
+		if (file.ok) await look(`${workspace}/${SKILL_FILE(entry.name)}`, file.value, SKILL_FILE(entry.name));
+	}
 	return found;
 }
 
@@ -269,27 +282,127 @@ function telling(tool: ToolRegistration, workspace: string | undefined): ToolReg
 			const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
 				(path) => before.get(path) !== after.get(path) && after.get(path) !== accepted[path]?.sha,
 			);
-			for (const path of changed.sort()) api.diagnostic(awaiting(path));
+			for (const path of changed.sort())
+				api.diagnostic(skillNamed(path) === undefined ? awaiting(path) : skillWaits(path, "a command changed it"));
 			return result;
 		},
 	};
 }
 
+/** The skill whose instructions `path` (relative to the workspace) is: `skills/<name>/SKILL.md`. */
+function skillNamed(path: string): string | undefined {
+	const name = /^skills\/([^/]+)\/SKILL\.md$/.exec(path)?.[1];
+	return name !== undefined && SKILL_NAME.test(name) ? name : undefined;
+}
+
+/** What the model is told of a skill file that is in the box and not in effect, and how it gets there. */
+export const skillWaits = (path: string, why: string) => ({
+	severity: "warn" as const,
+	code: "skill-waits",
+	message:
+		`${path} is not in effect: ${why}. A skill is in effect when you write its whole SKILL.md with the write tool, ` +
+		"or edit the version in effect; otherwise the owner allows it on the Skills page. Until then the version in " +
+		"effect, if any, is what loads.",
+});
+
+/** What the model is told of a skill it wrote: in effect, with nothing for the owner to accept. */
+export const skillInEffect = (path: string, name: string, change: "added" | "changed") => ({
+	severity: "info" as const,
+	code: "skill-in-effect",
+	message:
+		`${path} is in effect: the skill /${name} was ${change}, and the owner sees it on the Skills page. ` +
+		"It gives no tool, connection or permission.",
+});
+
+/** The text of `path` in the box as it is now, read without following a link; undefined when it is not plain text. */
+async function textAt(env: ExecutionEnv, path: string, ctx: Context): Promise<string | undefined> {
+	const opened = await env.openBinaryReader(path, { noFollow: true }, ctx);
+	if (!opened.ok) return undefined;
+	try {
+		const info = await opened.value.info(ctx);
+		if (!info.ok || info.value.size > MAX_SKILL_BYTES) return undefined;
+		const bytes = await opened.value.read(0, info.value.size, ctx);
+		if (!bytes.ok) return undefined;
+		return new TextDecoder("utf-8", { fatal: true }).decode(bytes.value);
+	} catch {
+		return undefined;
+	} finally {
+		await opened.value.close(ctx);
+	}
+}
+
 /**
- * `tool` (write or edit), telling the model when a file it changed takes effect only once the owner accepts it: until
- * then the accepted version stays in effect, so the change is not done when the call is.
+ * Put skill `name`'s instructions `text` in effect, as the call that wrote them: checked as any SKILL.md is, and for
+ * characters nobody sees, since nobody reviews it. `over` is the hash the bytes replaced, when the call edited a file
+ * rather than writing it whole: only an edit of the version in effect is the model's own text throughout. The note
+ * for the model says what happened.
+ */
+async function acceptSkill(
+	api: ToolExecutionApi,
+	ctx: Context,
+	name: string,
+	text: string,
+	over?: string,
+): Promise<ReturnType<typeof skillWaits> | ReturnType<typeof skillInEffect> | undefined> {
+	const path = SKILL_FILE(name);
+	try {
+		parseSkill(name, text);
+	} catch (error) {
+		return skillWaits(path, (error as Error).message);
+	}
+	const hidden = hiddenError(text, { lines: true });
+	if (hidden !== undefined) return skillWaits(path, hidden);
+	const sha = shaOf(text);
+	const change = await api.commit(async (tx) => {
+		const files = (await tx.doc(Accepted)).files;
+		const was = files[path];
+		if (was?.sha === sha) return "same" as const;
+		if (over !== undefined && was?.sha !== over) return "foreign" as const;
+		files[path] = { sha, text, at: api.now() };
+		return was === undefined ? ("added" as const) : ("changed" as const);
+	}, ctx);
+	if (change === "same") return undefined;
+	if (change === "foreign") return skillWaits(path, "the file you edited was not the version in effect");
+	return skillInEffect(path, name, change);
+}
+
+/**
+ * `tool` (write or edit), telling the model when what it changed takes effect. An agent, routine or watch file waits
+ * for the owner: until then the accepted version stays in effect, so the change is not done when the call is. A
+ * skill's instructions the call wrote are in effect at once (DESIGN.md "The workspace"): the bytes are the model's own,
+ * whole for a `write`, and for an `edit` only over the version in effect.
  */
 function accepting(tool: ToolRegistration, workspace: string | undefined): ToolRegistration {
 	if (workspace === undefined) return tool;
 	return {
 		...tool,
 		execute: async (args, api, ctx) => {
-			const result = await tool.execute(args, api, ctx);
 			const path = (args as { path?: unknown }).path;
+			const content = (args as { content?: unknown }).content;
 			const cwd = api.env?.cwd ?? workspace;
-			if (typeof path !== "string" || result.isError === true) return result;
-			const file = beforeFile(workspace, posix.resolve(cwd, path));
+			const at = typeof path === "string" ? posix.resolve(cwd, path) : undefined;
+			const skill = at === undefined ? undefined : skillNamed(posix.relative(workspace, at));
+			// an edit's file as it was: what it replaced must be the version in effect
+			const edited =
+				skill === undefined || at === undefined || typeof content === "string" || api.env === undefined
+					? undefined
+					: await textAt(api.env, at, ctx);
+			const result = await tool.execute(args, api, ctx);
+			if (at === undefined || result.isError === true) return result;
+			const file = beforeFile(workspace, at);
 			if (file !== undefined) api.diagnostic(awaiting(file));
+			if (skill === undefined) return result;
+			const text =
+				typeof content === "string" ? content : api.env === undefined ? undefined : await textAt(api.env, at, ctx);
+			const note =
+				text === undefined
+					? skillWaits(SKILL_FILE(skill), "it could not be read back as text")
+					: typeof content === "string"
+						? await acceptSkill(api, ctx, skill, text)
+						: edited === undefined
+							? skillWaits(SKILL_FILE(skill), "the file you edited was not the version in effect")
+							: await acceptSkill(api, ctx, skill, text, shaOf(edited));
+			if (note !== undefined) api.diagnostic(note);
 			return result;
 		},
 	};

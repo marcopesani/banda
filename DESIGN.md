@@ -311,21 +311,28 @@ and face, never the id:
 | `connections` | the connections it may use, by name; which of their accounts is the owner's switch |
 
 The body is its personality, a prompt section. Every direct agent chat gets the same base tools: the box, its files,
-its browser, memory, routines, watches and the speaking tools, plus `message_agent`, `read_agent_chat`, `propose_agent`,
-`propose_group` and `propose_agent_change`. Group executions do not get these direct-chat tools.
+its browser, memory, routines, watches and the speaking tools, plus `message_agent`, `read_agent_chat`, `create_agent`,
+`create_group` and `update_agent`. Group executions do not get these direct-chat tools.
 What distinguishes agents is personality, connections, routines, watches and memory. An agent never gets a connection's
 tools its file does not name. Enabled tools need not all be offered upfront: secondary tools are discovered on demand,
 within the same authority. Discovery never grants access, and a previously discovered tool loses access when its
 authority is revoked. A tool that asks the owner to accept something is named `propose_<what>`; a tool that acts
-is a plain verb. Agent files are "before" files (see the workspace): the owner's own edit is accepted by construction,
-in effect at once; the agent's change to itself waits for the owner as a card in its chat. An accepted change reaches
+is a plain verb. The band is the agents' to shape: `create_agent` makes an agent, `update_agent` changes one and
+`create_group` makes a group, each in the call itself, with no review; the chat draws a row that says what was done
+and links to it, from the daemon's receipt, never from the call's words. What the owner gives stays theirs by
+construction: a new agent has banda's base tools and no connection, permission, model or tier; a change keeps an
+agent's tools, connections, permissions, model, tier and state; an agent changes its own instructions, and of a peer
+only the name, face and description, since instructions are who an agent is to the model and rewriting a peer's
+would lend it what that peer may reach. Agent files are still "before" files (see the workspace): the owner's own
+edit is accepted by construction, in effect at once; a file written any other way (a command, a download, a harness)
+waits for the owner as a card in the chat, since nothing checked what it changes. An accepted change reaches
 its chat at the next model boundary and deliberately starts its prompt cache cold.
 
 The workspace starts with one agent, which is ordinary: renameable and archivable like any other, except
 that the last active agent cannot be archived, since the app opens in a chat. The owner makes another from the sheet:
 a face, a name, a personality, connections; nothing runs before the file is written. The owner never writes a
 description: it is the personality's first sentence (the name while there is none), and the owner's edit of either
-carries it along, unless it was written otherwise (an accepted proposal's). The default face is the chat
+carries it along, unless it was written otherwise (an agent's, with `create_agent` or `update_agent`). The default face is the chat
 bubble. The owner can choose a shape and colour or accept a generated candidate; generated geometry is data, validated
 and previewed before acceptance, never code or markup from the box. The sheet designs one in place, from the owner's
 description or the name alone, by an inference on the Balanced tier; it is the owner's pick, written with the file.
@@ -1034,9 +1041,9 @@ the agents work on. The daemon reads it over the box's connection, and the box r
 mounted into it. The agent writes it and the owner edits it, so the daemon decides when a change takes
 effect:
 - **Before**: `agents/` (each agent's own `routines/` and `watches/` within), `routines/`, `watches/` and skill
-  instructions take
-  effect once the owner
-  accepts the change. Accepting binds the hash of the bytes shown; the daemon keeps the accepted version in the store,
+  instructions take effect once the owner accepts the change, except what an agent's own tool wrote (`create_agent`
+  and `update_agent` for agents, `write` for a skill, below), which the daemon checked and the owner is shown.
+  Accepting binds the hash of the bytes shown; the daemon keeps the accepted version in the store,
   and prompts and loading read only from there. Until then the accepted version stays in effect, and the tool that made
   the change tells the model so. The owner's own write through the app is accepted in the commit that stores it. The app
   shows the agent's change as a plain question ("Allow this change?"), not a diff.
@@ -1060,7 +1067,12 @@ A skill is one shared prompt file, not an agent's private copy. Agents may load 
 `/name` invokes a known skill. The accepted instructions are loaded before that message's first model request, as
 one recorded tool call and result; an earlier running request must not see the load without the owner's message. The
 chat names only what loaded; Activity holds the exact result. Other files in a skill's folder remain box data, never
-instructions the daemon loads from an unaccepted change. A skill may be owner-only (`disable-model-invocation: true`):
+instructions the daemon loads from an unaccepted change. A skill an agent writes is its own words: the `write` that
+puts the whole SKILL.md in the workspace accepts those bytes in the same call, and an `edit` over the version in effect
+does the same, so it is in effect at once, a line in the chat and on the Skills page, with nothing for the owner to
+allow. Bytes that reached the file any other way (a command, a download, another harness's copy) are not the agent's
+words: they wait for the owner on the Skills page as before, and the agent is told so. A skill grants nothing, no
+tool, connection or permission, whatever its frontmatter says. A skill may be owner-only (`disable-model-invocation: true`):
 only the owner's /name loads it, agents never see it, and the app says so wherever the skill shows. banda ships a few
 skills; first run offers them once, right after the provider, and the ones the owner keeps are written into the
 workspace and accepted in that step, since banda wrote them and the owner chose them. The Skills page offers the
