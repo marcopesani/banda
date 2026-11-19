@@ -138,6 +138,9 @@ async function setup(): Promise<Running> {
 	const started = await core.receive(harness, inbound);
 	if ("turn" in started) await harness.waitForTask(started.turn as TaskId<TurnResult>, context);
 	else if ("refused" in started) throw new Error(started.refused);
+	// as the daemon does at start, when the box comes up and when the owner opens the band: a write the box refused
+	// while the call ran is finished now
+	await recoverAgentPublications(harness, workspace);
 	return { box, harness };
 }
 
@@ -156,7 +159,7 @@ const groups = await current.harness.snapshot(Groups, context);
 const calls = Object.values((await current.harness.snapshot(BandCalls, context))?.calls ?? {});
 const boxText = await readFile(join(current.box.workspace, "agents", "writer.md"), "utf8").catch(() => "");
 const chats = await current.harness.commit((tx) => tx.scanConversations({}, 10), context);
-const results: { tool: string; error: boolean; receipt: boolean }[] = [];
+const results: { tool: string; error: boolean; receipt: boolean; text?: string }[] = [];
 for (const chat of chats.items) {
 	const page = await current.harness.commit(
 		(tx) => tx.scanEntries({ conversationId: chat.id as ConversationId, order: "ascending" }, 200),
@@ -166,7 +169,15 @@ for (const chat of chats.items) {
 		const result = entry.model?.[0] as ToolResultMessage | undefined;
 		if (result === undefined) continue;
 		const receipt = (result.details as { receipt?: unknown } | undefined)?.receipt;
-		results.push({ tool: result.toolName, error: result.isError, receipt: receipt !== undefined });
+		results.push({
+			tool: result.toolName,
+			error: result.isError,
+			receipt: receipt !== undefined,
+			// an error's words, so a failing sweep says why
+			...(result.isError
+				? { text: result.content.map((part) => (part.type === "text" ? part.text : "")).join("") }
+				: {}),
+		});
 	}
 }
 console.log(

@@ -10,7 +10,7 @@ type State = {
 	box: string;
 	rooms: number;
 	receipts: string[];
-	results: { tool: string; error: boolean; receipt: boolean }[];
+	results: { tool: string; error: boolean; receipt: boolean; text?: string }[];
 	commits: number;
 	points: Record<AgentPublicationPoint, number>;
 };
@@ -25,7 +25,7 @@ const expectMadeOnce = ({ state }: Awaited<ReturnType<typeof run>>) => {
 	expect(state.rooms).toBe(1);
 	expect(state.receipts).toEqual(["agent", "group"]);
 	const band = state.results.filter((result) => result.tool === "create_agent" || result.tool === "create_group");
-	expect(band).toEqual([
+	expect(band, JSON.stringify(band)).toEqual([
 		{ tool: "create_agent", error: false, receipt: true },
 		{ tool: "create_group", error: false, receipt: true },
 	]);

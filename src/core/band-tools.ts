@@ -143,8 +143,9 @@ export function readBandReceipt(value: unknown): BandReceipt | undefined {
 const KEPT = 64;
 
 /**
- * What each call made, by `task:call`, so a call run again after a crash answers with what it did rather than doing it
- * twice or refusing its own work. Not a record of the band: the accepted files and the groups are.
+ * What each call made, by `chat:call` (the model's call id, which a replay keeps while the task running it may not),
+ * so a call run again after a crash answers with what it did rather than doing it twice or refusing its own work. Not
+ * a record of the band: the accepted files and the groups are.
  */
 export const BandCalls = defineDoc<{ calls: { [call: string]: JsonObject } }>({
 	kind: "banda.band-calls",
@@ -306,7 +307,7 @@ async function once(
 	apply: (tx: Tx, author: string) => Promise<BandReceipt>,
 	after: (receipt: BandReceipt) => Promise<void>,
 ): Promise<ToolExecutionResult> {
-	const id = `${api.taskId}:${api.callId}`;
+	const id = `${api.conversationId}:${api.callId}`;
 	let receipt: BandReceipt;
 	try {
 		receipt = await api.commit(async (tx) => {
@@ -327,8 +328,15 @@ async function once(
 		if (error instanceof Refused) return said(`${not}: ${error.message}.`);
 		throw error;
 	}
-	// what is in effect is in the store; the box's file and the members' tools follow, now or when they can
-	await after(receipt).catch(() => undefined);
+	// what is in effect is in the store; the box's file and the members' tools follow, now or when they can: a write the
+	// box refused is finished at the next start, when the box comes up, or when the owner opens the band
+	await after(receipt).catch((error: unknown) =>
+		api.diagnostic({
+			severity: "warn",
+			code: "publication-pending",
+			message: `In effect, but not written to the workspace yet (${error instanceof Error ? error.message : String(error)}); the file follows when the computer can be written.`,
+		}),
+	);
 	return said(receiptText(receipt), receipt);
 }
 
