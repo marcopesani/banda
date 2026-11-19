@@ -12,6 +12,7 @@ import { actOnRoutine, clickKey, makeRoutine, routineRuns } from "../areas/routi
 import type { RoutineRowView } from "../chat/Panel.tsx";
 import { RoutineDetail } from "../chat/RoutineDetail.tsx";
 import { type RoutineDraft, RoutineEditor } from "../chat/RoutineEditor.tsx";
+import { attempt } from "../lib/attempt.ts";
 import { runRows } from "../lib/routine-runs.ts";
 import { showControl } from "../lib/shell.ts";
 import { nearTime, routineTitle } from "./titles.ts";
@@ -59,12 +60,18 @@ export function routineRows(all: readonly RoutineView[], agent: string, now: num
 					? {}
 					: {
 							waiting,
+							// a refusal says why, as a note: the row has no place of its own for it
 							onAllow: () =>
-								void actOnRoutine(routine.id, {
-									action: "accept",
-									sha: change.kind === "removed" ? null : (change.sha ?? null),
-								}).then(showControl),
-							onDecline: () => void actOnRoutine(routine.id, { action: "decline" }).then(showControl),
+								void attempt(
+									change.kind === "removed" ? "stop it" : waiting === "change" ? "change it" : "set it up",
+									() =>
+										actOnRoutine(routine.id, {
+											action: "accept",
+											sha: change.kind === "removed" ? null : (change.sha ?? null),
+										}).then(showControl),
+								),
+							onDecline: () =>
+								void attempt("decline it", () => actOnRoutine(routine.id, { action: "decline" }).then(showControl)),
 						}),
 				...(routine.next === undefined ? {} : { next: near(routine.next, now) }),
 				...(last === undefined ? {} : { last }),
