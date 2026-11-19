@@ -31,7 +31,8 @@ import { receiptOf } from "../src/server/transcript.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { blobStore, FAUX_MODEL, FakeGateway, tempHome } from "./helpers.ts";
 
-type Call = readonly [string, object];
+/** A call: its tool, its arguments and, to stand for the same call run again, its id. */
+type Call = readonly [string, object] | readonly [string, object, string];
 
 /** A core on the faux provider: each owner message is answered with the calls `plan` gives for its words. */
 async function start(
@@ -51,7 +52,9 @@ async function start(
 		return calls.length === 0
 			? fauxAssistantMessage("done")
 			: fauxAssistantMessage(
-					calls.map(([name, args]) => fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1])),
+					calls.map(([name, args, id]) =>
+						fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1], id === undefined ? {} : { id }),
+					),
 					{ stopReason: "toolUse" },
 				);
 	};
@@ -312,6 +315,27 @@ describe("create_agent", () => {
 			expect(files[agentPath("old-hand")]).toBeUndefined();
 			expect(files[agentPath("ghost")]).toBeUndefined();
 			expect((await harness.snapshot(Permissions, context))?.permissions.p1).toMatchObject({ agent: "old-hand" });
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("answers the same call run again with the receipt it has, never refusing its own agent", async () => {
+		const hire: Call = [
+			"create_agent",
+			{ id: "scribe", name: "Scribe", description: "Takes notes", instructions: "Note." },
+			"call-run-twice",
+		];
+		const { harness, say, results } = await start((said) => (said === "Hire." || said === "Again." ? [hire] : []));
+		try {
+			const chat = await say("Hire.");
+			await say("Again.");
+			const made = (await results(chat)).filter((result) => result.name === "create_agent");
+			expect(made).toHaveLength(2);
+			expect(made[1]).toMatchObject({ error: false, text: made[0]?.text });
+			expect(made[1]?.receipt).toEqual(made[0]?.receipt);
+			expect(made[0]?.receipt).toMatchObject({ kind: "agent", change: "created", id: "scribe" });
+			expect(Object.keys((await harness.snapshot(BandCalls, context))?.calls ?? {})).toHaveLength(1);
 		} finally {
 			await harness.close(context);
 		}

@@ -317,7 +317,8 @@ async function once(
 				throw new Refused("this can be done only from an agent's own chat with the owner");
 			const doc = await tx.doc(BandCalls);
 			const was = doc.calls[id];
-			if (was !== undefined) return was as unknown as BandReceipt;
+			// a copy: what a doc holds is the transaction's own view of it, unreadable once the commit is over
+			if (was !== undefined) return JSON.parse(JSON.stringify(was)) as BandReceipt;
 			const made = await apply(tx, author);
 			doc.calls[id] = made as unknown as JsonObject;
 			const kept = Object.keys(doc.calls);
