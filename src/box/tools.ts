@@ -367,12 +367,38 @@ async function acceptSkill(
 }
 
 /**
+ * `before` with each of an `edit` call's replacements applied as the tool applies them to the original: every
+ * `oldText` found exactly once, none overlapping. Undefined when they cannot be applied that way (the tool may still
+ * have matched more loosely): then what the file holds after the call is not known to be the model's own text.
+ */
+export function editedText(before: string, edits: unknown): string | undefined {
+	if (!Array.isArray(edits) || edits.length === 0) return undefined;
+	const spans: { at: number; end: number; text: string }[] = [];
+	for (const edit of edits as { oldText?: unknown; newText?: unknown }[]) {
+		if (typeof edit?.oldText !== "string" || typeof edit.newText !== "string" || edit.oldText === "") return undefined;
+		const at = before.indexOf(edit.oldText);
+		if (at < 0 || before.indexOf(edit.oldText, at + 1) >= 0) return undefined;
+		spans.push({ at, end: at + edit.oldText.length, text: edit.newText });
+	}
+	spans.sort((a, b) => a.at - b.at);
+	let out = "";
+	let from = 0;
+	for (const span of spans) {
+		if (span.at < from) return undefined;
+		out += before.slice(from, span.at) + span.text;
+		from = span.end;
+	}
+	return out + before.slice(from);
+}
+
+/**
  * `tool` (write or edit), telling the model when what it changed takes effect. An agent, routine or watch file waits
  * for the owner: until then the accepted version stays in effect, so the change is not done when the call is. A
  * skill's instructions the call wrote are in effect at once (DESIGN.md "The workspace"): the bytes are the model's own,
- * whole for a `write`, and for an `edit` only over the version in effect.
+ * whole for a `write`; for an `edit`, the replacements it gave applied to the version in effect, accepted only when
+ * that is what the file holds after the call, so bytes another writer put there meanwhile are never taken as its own.
  */
-function accepting(tool: ToolRegistration, workspace: string | undefined): ToolRegistration {
+export function accepting(tool: ToolRegistration, workspace: string | undefined): ToolRegistration {
 	if (workspace === undefined) return tool;
 	return {
 		...tool,
@@ -394,14 +420,22 @@ function accepting(tool: ToolRegistration, workspace: string | undefined): ToolR
 			if (skill === undefined) return result;
 			const text =
 				typeof content === "string" ? content : api.env === undefined ? undefined : await textAt(api.env, at, ctx);
-			const note =
-				text === undefined
-					? skillWaits(SKILL_FILE(skill), "it could not be read back as text")
-					: typeof content === "string"
-						? await acceptSkill(api, ctx, skill, text)
-						: edited === undefined
-							? skillWaits(SKILL_FILE(skill), "the file you edited was not the version in effect")
-							: await acceptSkill(api, ctx, skill, text, shaOf(edited));
+			const note = await (async () => {
+				if (text === undefined) return skillWaits(SKILL_FILE(skill), "it could not be read back as text");
+				if (typeof content === "string") return await acceptSkill(api, ctx, skill, text);
+				if (edited === undefined)
+					return skillWaits(SKILL_FILE(skill), "the file you edited was not the version in effect");
+				// the model's own text is its replacements over what was there; the file must hold exactly that
+				const expected = editedText(edited, (args as { edits?: unknown }).edits);
+				if (expected === undefined)
+					return skillWaits(
+						SKILL_FILE(skill),
+						"the edit could not be checked against the version in effect: write the whole file instead",
+					);
+				if (text !== expected)
+					return skillWaits(SKILL_FILE(skill), "the file changed while it was edited: write the whole file instead");
+				return await acceptSkill(api, ctx, skill, expected, shaOf(edited));
+			})();
 			if (note !== undefined) api.diagnostic(note);
 			return result;
 		},

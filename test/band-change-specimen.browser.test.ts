@@ -73,12 +73,21 @@ for (const width of [390, 1440])
 						await page.run(`${section}.scrollIntoView({ block: 'start' })`);
 						await page.shoot(`${shots}/band-${width}.png`);
 					}
-					// the created agent's row opens into its card, which says what is the owner's to give
-					await page.run(`[...${section}.querySelectorAll('[data-done="agent"] button')].at(-1).click()`);
+					// the created agent's row (the first copy, in view) opens into its card, which says what is the owner's to give
+					await page.run(`${section}.querySelector('[data-done="agent"] button').click()`);
 					const made = `${section}.querySelector('[data-band-change][aria-label="New agent"]')`;
 					await page.until(made);
 					expect(await page.run<string>(`${made}.innerText`)).toContain("yours to give");
-					if (shots !== undefined) await page.shoot(`${shots}/band-${width}-agent-card.png`);
+					if (shots !== undefined) {
+						await page.run(`${made}.scrollIntoView({ block: 'center' })`);
+						await page.run("new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+						// the card is in the viewport, so the picture shows it
+						const seen = await page.run<boolean>(
+							`(() => { const r = ${made}.getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight; })()`,
+						);
+						expect(seen).toBe(true);
+						await page.shoot(`${shots}/band-${width}-agent-card.png`);
+					}
 					expect(page.errors().filter((e) => !/Failed to load resource/.test(e))).toEqual([]);
 				},
 			);

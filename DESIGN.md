@@ -325,7 +325,10 @@ agent's tools, connections, permissions, model, tier and state; an agent changes
 only the name, face and description, since instructions are who an agent is to the model and rewriting a peer's
 would lend it what that peer may reach. Agent files are still "before" files (see the workspace): the owner's own
 edit is accepted by construction, in effect at once; a file written any other way (a command, a download, a harness)
-waits for the owner as a card in the chat, since nothing checked what it changes. An accepted change reaches
+waits for the owner as a card in the chat, since nothing checked what it changes, and `create_agent` never writes
+over it. Nor does it take an id that was an agent's while anything of that agent is still here (its chat, its
+permissions, its routines or watches, or the record of its removal): a new agent would inherit them unreviewed, so it
+fails closed and the owner's sheet, which they review, is the way. An accepted change reaches
 its chat at the next model boundary and deliberately starts its prompt cache cold.
 
 The workspace starts with one agent, which is ordinary: renameable and archivable like any other, except
@@ -1069,8 +1072,9 @@ one recorded tool call and result; an earlier running request must not see the l
 chat names only what loaded; Activity holds the exact result. Other files in a skill's folder remain box data, never
 instructions the daemon loads from an unaccepted change. A skill an agent writes is its own words: the `write` that
 puts the whole SKILL.md in the workspace accepts those bytes in the same call, and an `edit` over the version in effect
-does the same, so it is in effect at once, a line in the chat and on the Skills page, with nothing for the owner to
-allow. Bytes that reached the file any other way (a command, a download, another harness's copy) are not the agent's
+does the same (its replacements applied to that version, accepted only when that is exactly what the file then
+holds, so bytes another writer put there meanwhile are never taken as its own), so it is in effect at once, a line in
+the chat and on the Skills page, with nothing for the owner to allow. Bytes that reached the file any other way (a command, a download, another harness's copy) are not the agent's
 words: they wait for the owner on the Skills page as before, and the agent is told so. A skill grants nothing, no
 tool, connection or permission, whatever its frontmatter says. A skill may be owner-only (`disable-model-invocation: true`):
 only the owner's /name loads it, agents never see it, and the app says so wherever the skill shows. banda ships a few

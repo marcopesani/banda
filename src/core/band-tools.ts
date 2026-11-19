@@ -31,8 +31,11 @@ import {
 } from "./agents.ts";
 import { type AvatarFace, defaultAvatarFace, readAvatarFace } from "./avatar-face.ts";
 import { GROUP_LIMIT_RANGE, Groups, groupLimitsIn, MAX_GROUP_NAME } from "./groups.ts";
+import { Permissions } from "./permissions.ts";
+import { Routines, routineAgent } from "./routines.ts";
 import { context } from "./store.ts";
 import { CREATE_AGENT, CREATE_GROUP, UPDATE_AGENT } from "./toolsets.ts";
+import { Watches, watchAgent } from "./watches.ts";
 
 /** The most characters of instructions one call writes. */
 export const MAX_INSTRUCTIONS = 16_000;
@@ -184,8 +187,9 @@ function checkedFace(value: unknown): AvatarFace | undefined {
 	return checked.ok ? checked.face : undefined;
 }
 
-const shown = (agent: Agent): AgentShown => ({
-	name: agent.name,
+/** `agent` as the owner reads it: by the name they call it (the lead's is the companion's, its file naming none). */
+const shown = async (tx: Tx, agent: Agent): Promise<AgentShown> => ({
+	name: agent.name === agent.id ? await agentWords(tx, agent.id) : agent.name,
 	face: agent.face,
 	description: agent.description,
 	instructions: agent.instructions,
@@ -216,6 +220,24 @@ const avatarSchema = Type.Object({
 
 /** A refusal: why, in words the model can act on. */
 class Refused extends Error {}
+
+/**
+ * What agent id `id` still owns in the store, though no accepted file is its: a chat, permissions, routines, watches,
+ * or the record that it was removed. A new agent under that id would inherit them unreviewed, so creation fails closed
+ * while any is there (the owner's sheet, which they review, is not bound by this).
+ */
+export async function leftOf(tx: Tx, id: string): Promise<string[]> {
+	const left: string[] = [];
+	if ((await tx.doc(Accepted)).removed?.[agentPath(id)] !== undefined) left.push("its removal");
+	if (Object.values((await tx.doc(AgentChats)).chats).includes(id)) left.push("its chat");
+	if (Object.values((await tx.doc(Permissions)).permissions).some((permission) => permission.agent === id))
+		left.push("its permissions");
+	if (Object.entries((await tx.doc(Routines)).routines).some(([name, record]) => routineAgent(name, record) === id))
+		left.push("its routines");
+	if (Object.entries((await tx.doc(Watches)).watches).some(([name, record]) => watchAgent(name, record) === id))
+		left.push("its watches");
+	return left;
+}
 
 /**
  * Run `apply` once for this call, in one commit: from a direct agent chat only, and a call run again answers with the
@@ -321,6 +343,18 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 						if (!AGENT_NAME.test(value.id)) throw new Refused("use a lowercase agent id with words joined by dashes");
 						if ((await tx.doc(Accepted)).files[agentPath(value.id)] !== undefined)
 							throw new Refused("an agent already has that id");
+						// a file in the box under that id is a draft the owner has yet to answer, or one that cannot be read:
+						// neither is written over, and its card stays
+						if (workingBase !== null)
+							throw new Refused(
+								`agents/${value.id}.md is in the workspace already, not accepted: it waits for the owner, who may allow it or remove it; choose another id, or ask them`,
+							);
+						// an id that was an agent's keeps what that agent had until the owner reconciles it: not a new agent's
+						const left = await leftOf(tx, value.id);
+						if (left.length > 0)
+							throw new Refused(
+								`that id belonged to an agent that was removed, and ${left.join(", ")} ${left.length === 1 ? "is" : "are"} still here: choose another id`,
+							);
 						const name = value.name.trim();
 						const description = value.description.trim();
 						const instructions = value.instructions.trim();
@@ -342,7 +376,7 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 						if (!("agent" in checked)) throw new Refused(checked.errors.join("; "));
 						if (Buffer.byteLength(text) > MAX_AGENT_BYTES) throw new Refused("the agent file would be too large");
 						await accept(tx, deps, value.id, text, null, workingBase);
-						return { kind: "agent", change: "created", id: value.id, agent: shown(checked.agent) };
+						return { kind: "agent", change: "created", id: value.id, agent: await shown(tx, checked.agent) };
 					},
 					(receipt) => publish(receipt, ctx),
 				);
@@ -418,16 +452,17 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 						if (!("agent" in result)) throw new Refused("the resulting agent definition would be invalid");
 						if (Buffer.byteLength(text) > MAX_AGENT_BYTES) throw new Refused("the agent file would be too large");
 						const before: { [field in UpdatedField]?: unknown } = {};
+						const was = await shown(tx, parsed.agent);
 						for (const field of UPDATED_FIELDS)
 							if (JSON.stringify(parsed.agent[field]) !== JSON.stringify(result.agent[field]))
-								before[field] = parsed.agent[field];
+								before[field] = was[field];
 						if (Object.keys(before).length === 0) throw new Refused("nothing would change");
 						await accept(tx, deps, agent.id, text, accepted.sha, workingBase ?? accepted.sha);
 						return {
 							kind: "agent",
 							change: "updated",
 							id: agent.id,
-							agent: shown(result.agent),
+							agent: await shown(tx, result.agent),
 							before: before as Partial<AgentShown>,
 						};
 					},
@@ -464,7 +499,12 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 							// as the owner calls it: the lead by the companion's name
 							members.push({ id, name: await agentWords(tx, id) });
 						}
-						const room = await deps.createGroup(tx, { name, members: ids });
+						let room: number;
+						try {
+							room = await deps.createGroup(tx, { name, members: ids });
+						} catch (error) {
+							throw new Refused(error instanceof Error ? error.message : String(error));
+						}
 						return { kind: "group", room, name, members };
 					},
 					(receipt) => publish(receipt, ctx),

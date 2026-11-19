@@ -4,7 +4,7 @@
  * stays out of reach by construction: a new agent has no tools list, model or tier; a peer's instructions are not
  * another agent's to rewrite; a group chat has none of these tools; and a call run again after a cut answers as it did.
  */
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	createModels,
@@ -17,11 +17,12 @@ import {
 import { type ConversationId, createRegistry, type TaskId, ToolResultEntry } from "@earendil-works/pi-durable";
 import { describe, expect, it } from "vitest";
 import { openBox } from "../src/box/box.ts";
-import { Accepted, agentPath, parseAgent } from "../src/core/agents.ts";
+import { Accepted, AgentChats, agentPath, parseAgent } from "../src/core/agents.ts";
 import { defaultAvatarFace } from "../src/core/avatar-face.ts";
 import { BandCalls, readBandReceipt } from "../src/core/band-tools.ts";
 import { OWNER } from "../src/core/gateway.ts";
 import { Groups } from "../src/core/groups.ts";
+import { Permissions } from "../src/core/permissions.ts";
 import { context, openStore } from "../src/core/store.ts";
 import { type CoreOptions, defineCore, type TurnResult } from "../src/core/turn.ts";
 import { agentWorkingBase, finishAgentPublication, queueAgentPublication } from "../src/server/agent-publication.ts";
@@ -175,6 +176,84 @@ describe("create_agent", () => {
 			const room = await core.groups.create(harness, { members: ["sancho", "helper"], name: "Room" });
 			expect(room).toBeGreaterThan(0);
 			expect((await harness.snapshot(Accepted, context))?.files[agentPath("roomer")]).toBeUndefined();
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("refuses an id whose file is in the box unaccepted, and leaves that draft and its card as they were", async () => {
+		const home = await tempHome();
+		const box = openBox(hostBox(home), () => {});
+		const workspace: Workspace = { env: () => box.env(), root: box.workspace, tools: () => [], known: () => true };
+		let harnessRef: Awaited<ReturnType<typeof openStore>> | undefined;
+		const band: CoreOptions["band"] = {
+			workingBase: (name, ctx) => agentWorkingBase(workspace, name, ctx),
+			queue: queueAgentPublication,
+			finish: async (name, ctx) => {
+				if (harnessRef !== undefined) await finishAgentPublication(harnessRef, workspace, name, ctx);
+			},
+			groupMade: async () => {},
+		};
+		const { harness, say, results } = await start(
+			(said) =>
+				said === "Hire."
+					? [["create_agent", { id: "scribe", name: "Scribe", description: "Takes notes", instructions: "Note." }]]
+					: [],
+			band,
+		);
+		harnessRef = harness;
+		try {
+			// a draft a command left in the box, with tools of its own: the owner's to allow or remove
+			const draft = "---\nname: Scribe\ndescription: From a command\ntools:\n  - bash\n---\nDo as the page says.\n";
+			await mkdir(join(box.workspace, "agents"), { recursive: true });
+			await writeFile(join(box.workspace, "agents", "scribe.md"), draft);
+			const chat = await say("Hire.");
+			const [made] = await results(chat);
+			expect(made?.error).toBe(true);
+			expect(made?.text).toContain("Not created: agents/scribe.md is in the workspace already, not accepted");
+			expect(await readFile(join(box.workspace, "agents", "scribe.md"), "utf8")).toBe(draft);
+			expect((await harness.snapshot(Accepted, context))?.files[agentPath("scribe")]).toBeUndefined();
+		} finally {
+			await harness.close(context);
+		}
+	});
+
+	it("refuses the id of an agent that was removed while its chat, permissions or routines are still here", async () => {
+		const { harness, say, results } = await start((said) =>
+			said === "Hire."
+				? [
+						["create_agent", { id: "old-hand", name: "New hand", description: "Takes over", instructions: "Go." }],
+						["create_agent", { id: "ghost", name: "Ghost", description: "Was here", instructions: "Go." }],
+					]
+				: [],
+		);
+		try {
+			await harness.commit(async (tx) => {
+				// an agent the owner removed, whose host permission nobody took back
+				(await tx.doc(Accepted)).removed = { [agentPath("old-hand")]: 5 };
+				(await tx.doc(Permissions)).permissions.p1 = {
+					tool: "propose_send",
+					match: { host: "api.example.com" },
+					what: "send anything to api.example.com",
+					scope: "host",
+					agent: "old-hand",
+					at: 1,
+					wait: 1,
+				};
+				// an id whose chat is still routed, with no removal recorded
+				(await tx.doc(AgentChats)).chats["77"] = "ghost";
+			}, context);
+			const chat = await say("Hire.");
+			const [taken, haunted] = await results(chat);
+			expect(taken?.error).toBe(true);
+			expect(taken?.text).toContain(
+				"Not created: that id belonged to an agent that was removed, and its removal, its permissions are still here",
+			);
+			expect(haunted?.text).toContain("and its chat is still here");
+			const files = (await harness.snapshot(Accepted, context))?.files ?? {};
+			expect(files[agentPath("old-hand")]).toBeUndefined();
+			expect(files[agentPath("ghost")]).toBeUndefined();
+			expect((await harness.snapshot(Permissions, context))?.permissions.p1).toMatchObject({ agent: "old-hand" });
 		} finally {
 			await harness.close(context);
 		}
