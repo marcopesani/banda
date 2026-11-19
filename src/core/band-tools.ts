@@ -329,15 +329,14 @@ async function once(
 		throw error;
 	}
 	// what is in effect is in the store; the box's file and the members' tools follow, now or when they can: a write the
-	// box refused is finished at the next start, when the box comes up, or when the owner opens the band
-	await after(receipt).catch((error: unknown) =>
-		api.diagnostic({
-			severity: "warn",
-			code: "publication-pending",
-			message: `In effect, but not written to the workspace yet (${error instanceof Error ? error.message : String(error)}); the file follows when the computer can be written.`,
-		}),
+	// box refused is finished at the next start, when the box comes up, or when the owner opens the band. Outside the
+	// call's own context: its overlay settled with the commit, and the harness takes no more work under it.
+	const pending = await after(receipt).then(
+		() => "",
+		(error: unknown) =>
+			` Not written to the workspace yet (${error instanceof Error ? error.message : String(error)}): the file follows when the computer can be written.`,
 	);
-	return said(receiptText(receipt), receipt);
+	return said(`${receiptText(receipt)}${pending}`, receipt);
 }
 
 function tool<P extends TSchema, A>(
@@ -375,9 +374,9 @@ async function accept(
 export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 	const working = async (name: string, ctx: Context) =>
 		AGENT_NAME.test(name) ? await deps.publication()?.workingBase(name, ctx) : undefined;
-	const publish = async (receipt: BandReceipt, ctx: Context) => {
-		if (receipt.kind === "agent") await deps.publication()?.finish(receipt.id, ctx);
-		else await deps.publication()?.groupMade(ctx);
+	const publish = async (receipt: BandReceipt) => {
+		if (receipt.kind === "agent") await deps.publication()?.finish(receipt.id, context);
+		else await deps.publication()?.groupMade(context);
 	};
 	return [
 		tool<TSchema, CreateAgentArgs>(
@@ -452,7 +451,7 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 						await accept(tx, deps, value.id, text, null, workingBase);
 						return { kind: "agent", change: "created", id: value.id, agent: await shown(tx, checked.agent) };
 					},
-					(receipt) => publish(receipt, ctx),
+					publish,
 				);
 			},
 		),
@@ -549,7 +548,7 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 							before,
 						};
 					},
-					(receipt) => publish(receipt, ctx),
+					publish,
 				);
 			},
 		),
@@ -590,7 +589,7 @@ export function bandTools(deps: BandDeps): readonly ToolRegistration[] {
 						}
 						return { kind: "group", room, name, members };
 					},
-					(receipt) => publish(receipt, ctx),
+					publish,
 				),
 		),
 	];

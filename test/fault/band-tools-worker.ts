@@ -103,8 +103,11 @@ const inbound = {
 } as const;
 
 type Running = { box: Box; harness: Awaited<ReturnType<typeof openStore>> };
+/** What a failed setup opened, to close before the next: a box left open keeps the process alive. */
+let opened: { box?: Box; harness?: Awaited<ReturnType<typeof openStore>> } = {};
 async function setup(): Promise<Running> {
 	const box = openBox(hostBox(home!), () => {});
+	opened = { box };
 	await mkdir(join(box.workspace, "agents"), { recursive: true });
 	const workspace: Workspace = {
 		env: () => box.env(),
@@ -133,6 +136,7 @@ async function setup(): Promise<Running> {
 	});
 	registry.install(core.extension);
 	harness = await openStore(home!, { models, registry, wrapStorage });
+	opened.harness = harness;
 	await recoverAgentPublications(harness, workspace);
 	harness.resume();
 	const started = await core.receive(harness, inbound);
@@ -150,6 +154,8 @@ try {
 	current = await setup();
 } catch (error) {
 	if (!injected(error)) throw error;
+	await opened.harness?.close(context).catch(() => {});
+	await opened.box?.close().catch(() => {});
 	armed = false;
 	current = await setup();
 }
