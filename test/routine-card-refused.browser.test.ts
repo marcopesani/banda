@@ -3,7 +3,9 @@
  * width: the card says what did not happen and why, in the daemon's words, and keeps its buttons and the owner's edit,
  * so a routine gone since reads apart from one changed since, and no click goes quiet. The refusals are the daemon's
  * own answers, played back by the page's `fetch` for the one request each, so the case is exact whatever the daemon's
- * timing; the last answer goes to the daemon itself, and the card settles. `BANDA_SHOTS=<dir>` saves shots.
+ * timing; the last answer goes to the daemon itself, and the card settles. The panel's detail says a refused Pause in
+ * the daemon's words, a row's menu (Run now) says it as a note with Try again, and the row and its buttons stay. `BANDA_SHOTS=<dir>`
+ * saves shots.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -23,7 +25,7 @@ import { readDaemonFile } from "../src/home.ts";
 import type { ControlView } from "../src/server/api.ts";
 import { hostBox } from "./fixtures/host-box.ts";
 import { skipShippedSkills, tempHome, until, webServer } from "./helpers.ts";
-import { hasChrome, withPage } from "./smoke/chrome.ts";
+import { hasChrome, type Page, withPage } from "./smoke/chrome.ts";
 
 const SHOTS = process.env.BANDA_SHOTS;
 const NAME = "weekly-summary-draft";
@@ -33,6 +35,21 @@ const button = (text: string) =>
 	`[...document.querySelectorAll('button')].find(el => ${visible} && el.textContent.trim() === ${JSON.stringify(text)})`;
 const shows = (text: string) => `document.body.innerText.includes(${JSON.stringify(text)})`;
 const problem = "document.querySelector('[data-routine-problem]')?.textContent ?? ''";
+const named = (label: string) =>
+	`[...document.querySelectorAll('[aria-label]')].find(el => ${visible} && el.getAttribute('aria-label') === ${JSON.stringify(label)})`;
+const menuItem = (text: string) =>
+	`[...document.querySelectorAll('[role="menuitem"]')].find(el => ${visible} && el.textContent.trim() === ${JSON.stringify(text)})`;
+
+/** A native click through pointer events alone: a menu's trigger opens on press, so the release lands on the menu. */
+async function click(page: Page, expression: string) {
+	await page.until(expression);
+	await page.run(`(${expression}).scrollIntoView({block:'center'})`);
+	const point = await page.run<{ x: number; y: number }>(
+		`(() => {const el=${expression}; const r=el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+	);
+	await page.input("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
+	await page.input("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
+}
 
 const textOf = (content: unknown) =>
 	typeof content === "string"
@@ -128,6 +145,10 @@ for (const width of [390, 1440])
 								true,
 							);
 							expect(page.errors(), `${name}: page errors`).toEqual([]);
+							// a note still fading in would shoot half-drawn
+							await page.until(
+								"document.getAnimations().every(a => a.playState !== 'running' || !(a.effect?.getComputedTiming().endTime < 2000))",
+							);
 							if (SHOTS !== undefined) await page.shoot(join(SHOTS, `${width}-${name}.png`));
 						};
 						await page.run(`location.hash='#/a/sancho'`);
@@ -166,7 +187,38 @@ for (const width of [390, 1440])
 						await page.until(shows("Set up"));
 						await page.until(`document.querySelector('[data-routine-problem]') === null`);
 						await shot("3-allowed");
-						// nothing was ever asked of a routine by its name alone
+
+						// the panel: its detail says a refused Pause in the daemon's words, and the button still says Pause
+						await page.click(named("Sancho: open its panel"));
+						await page.click(named("Weekly summary draft"));
+						await page.until(button("Pause"));
+						await page.run(
+							refuseOnce("pause", 404, `there is no routine sancho/${NAME}: it is gone from the box and the store`),
+						);
+						await page.click(button("Pause"));
+						await page.until(shows(`there is no routine sancho/${NAME}: it is gone from the box and the store`));
+						await page.until(button("Pause"));
+						expect(await page.run<boolean>(`${button("Resume")} !== undefined`)).toBe(false);
+						await shot("4-detail-pause-refused");
+						// a row's Run now refused reads as a note too; the row stays
+						await page.click(button("Routines"));
+						await page.until(named("Weekly summary draft: more"));
+						await page.run(
+							refuseOnce("run", 404, `there is no routine sancho/${NAME}: it is gone from the box and the store`),
+						);
+						await click(page, named("Weekly summary draft: more"));
+						await click(page, menuItem("Run now"));
+						await page.until(shows("Couldn't run it now"));
+						await page.until(named("Weekly summary draft: more"));
+						await shot("5-row-run-refused");
+						// the daemon itself: the routine is still there, and it is paused as asked
+						await page.until(`!${shows("Couldn't run it now")}`, 15_000);
+						await click(page, named("Weekly summary draft: more"));
+						await click(page, menuItem("Pause"));
+						await until(
+							async () => (await routines()).find((each) => each.id === `sancho/${NAME}`)?.paused === "owner",
+						);
+						expect(await page.run<boolean>(shows("Couldn't"))).toBe(false);
 						expect(page.errors()).toEqual([]);
 					});
 				} finally {
