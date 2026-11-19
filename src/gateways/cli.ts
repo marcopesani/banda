@@ -62,6 +62,8 @@ export class CliGateway implements Gateway {
 			this.#waiting.set(id, { route: routeKey(origin), reject, heard });
 			signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 		});
+		// a `say` that ends without waiting (refused, or an answer) still has its client go away afterwards
+		gone.catch(() => undefined);
 		try {
 			const received = await this.#receive({ id, origin, text });
 			if ("refused" in received) throw new Error(received.refused);
