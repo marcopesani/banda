@@ -113,7 +113,8 @@ export function ExchangeFeed({
 					</button>
 				) : null}
 				{loaded ? null : <ChatLoading />}
-				{loaded && items.length === 0 ? (
+				{/* only once every page was read: a long chat of other work gives an empty page with more behind it */}
+				{loaded && items.length === 0 && !older ? (
 					<Line icon={MessageCircleIcon}>
 						{pair[0].name} and {pair[1].name} haven't messaged each other yet.
 					</Line>
@@ -168,31 +169,32 @@ export function ExchangePage({
 	call,
 	phone,
 	onBack,
-	onGone,
+	gone,
 }: {
 	pair: Pair;
 	call?: string | undefined;
 	phone: boolean;
 	onBack: () => void;
-	/** The daemon knows no such pair: one of them is no agent of this band. */
-	onGone: () => void;
+	/** What to show when the daemon knows no such pair: one of them is no agent of this band. */
+	gone: ReactNode;
 }) {
 	const [items, setItems] = useState<readonly ExchangeMessage[]>([]);
 	const [next, setNext] = useState<string>();
 	const [loaded, setLoaded] = useState(false);
-	const [missing, setMissing] = useState(false);
+	/** The call said to be missing: a notice for that call alone, so another call opened at needs no reset. */
+	const [missing, setMissing] = useState<string>();
 	const [failed, setFailed] = useState<Error>();
+	const [noPair, setNoPair] = useState(false);
+	const [attempt, setAttempt] = useState(0);
 	const [a, b] = [pair[0].id, pair[1].id];
-	// the latest callback, read when the daemon answers: a new one is no reason to read again
-	const gone = useRef(onGone);
-	gone.current = onGone;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` counts the reads asked for; each reads again
 	useEffect(() => {
 		let left = false;
 		setItems([]);
 		setNext(undefined);
 		setLoaded(false);
-		setMissing(false);
 		setFailed(undefined);
+		setNoPair(false);
 		exchange(a, b).then(
 			(page) => {
 				if (left) return;
@@ -202,14 +204,21 @@ export function ExchangePage({
 			},
 			(error: unknown) => {
 				if (left || error instanceof Unauthorized) return;
-				if (error instanceof Refused && error.status === 404) gone.current();
+				if (error instanceof Refused && error.status === 404) setNoPair(true);
 				else setFailed(error instanceof Error ? error : new Error(String(error)));
 			},
 		);
 		return () => {
 			left = true;
 		};
-	}, [a, b]);
+	}, [a, b, attempt]);
+	// opened at another message while the pair was gone (an agent restored since, say): read again
+	const wasGone = useRef(false);
+	wasGone.current = noPair;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `call` changing is what asks for the read again
+	useEffect(() => {
+		if (wasGone.current) setAttempt((n) => n + 1);
+	}, [call]);
 	const loadOlder = useCallback(async () => {
 		if (next === undefined) return;
 		const page = await exchange(a, b, next);
@@ -220,12 +229,13 @@ export function ExchangePage({
 		});
 		setNext(page.next);
 	}, [a, b, next]);
-	const onMissing = useCallback(() => setMissing(true), []);
+	const onMissing = useCallback(() => setMissing(call), [call]);
 	const notice = useMemo(() => {
 		if (failed !== undefined) return `Couldn't read these messages: ${failed.message}`;
-		if (missing) return "The message this opened at isn't here.";
+		if (missing !== undefined && missing === call) return "The message this opened at isn't here.";
 		return undefined;
-	}, [failed, missing]);
+	}, [failed, missing, call]);
+	if (noPair) return gone;
 	return (
 		<ExchangeScreen
 			pair={pair}

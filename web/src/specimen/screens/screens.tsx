@@ -37,7 +37,7 @@ import {
 	SKILL_OFFERS,
 	VOICE,
 } from "../fixtures.ts";
-import { Section, StageContext } from "../stage.tsx";
+import { Labelled, Section, StageContext } from "../stage.tsx";
 
 /** A chat: its header, its timeline, its composer. */
 export function ChatScreen({
@@ -199,8 +199,28 @@ const EXCHANGE = [
 function AgentExchange() {
 	const phone = useContext(StageContext).width === "phone";
 	return (
-		<div className="flex h-[36rem] min-h-0 flex-col overflow-hidden border border-line-soft bg-paper">
-			<ExchangeScreen pair={EXCHANGE_PAIR} items={EXCHANGE} loaded phone={phone} onBack={() => {}} />
+		<div className="flex flex-col gap-6">
+			<div className="flex h-[36rem] min-h-0 flex-col overflow-hidden border border-line-soft bg-paper">
+				<ExchangeScreen pair={EXCHANGE_PAIR} items={EXCHANGE} loaded phone={phone} onBack={() => {}} />
+			</div>
+			<Labelled label="Nothing in the newest page, older pages behind it: no empty state until every page was read">
+				<div className="flex h-[14rem] min-h-0 flex-col overflow-hidden border border-line-soft bg-paper">
+					<ExchangeScreen
+						pair={EXCHANGE_PAIR}
+						items={[]}
+						loaded
+						older
+						onOlder={async () => {}}
+						phone={phone}
+						onBack={() => {}}
+					/>
+				</div>
+			</Labelled>
+			<Labelled label="Nothing between them at all">
+				<div className="flex h-[14rem] min-h-0 flex-col overflow-hidden border border-line-soft bg-paper">
+					<ExchangeScreen pair={EXCHANGE_PAIR} items={[]} loaded phone={phone} onBack={() => {}} />
+				</div>
+			</Labelled>
 		</div>
 	);
 }
