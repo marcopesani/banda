@@ -27,11 +27,11 @@ Keep the instructions focused. Avoid ceremonial role descriptions, repeated plat
 
 ## Create it
 
-Use `create_agent` with a stable lowercase, dash-separated id, the name, description, and complete instructions. Follow the available tool schema. Leave the optional face at its default unless the owner asked for one.
+Use `create_agent` with a stable lowercase, dash-separated id, the name, description, and complete instructions. Follow the available tool schema. Leave the optional face, model and tier at their defaults unless the owner asked for one; name only a model the owner's providers have.
 
-The agent is in the band as soon as the call succeeds: the owner is shown a card of what you made, with a link to it, and nothing waits on them. Say what you made, in a sentence, and what the owner may want to give it: its model and tier, connections, and any routine the job calls for, which are theirs to set. If the tool fails, explain the problem rather than claiming success; do not write an agent file by hand instead.
+The agent is in the band as soon as the call succeeds: the owner is shown a card of what you made, with a link to it, and nothing waits on them. Say what you made, in a sentence, and what the owner may want to give it: connections, and any routine the job calls for, which are theirs to set. If the tool fails, explain the problem rather than claiming success; do not write an agent file by hand instead.
 
-Tools, connections, model, tier and permissions remain owner-controlled: the tool takes none of them. A schedule written in instructions is not a running routine; if recurring work is requested, explain what still needs to be set up. Do not add healthchecks, routines, groups or public templates merely because an agent is being created.
+Tools, connections and permissions remain owner-controlled: the tool takes none of them. A schedule written in instructions is not a running routine; if recurring work is requested, explain what still needs to be set up. Do not add healthchecks, routines, groups or public templates merely because an agent is being created.
 
 `create_agent` is available in direct chats. In a group, direct the owner to an agent's direct chat.
 

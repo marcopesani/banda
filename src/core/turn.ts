@@ -358,6 +358,8 @@ export type CoreOptions = {
 	 * none, and the store alone holds it.
 	 */
 	readonly band?: BandPublication;
+	/** Whether a model `create_agent` or `update_agent` names exists on this daemon; unset, any well-formed one is taken. */
+	readonly knownModel?: (model: ModelRef) => boolean;
 };
 
 /** Where `chat` started: its home origin. */
@@ -1924,6 +1926,7 @@ export function defineCore(options: CoreOptions) {
 			readAgentChatTool(readAgentChat),
 			...bandTools({
 				publication: () => options.band,
+				...(options.knownModel === undefined ? {} : { knownModel: options.knownModel }),
 				agentChanged,
 				createGroup: (tx, made) => groups.createIn(tx, made),
 			}),

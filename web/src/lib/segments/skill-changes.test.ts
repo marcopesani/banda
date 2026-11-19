@@ -51,8 +51,16 @@ describe("a skill an agent wrote, in the feed", () => {
 				),
 			),
 		).toBeUndefined();
+		// a command that left a skill in effect draws the same line; a read draws nothing
 		expect(
 			skillChanges.call?.({ id: "c1", name: "bash", args: {} } as ToolCall, "1:c1", {
+				result: put,
+				asks: () => [],
+				context: {},
+			}),
+		).toHaveLength(1);
+		expect(
+			skillChanges.call?.({ id: "c1", name: "read", args: {} } as ToolCall, "1:c1", {
 				result: put,
 				asks: () => [],
 				context: {},

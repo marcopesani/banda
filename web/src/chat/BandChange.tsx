@@ -16,7 +16,14 @@ const FIELD: { readonly [field: string]: string } = {
 	face: "face",
 	description: "description",
 	instructions: "instructions",
+	model: "model",
+	tier: "tier",
 };
+
+const modelWords = (agent: { readonly model?: { provider: string; modelId: string } | null | undefined }) =>
+	agent.model == null ? "Default model" : `${agent.model.provider}/${agent.model.modelId}`;
+const tierWords = (agent: { readonly tier?: string | null | undefined }) =>
+	agent.tier == null ? "Default tier" : `${agent.tier[0]?.toUpperCase()}${agent.tier.slice(1)}`;
 
 /** The fields a change changed, as words: "description and instructions". */
 export function changedWords(receipt: Extract<AgentReceipt, { change: "updated" }>): string {
@@ -98,13 +105,16 @@ export function BandChangeCard({ receipt }: { receipt: BandReceipt }) {
 					<AvatarPreview face={agent.face} label={agent.name} />
 					<p className="min-w-0 [overflow-wrap:anywhere]">{agent.description}</p>
 				</div>
+				<p>
+					{modelWords(agent)} · {tierWords(agent)}
+				</p>
 				<details>
 					<summary className="cursor-pointer text-meta">Instructions</summary>
 					<div className="mt-2">
 						<Instructions label="In effect">{agent.instructions}</Instructions>
 					</div>
 				</details>
-				<p>It has no connections or permissions yet. Those, and its model, are yours to give.</p>
+				<p>It has no connections or permissions yet. Those are yours to give.</p>
 			</Frame>
 		);
 	const { before } = receipt;
@@ -115,8 +125,8 @@ export function BandChangeCard({ receipt }: { receipt: BandReceipt }) {
 			label="Updated agent"
 			link={{ href: `#/a/${receipt.id}`, words: `Open ${agent.name}` }}
 		>
-			{before.name === undefined ? null : <FieldChange label="Name" before={before.name} after={agent.name} />}
-			{before.face === undefined ? null : (
+			{before.name == null ? null : <FieldChange label="Name" before={before.name} after={agent.name} />}
+			{before.face == null ? null : (
 				<div>
 					<p className="text-meta font-medium text-ink-2">Face</p>
 					<div className="mt-1 flex items-center gap-2">
@@ -126,10 +136,12 @@ export function BandChangeCard({ receipt }: { receipt: BandReceipt }) {
 					</div>
 				</div>
 			)}
-			{before.description === undefined ? null : (
+			{before.description == null ? null : (
 				<FieldChange label="Description" before={before.description} after={agent.description} />
 			)}
-			{before.instructions === undefined ? null : (
+			{"model" in before ? <FieldChange label="Model" before={modelWords(before)} after={modelWords(agent)} /> : null}
+			{"tier" in before ? <FieldChange label="Tier" before={tierWords(before)} after={tierWords(agent)} /> : null}
+			{before.instructions == null ? null : (
 				<details>
 					<summary className="cursor-pointer text-meta">Instructions</summary>
 					<div className="mt-2 space-y-2">
@@ -138,7 +150,7 @@ export function BandChangeCard({ receipt }: { receipt: BandReceipt }) {
 					</div>
 				</details>
 			)}
-			<p>Its tools, connections, permissions and model didn’t change.</p>
+			<p>Its tools, connections and permissions didn’t change.</p>
 		</Frame>
 	);
 }

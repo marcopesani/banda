@@ -44,6 +44,8 @@ changes.
 - [ ] Re-audit avatar geometry preflight on every open-bot-avatar upgrade (`npm run avatar:bench`, and `node scripts/avatar-bench.ts <checkout>` on the previous pin); verify native colour selection and installed-icon refresh across supported browsers and platforms
 - [ ] Verify meta-tools end to end in a throwaway home: direct agent messages, bounded chat reads, and `create_agent`,
   `update_agent` and `create_group` with their rows and cards at desktop and phone widths (#58)
+- [ ] Removing a skill: a SKILL.md gone from the box still leaves effect only when the owner allows it, while adding
+  and changing one is the agents' own (DESIGN.md "The workspace"); decide whether removal follows the file too
 - [ ] A home made before #58 may hold a pending `propose_*` card: the owner still answers it (`POST /proposals/:id`),
   nothing else applies it; drop the route and `src/core/proposals.ts` once no home needs it
 - [ ] Delete the lead, hand-offs, helpers and every `propose_*` tool; make the first agent ordinary

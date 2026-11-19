@@ -1,12 +1,12 @@
 {
 	"lead": {
 		"system": {
-			"total": 2712,
+			"total": 2860,
 			"sections": {
 				"speaking": 1066,
 				"roster": 95,
 				"avatar_design": 0,
-				"skills": 507,
+				"skills": 655,
 				"computer": 138,
 				"memory": 37,
 				"now": 265,
@@ -15,7 +15,7 @@
 			}
 		},
 		"tools": {
-			"total": 22844,
+			"total": 23643,
 			"tools": {
 				"message_user": 2085,
 				"ask_user": 1550,
@@ -31,9 +31,9 @@
 				"skill": 368,
 				"message_agent": 621,
 				"read_agent_chat": 513,
-				"create_agent": 1551,
+				"create_agent": 1973,
 				"create_group": 555,
-				"update_agent": 1540,
+				"update_agent": 1917,
 				"schedule": 1978,
 				"watch": 1770,
 				"remember": 1505,
@@ -45,12 +45,12 @@
 	},
 	"helper": {
 		"system": {
-			"total": 2757,
+			"total": 2905,
 			"sections": {
 				"speaking": 1066,
 				"roster": 387,
 				"avatar_design": 0,
-				"skills": 507,
+				"skills": 655,
 				"computer": 138,
 				"memory": 37,
 				"now": 265,
@@ -59,7 +59,7 @@
 			}
 		},
 		"tools": {
-			"total": 22844,
+			"total": 23643,
 			"tools": {
 				"message_user": 2085,
 				"ask_user": 1550,
@@ -75,9 +75,9 @@
 				"skill": 368,
 				"message_agent": 621,
 				"read_agent_chat": 513,
-				"create_agent": 1551,
+				"create_agent": 1973,
 				"create_group": 555,
-				"update_agent": 1540,
+				"update_agent": 1917,
 				"schedule": 1978,
 				"watch": 1770,
 				"remember": 1505,
@@ -89,10 +89,10 @@
 	},
 	"group": {
 		"system": {
-			"total": 2212,
+			"total": 2360,
 			"sections": {
 				"group": 914,
-				"skills": 507,
+				"skills": 655,
 				"computer": 138,
 				"memory": 37,
 				"now": 267,

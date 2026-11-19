@@ -12,7 +12,13 @@ describe("what an agent made or changed in the band", () => {
 			kind: "agent" as const,
 			change: "created" as const,
 			id: "writer",
-			agent: { name: "Writer", face, description: "Writes drafts", instructions: "Write clearly." },
+			agent: {
+				name: "Writer",
+				face,
+				description: "Writes drafts",
+				instructions: "Write clearly.",
+				tier: "deep" as const,
+			},
 		};
 		const row = renderToStaticMarkup(createElement(BandChangeRow, { receipt }));
 		expect(row).toContain('href="#/a/writer"');
@@ -23,6 +29,7 @@ describe("what an agent made or changed in the band", () => {
 		expect(card).toContain("New agent: Writer");
 		expect(card).toContain("Write clearly.");
 		expect(card).toContain("yours to give");
+		expect(card).toContain("Default model · Deep");
 		expect(card).toContain("Open Writer");
 		expect(card).not.toContain("<button");
 	});
@@ -33,9 +40,13 @@ describe("what an agent made or changed in the band", () => {
 			change: "updated" as const,
 			id: "atlas",
 			agent: { name: "Atlas", face, description: "Checks fares.", instructions: "Compare and report." },
-			before: { description: "Tracks dates.", instructions: "Compare." },
+			before: {
+				description: "Tracks dates.",
+				instructions: "Compare.",
+				model: { provider: "openai", modelId: "gpt-6.1-sol" },
+			},
 		};
-		expect(changedWords(receipt)).toBe("description and instructions");
+		expect(changedWords(receipt)).toBe("description, instructions and model");
 		const card = renderToStaticMarkup(createElement(BandChangeCard, { receipt }));
 		expect(card).toContain("Updated Atlas");
 		expect(card).toContain("Tracks dates.");
@@ -43,6 +54,8 @@ describe("what an agent made or changed in the band", () => {
 		expect(card).toContain("Compare.");
 		expect(card).toContain("Compare and report.");
 		expect(card).toContain("didn’t change");
+		expect(card).toContain("openai/gpt-6.1-sol");
+		expect(card).toContain("Default model");
 		const group = renderToStaticMarkup(
 			createElement(BandChangeRow, {
 				receipt: {

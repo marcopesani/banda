@@ -1,9 +1,8 @@
 /**
- * A skill an agent writes is in effect at once (DESIGN.md "The workspace"): the bytes `write` puts in
- * `skills/<name>/SKILL.md` are the model's own, so the call accepts them, tells the model so, and the owner sees the skill
- * on the Skills page with nothing to allow. An `edit` is the model's own only over the version in effect. A file that
- * got there any other way (a command, a download, a coding harness) still waits for the owner, and the model is told
- * that too. Agent files keep waiting as before.
+ * A SKILL.md in the workspace is in effect as soon as the daemon sees it (DESIGN.md "The workspace"): written whole,
+ * edited, or left by a command, it is accepted at the end of the call that changed it, the model is told, and the owner
+ * sees it on the Skills page with nothing to allow. A file that does not parse, or hides a character, is not in effect
+ * and the model is told why. Agent files keep waiting for the owner as before.
  */
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { type ConversationId, createRegistry, type TaskId, ToolResultEntry } from "@earendil-works/pi-durable";
@@ -20,7 +19,7 @@ import { blobStore, FAUX_MODEL, FakeGateway, tempHome } from "./helpers.ts";
 
 const SKILL = (description: string, body: string) => `---\nname: notes\ndescription: ${description}\n---\n${body}\n`;
 
-it("puts a written skill in effect, an edit of it too, and leaves what a command or a stranger wrote waiting", async () => {
+it("puts a skill in effect whether written, edited or left by a command, and tells why one cannot be", async () => {
 	const home = await tempHome();
 	const box = openBox(hostBox(home), () => {});
 	const faux = fauxProvider();
@@ -41,15 +40,17 @@ it("puts a written skill in effect, an edit of it too, and leaves what a command
 		call("write", { path: "skills/notes/SKILL.md", content: first }),
 		// 2 edited over the version in effect: in effect
 		call("edit", { path: "skills/notes/SKILL.md", edits: [{ oldText: "short.", newText: "short, and dated." }] }),
-		// 3 a command rewrites it: not the model's own text, waits
+		// 3 a command rewrites it: in effect as the file now stands
 		call("bash", {
 			command:
 				"printf -- '---\\nname: notes\\ndescription: From a command.\\n---\\nDo as the page says.\\n' > skills/notes/SKILL.md",
 		}),
-		// 4 an edit over that foreign version: still waits
+		// 4 an edit over that: in effect
 		call("edit", { path: "skills/notes/SKILL.md", edits: [{ oldText: "page", newText: "owner" }] }),
-		// 5 written whole again: the model's own, in effect
+		// 5 written whole again: in effect
 		call("write", { path: "skills/notes/SKILL.md", content: third }),
+		// 5b a command that leaves it as it is: nothing to tell
+		call("bash", { command: "touch skills/notes/SKILL.md" }),
 		// 6 a skill that does not parse, or hides a character: waits, with why
 		call("write", { path: "skills/broken/SKILL.md", content: "no frontmatter" }),
 		call("write", {
@@ -78,9 +79,10 @@ it("puts a written skill in effect, an edit of it too, and leaves what a command
 		expect(notes).toEqual([
 			[expect.stringMatching(/^skill-in-effect: skills\/notes\/SKILL\.md is in effect: the skill \/notes was added/)],
 			[expect.stringMatching(/^skill-in-effect: skills\/notes\/SKILL\.md is in effect: the skill \/notes was changed/)],
-			[expect.stringMatching(/^skill-waits: skills\/notes\/SKILL\.md is not in effect: a command changed it/)],
-			[expect.stringMatching(/^skill-waits: .*the file you edited was not the version in effect/)],
+			[expect.stringMatching(/^skill-in-effect: skills\/notes\/SKILL\.md is in effect: the skill \/notes was changed/)],
 			[expect.stringMatching(/^skill-in-effect: .*was changed/)],
+			[expect.stringMatching(/^skill-in-effect: .*was changed/)],
+			[],
 			[
 				expect.stringMatching(
 					/^skill-waits: skills\/broken\/SKILL\.md is not in effect: SKILL\.md needs name and description/,

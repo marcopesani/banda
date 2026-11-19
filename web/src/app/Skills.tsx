@@ -193,8 +193,8 @@ export function SkillsPage({
 				</>
 			) : accepted === undefined ? (
 				<p className="text-ui text-ink-2">
-					No skill named /{name} is in effect. A file an agent wrote with its write tool is in effect at once; one that
-					got here another way waits for you below.
+					No skill named /{name} is in effect. A SKILL.md in the workspace is in effect as soon as it parses; one that
+					does not is below, with what is wrong.
 				</p>
 			) : (
 				<SkillDetail skill={accepted} showTitle={false} />

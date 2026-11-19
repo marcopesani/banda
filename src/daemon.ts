@@ -101,7 +101,15 @@ import {
 	remove as removeRoutine,
 } from "./server/routines.ts";
 import { seenBy } from "./server/seen.ts";
-import { acceptSkill, acceptSkills, chooseShippedSkills, saveSkill, shippedSkills, skills } from "./server/skills.ts";
+import {
+	acceptSkill,
+	acceptSkills,
+	chooseShippedSkills,
+	reconcileSkills,
+	saveSkill,
+	shippedSkills,
+	skills,
+} from "./server/skills.ts";
 import {
 	chatContext,
 	chatPrompt,
@@ -310,6 +318,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			box: attachmentsIn(agentBox),
 
 			workspace: () => agentBox.workspace,
+			// a model an agent names for an agent must be one this daemon can ask
+			knownModel: (model) => models.getModel(model.provider, model.modelId) !== undefined,
 			// what an agent's create_agent or update_agent put in effect is written to the box as the owner's save is
 			band: {
 				workingBase: (name, ctx) => agentWorkingBase(workspace, name, ctx),
@@ -666,6 +676,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		let seeding: Promise<void> | undefined;
 		const seedWorkspace = () =>
 			(seeding ??= seed(open, workspace)
+				.then(() => reconcileSkills(open, workspace))
+				.then((put) => {
+					if (put.length > 0) log(`skills: in effect from the workspace: ${put.join(", ")}`);
+				})
 				.catch((error: unknown) => log(`agents: ${(error as Error).message}`))
 				.finally(() => {
 					seeding = undefined;

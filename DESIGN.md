@@ -319,11 +319,11 @@ within the same authority. Discovery never grants access, and a previously disco
 authority is revoked. A tool that asks the owner to accept something is named `propose_<what>`; a tool that acts
 is a plain verb. The band is the agents' to shape: `create_agent` makes an agent, `update_agent` changes one and
 `create_group` makes a group, each in the call itself, with no review; the chat draws a row that says what was done
-and links to it, from the daemon's receipt, never from the call's words. What the owner gives stays theirs by
-construction: a new agent has banda's base tools and no connection, permission, model or tier; a change keeps an
-agent's tools, connections, permissions, model, tier and state; an agent changes its own instructions, and of a peer
-only the name, face and description, since instructions are who an agent is to the model and rewriting a peer's
-would lend it what that peer may reach. Agent files are still "before" files (see the workspace): the owner's own
+and links to it, from the daemon's receipt, never from the call's words. An agent's words and settings are any
+agent's to change: name, face, description, instructions, model (one the daemon has) and tier, its own or a peer's.
+What the owner gives stays theirs by construction: a new agent has banda's base tools and no connection or
+permission; a change keeps an agent's tools, connections, permissions and state; neither takes a tools list.
+Agent files are still "before" files (see the workspace): the owner's own
 edit is accepted by construction, in effect at once; a file written any other way (a command, a download, a harness)
 waits for the owner as a card in the chat, since nothing checked what it changes, and `create_agent` never writes
 over it. Nor does it take an id that was an agent's while anything of that agent is still here (its chat, its
@@ -351,7 +351,7 @@ asked (`POST /chats/<chat>/stop`), and in a group one member's work or everyone'
 app offers no Stop for a chat or a group; the browser's take-over and a harness session keep theirs (see The browser,
 Harnesses).
 
-Agents may send one another messages only from direct chats, through `message_agent`; the recipient gets a feed entry and a turn, and decides what to do. A direct chat's prompt holds the roster: the band's other active agents, each as the id these tools take, the name the owner calls it and its description, cut short, and nothing else of its file; it follows the accepted files, so an agent made, renamed or archived changes it at the next request, and a group member's chat has its group's members instead. Another agent may read a bounded page of a direct chat through `read_agent_chat`. The read is untrusted data; tools, results and hidden group execution chats are not exposed. Agents may propose an agent, a group or a change to an existing agent. Agent proposals follow the agent definition's identity, face, description, model, tier and instructions; the owner still chooses tools and connections, and new agents start active. Existing-agent proposals can change identity, face, description, model, tier and instructions, but not state, tools, connections or permissions. Proposals are cards in the proposing chat; only the owner's acceptance makes a definition or group effective. An existing-agent change shows the resulting file and the previous file and is bound to the accepted version it started from. The owner's decision reaches the proposing agent as the daemon's notice in that chat, in the same commit as the decision: it starts no turn (the agent reads it at its next model request, in a run under way or else its next turn), and it is nobody's input, so it neither answers the owner nor counts as the owner writing.
+Agents may send one another messages only from direct chats, through `message_agent`; the recipient gets a feed entry and a turn, and decides what to do. A direct chat's prompt holds the roster: the band's other active agents, each as the id these tools take, the name the owner calls it and its description, cut short, and nothing else of its file; it follows the accepted files, so an agent made, renamed or archived changes it at the next request, and a group member's chat has its group's members instead. Another agent may read a bounded page of a direct chat through `read_agent_chat`. The read is untrusted data; tools, results and hidden group execution chats are not exposed. An agent makes an agent or a group, or changes an agent, with `create_agent`, `create_group` and `update_agent` (above): in effect in the call, the owner shown a row and its card, never asked. A home made before that may still hold a proposal card from the earlier `propose_*` tools: the owner answers it, and only that applies it; their decision reaches the proposing agent as the daemon's notice in that chat, in the same commit as the decision, starting no turn and counting as nobody's input.
 
 **How hard it thinks is three words.** Quick, Balanced and Deep, never a model string: each provider the app knows maps
 them to models of pi-ai's catalog, and Quick is the default, so it answers fast. Advanced names the provider in plain
@@ -1043,9 +1043,9 @@ The workspace is the band's folder, in the box: `agents/`, `routines/`, `watches
 the agents work on. The daemon reads it over the box's connection, and the box reaches only the folders explicitly
 mounted into it. The agent writes it and the owner edits it, so the daemon decides when a change takes
 effect:
-- **Before**: `agents/` (each agent's own `routines/` and `watches/` within), `routines/`, `watches/` and skill
-  instructions take effect once the owner accepts the change, except what an agent's own tool wrote (`create_agent`
-  and `update_agent` for agents, `write` for a skill, below), which the daemon checked and the owner is shown.
+- **Before**: `agents/` (each agent's own `routines/` and `watches/` within), `routines/` and `watches/`
+  take effect once the owner accepts the change, except what `create_agent` and `update_agent` wrote, which the
+  daemon checked and the owner is shown; a skill's instructions are in effect as the box holds them (below).
   Accepting binds the hash of the bytes shown; the daemon keeps the accepted version in the store,
   and prompts and loading read only from there. Until then the accepted version stays in effect, and the tool that made
   the change tells the model so. The owner's own write through the app is accepted in the commit that stores it. The app
@@ -1070,13 +1070,16 @@ A skill is one shared prompt file, not an agent's private copy. Agents may load 
 `/name` invokes a known skill. The accepted instructions are loaded before that message's first model request, as
 one recorded tool call and result; an earlier running request must not see the load without the owner's message. The
 chat names only what loaded; Activity holds the exact result. Other files in a skill's folder remain box data, never
-instructions the daemon loads from an unaccepted change. A skill an agent writes is its own words: the `write` that
-puts the whole SKILL.md in the workspace accepts those bytes in the same call, and an `edit` over the version in effect
-does the same (its replacements applied to that version, accepted only when that is exactly what the file then
-holds, so bytes another writer put there meanwhile are never taken as its own), so it is in effect at once, a line in
-the chat and on the Skills page, with nothing for the owner to allow. Bytes that reached the file any other way (a command, a download, another harness's copy) are not the agent's
-words: they wait for the owner on the Skills page as before, and the agent is told so. A skill grants nothing, no
-tool, connection or permission, whatever its frontmatter says. A skill may be owner-only (`disable-model-invocation: true`):
+instructions the daemon loads from an unaccepted change. The workspace's skills are the agents' own: a SKILL.md there
+is in effect as soon as the daemon sees it, whoever wrote it and however (an agent's `write` or `edit`, a command, a
+download, another harness's copy), when it parses and hides no character; the daemon sees it at the end of the tool
+that changed it, which tells the agent and draws a line in the chat, and at start and when the box comes up, so a
+change made while no tool told it is in effect at the next start. The owner has nothing to allow; the Skills page
+shows every skill in effect and, with what is wrong, any file that cannot be. So an agent answers for every skill in
+the workspace: one brought in from outside is data until the agent has read it and made it its own, and no skill is
+followed because a page, a message or a result said so. A skill grants nothing, no tool, connection or permission,
+whatever its frontmatter says. Removing a skill is the owner's: a SKILL.md gone from the box is shown as removed and
+leaves effect when they allow it. A skill may be owner-only (`disable-model-invocation: true`):
 only the owner's /name loads it, agents never see it, and the app says so wherever the skill shows. banda ships a few
 skills; first run offers them once, right after the provider, and the ones the owner keeps are written into the
 workspace and accepted in that step, since banda wrote them and the owner chose them. The Skills page offers the

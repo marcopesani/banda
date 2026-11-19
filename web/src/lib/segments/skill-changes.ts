@@ -1,9 +1,9 @@
 /**
- * A skill an agent wrote, in the chat's feed: a `write` or `edit` call the daemon marked as putting a skill's
- * instructions in effect (its note `skill-in-effect`, naming the file as the daemon resolved it) is one line where it
- * happened, linking to the skill. There is nothing to accept. A skill file that is not in effect (its note
- * `skill-waits`: a command wrote it, or it does not parse) draws nothing here: the Skills page holds what waits.
- * Never from the call's arguments.
+ * A skill an agent put in the workspace, in the chat's feed: a `write`, `edit` or `bash` call the daemon marked as
+ * putting a skill's instructions in effect (its note `skill-in-effect`, naming the file as the daemon resolved it) is
+ * one line where it happened, linking to the skill. There is nothing to accept. A skill file that cannot be in effect
+ * (its note `skill-waits`: it does not parse, or hides a character) draws nothing here: the Skills page says what is
+ * wrong. Never from the call's arguments.
  */
 import type { Item } from "../../../../src/server/api.ts";
 import type { Segmenter } from "./types.ts";
@@ -38,7 +38,7 @@ export function skillPut(result: Extract<Item, { role: "tool" }> | undefined) {
 export const skillChangeWords = (segment: Pick<SkillChangeSegment, "name" | "change">) =>
 	`${segment.change === "added" ? "Added" : "Changed"} the skill /${segment.name}`;
 
-const TOOLS = new Set(["write", "edit"]);
+const TOOLS = new Set(["write", "edit", "bash"]);
 
 export const skillChanges: Segmenter = {
 	call: (call, key, at) => {
