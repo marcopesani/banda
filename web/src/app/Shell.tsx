@@ -40,6 +40,7 @@ import { attentionOf, bandRows, titleOf, whoOf } from "./band.ts";
 import { ChatThinking } from "./ChatThinking.tsx";
 import { ConnectFlow, freshAccounts } from "./ConnectFlow.tsx";
 import { ConnectionPage } from "./ConnectionPage.tsx";
+import { ExchangePage } from "./Exchange.tsx";
 import { saveEdit, setAgentState } from "./edits.ts";
 import { GroupChat } from "./GroupChat.tsx";
 import { AddHarnessButton, HarnessConnectionTile } from "./HarnessConnections.tsx";
@@ -200,6 +201,8 @@ function Main() {
 	const [searching, setSearching] = useState(false);
 	const [shortcuts, setShortcuts] = useState(false);
 	const [making, setMaking] = useState(false);
+	// an exchange the daemon knew no pair for: one of the two is no agent of this band
+	const [goneExchange, setGoneExchange] = useState<string>();
 	// the routine open in the panel (its detail; its editor when `edit`, a new one when none), the run whose line the
 	// owner last opened from it, and a routine's line asking for the agent's routines
 	const [editing, setEditing] = useState<{
@@ -675,6 +678,21 @@ function Main() {
 					}}
 				/>
 			);
+		if (where.name === "exchange") {
+			const known = [...agents, ...archived];
+			if (goneExchange === `${where.a}/${where.b}`)
+				return <Gone what="This conversation" onHome={() => go({ name: "home" })} />;
+			return (
+				<ExchangePage
+					key={`${where.a}/${where.b}`}
+					pair={[whoOf(known, where.a), whoOf(known, where.b)]}
+					call={where.call}
+					phone={phone}
+					onBack={back}
+					onGone={() => setGoneExchange(`${where.a}/${where.b}`)}
+				/>
+			);
+		}
 		if (where.name === "artifact") {
 			const agentOf = (chat: number) => shell.rows.find((each) => each.chat === chat)?.agent;
 			const sourceOf = (chat: number) => {
