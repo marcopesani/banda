@@ -934,7 +934,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 						),
 					stop: (chat) => stopChat(open, chat),
 					agents: listAgents,
-					skills: () => skills(open, workspace),
+					// an explicit read reconciles: a SKILL.md that reached the box since is in effect before the page shows it
+					skills: async () => {
+						await reconcileSkills(open, workspace).catch((error: unknown) =>
+							log(`skills: ${(error as Error).message}`),
+						);
+						return skills(open, workspace);
+					},
 					acceptSkill: (name, sha) => changingWorkspace(() => acceptSkill(open, workspace, name, sha)),
 					acceptSkills: (wanted) => changingWorkspace(() => acceptSkills(open, workspace, wanted)),
 					saveSkill: (name, text, base) => changingWorkspace(() => saveSkill(open, workspace, name, text, base)),
