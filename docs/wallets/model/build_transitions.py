@@ -526,7 +526,7 @@ row(X, "authorizing", "authorization_commit", "eff != 'deny' and (eff == 'always
     ["the balance dropped (C11)"], ["H-239", "H-240"], ["C11"], "Authorize")
 row(X, "authorizing", "authorization_commit", "eff != 'deny' and (eff == 'always' or approved) and fits", "authorized",
     ["nonce = keccak256('banda/x402' || wallet || observation id) (R-5)",
-     "validAfter = t - 5 s, validBefore = t + min(maxTimeoutSeconds, 60 s) from the latest block (C19)",
+     "validAfter = min(c, w) - 5 s, validBefore = max(c, w) + min(maxTimeoutSeconds, 60 s), c the latest block's time, w the wall clock (C19)",
      "domain from banda's chain definition (H-224)", "commit message and nonce before any signature exists"],
     ["H-216", "H-225", "H-227", "H-250"], ["C14", "C19", "C21"], "Authorize")
 row(X, "authorized", "hand_header", "synced", "handed",

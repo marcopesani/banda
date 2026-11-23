@@ -71,8 +71,8 @@ answer:
    unknown recipients (Ask; Deny only as the owner's opt-in, OD-13);
 8. the available balance after reservations, fees included (C11);
 9. dedup: one open ask per (wallet, agent, recipient, amount, asset); a duplicate is answered with the open card.
-   There is no count of asks and no burst check: the balance is the only cap (requirement 2); a burst pause is OD-12,
-   an owner opt-in, off by default.
+   There is no count of asks and no burst check: the balance is the only cap (requirement 2), and no burst pause is
+   built, not even as an opt-in (OD-12).
 
 Proven by: a property test over generated calls, states and recorded readings that checks the answer is a function of
 (inputs, store, readings); PaymentLane's `AccessAtStart`, `DenyAtStart` and `AlwaysNeverAsks` (model/README.md).
@@ -262,8 +262,11 @@ H-217, H-218, H-219, H-220, H-221, H-222, H-223, H-224, H-228, H-229, H-230, H-2
 
 ### C19 · Chain time
 
-x402 validity windows come from the latest block's timestamp: `validAfter` = t − 5 s, `validBefore` = t +
-min(`maxTimeoutSeconds`, 60 s). A skew above 120 s between the wall clock and chain time pauses x402 signing.
+x402 validity windows are anchored to both clocks, chain time c (the latest block's timestamp) and the wall clock w:
+`validAfter` = min(c, w) − 5 s, `validBefore` = max(c, w) + min(`maxTimeoutSeconds`, 60 s). The token checks the
+window against block time and a facilitator against its own wall clock (the reference one refuses `validBefore` <
+now + 6 s and `validAfter` > now, spikes/gaps §F), so a window anchored to one clock alone fails the other's check. A
+skew above 120 s between c and w pauses x402 signing, which keeps a window under 185 s.
 Deadlines run on the store's timers, not on wall-clock comparisons. An authorization is Expired only once the block at
 or after `validBefore` is finalized with no `AuthorizationUsed` (X402 `ReportedIsTrue`).
 

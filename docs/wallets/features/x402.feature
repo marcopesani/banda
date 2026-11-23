@@ -8,7 +8,7 @@
 # untrusted upstream gave 502 and no observation.
 # spikes/gaps/README.md §F: the reference facilitator checks C19's window against its own wall clock (it refuses
 # validBefore < now + 6 and validAfter > now), so the window passes only while chain time is 54 s behind to 5 s ahead
-# of that clock, a narrower band than the 120 s skew pause (left open in C19). §B: the offline fixture is built with
+# of that clock, a narrower band than the 120 s skew pause; C19 anchors the window to both clocks for that reason. §B: the offline fixture is built with
 # the prestate tracer, because a fork's anvil_dumpState drops the token's implementation and its library.
 
 Feature: An agent pays an x402 endpoint the proxy observed

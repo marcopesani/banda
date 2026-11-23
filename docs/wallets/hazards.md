@@ -69,9 +69,9 @@ The lens catalogs disagreed in places. These are resolved here, with the reason,
 | R-12 | What names a home, and what lets it sign | RFC: "the home's own id"; banda-integration spike: put `auth/device-id` in the keychain service name; SEC-121 and DUR-153: a restored backup must not sign beside its original | **The id names, the lease decides.** The keychain account carries a home id for findability; signing needs the lease of C16, proven by a home secret kept outside the home directory: a keychain item `<home-id>/home-secret` bound to the home's realpath and (dev, inode, birth time), so no backup, restore, fork or hand copy (`cp -a`, rsync, Time Machine) carries a secret that matches. |
 | R-13 | The keychain account name | PRO and SEC: a random name committed before the write; keychain spike: `<home-id>/wallet/<address>` | **The address** (keychain spike): the `creating` record holds the address before the write, so recovery never guesses, a retried create can only ever write that one key, and nobody can plant an item for an address not yet made. |
 
-Owner decisions still open (each entry that depends on one names it; the safer default is what the entries assume):
+Owner decisions (each entry that depends on one names it):
 
-| # | Decision | Recommended default |
+| # | Decision | Decided |
 |---|---|---|
 | OD-1 | Rule scope on a shared wallet | Recipient, label and Deny per wallet; Always per (wallet, agent) |
 | OD-2 | Reveal the key after creation | Host only, in the desktop app, behind an OS re-authentication, listed in the wallet's activity |
@@ -83,9 +83,9 @@ Owner decisions still open (each entry that depends on one names it; the safer d
 | OD-8 | An Ask over the available balance | Refused at the call, with the available amount; no draft |
 | OD-9 | Networks per wallet | One, fixed at creation |
 | OD-10 | A routine's payment ask nobody answers | Deadline 24 h (`DEFAULT_DEADLINE`), then "Not paid: no answer" |
-| OD-11 | A separate, signed signer helper with a keychain access group (narrows TA-1) | A precondition for wallets beside a host coding agent on macOS: until it ships, a host harness that runs commands without a per-command ask takes wallets offline (H-065). Spike on a signed bundle first |
-| OD-12 | A burst pause on Always (drop to Ask after N payments an hour) | Off; an opt-in the owner turns on from the Always button, worded as its consequence. Requirement 2 makes the balance the only cap, so it is not built until the owner asks |
-| OD-13 | A wallet default of Deny for unknown recipients | Ask (requirement 3: the first payment to an unknown recipient asks); Deny only as the owner's opt-in, pending the owner's sign-off. Under Deny an unknown recipient or endpoint is refused in words with no card, and the change refuses open unknown-recipient asks in its commit (C9) |
+| OD-11 | A separate, signed signer helper with a keychain access group (narrows TA-1) | Designed and spiked as its own step (wallets.md, Spikes). A precondition for wallets beside a host coding agent on macOS: until it ships, a host harness that runs commands without a per-command ask takes wallets offline (H-065) |
+| OD-12 | A burst pause on Always (drop to Ask after N payments an hour) | Off: not built, not even as an opt-in. Requirement 2 makes the balance the only cap |
+| OD-13 | A wallet default of Deny for unknown recipients | Ask (requirement 3: the first payment to an unknown recipient asks); Deny only as the owner's opt-in per wallet. Under Deny an unknown recipient or endpoint is refused in words with no card, and the change refuses open unknown-recipient asks in its commit (C9) |
 
 ## Trust assumptions (from the security lens, kept)
 
@@ -884,8 +884,8 @@ Owner decisions still open (each entry that depends on one names it; the safer d
 **H-098** · security · high · design rule · A page steers repeated payments to an Always recipient
 - Trigger: an injection makes the agent pay an Always recipient many times.
 - Expected: accepted residual bounded by the balance and visible: every payment is a row and a chat line, and the
-  owner's undo is one tap in Settings → Recipients. No burst pause by default: requirement 2 makes the balance the only
-  cap (OD-12 keeps it as an owner opt-in).
+  owner's undo is one tap in Settings → Recipients. No burst pause: requirement 2 makes the balance the only cap
+  (OD-12).
 - Mitigation: the reservation ledger (C11); requirement 3 excludes an amount cap; a property test that a loop of
   Always payments spends at most the balance and opens no card (UC-07).
 - Rules: C3, C11 · From: SEC-048, PRO-128
@@ -968,7 +968,7 @@ Owner decisions still open (each entry that depends on one names it; the safer d
 - Trigger: the burst check drops Ana's Always to Ask while the owner, seeing the notice, sets Always again.
 - Expected: both are versioned acts on the rule (the burst pause is a system act with its own version); the later
   commit wins and the earlier is visible in the rule's history.
-- Mitigation: C8; out of scope while the burst pause is not built (OOS-11, OD-12), and it applies if the owner opts in.
+- Mitigation: C8; out of scope, since the burst pause is not built (OOS-11, OD-12).
 - Rules: C8 · From: new (critic)
 
 **H-111** · edge · low · implementation note · Rules of an agent that was deleted
@@ -1258,8 +1258,7 @@ Confirmed, Failed, Refused, Not paid (conflicts.md, payment state machine).
 
 **H-149** · edge · high · design rule · An agent loop enqueues hundreds of Always payments
 - Trigger: a bug or an injection calls `wallet__send` 300 times to an Always recipient.
-- Expected: bounded by the balance (C11); the lane stays FIFO; every payment is a row; no burst pause by default
-  (OD-12).
+- Expected: bounded by the balance (C11); the lane stays FIFO; every payment is a row; no burst pause (OD-12).
 - Mitigation: C11; the lane's FIFO (C2); the property test of UC-07.
 - Rules: C2, C3, C11 · From: DUR-185
 

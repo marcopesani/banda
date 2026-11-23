@@ -256,8 +256,8 @@ Verdict: **refuted in part**. The token checks the window against block time (§
 facilitator checks it against its own wall clock. When chain time and the facilitator's clock differ by more than that
 band (a stalled sequencer, a payee whose clock is off), banda signs a window that verify refuses. The failure is
 liveness, not money: verify refuses before any broadcast, nothing moves, and the authorization expires and is released
-(H-237). No scenario asserts on the skew, so none changes. The 120 s threshold, and whether the window should be
-anchored to both clocks, are open in C19. For the runner, a scenario that runs this facilitator keeps chain time
+(H-237). No scenario asserts on the skew, so none changes. C19 anchors the window to both clocks for this reason,
+and keeps the 120 s pause to bound the window's length. For the runner, a scenario that runs this facilitator keeps chain time
 within that band until the header is handed, and moves block time past `validBefore` only after the header is handed
 (the change to ISOLATION section 5).
 
@@ -337,7 +337,7 @@ The match on the service is exact, so the service name decides which homes' item
 | A | "whether `finalized` follows `--slots-in-an-epoch` is checked before the runner relies on it" | it does (latest − 2N), but `anvil_reorg` rewrites finalized blocks without complaint, and drops re-included transactions whose predecessors are gone | ISOLATION.md section 3; STEPS.md realisations of the reorg, finalized and funds-at-safe steps |
 | D | a fee cap below the base fee comes back as an error (`fee-low`) | only on anvil; geth and reth accept it and it waits | payments.feature's bump comment; this README (the nonce-and-crash table is the spike's record and is not rewritten) |
 | E | an anvil fork can stand in for Base's L1 fee | the fork charges it, but no receipt field shows it; `-n base` charges a fee too | ISOLATION.md section 3: plain anvil for transfer scenarios |
-| F | windows from chain time are accepted while the skew is under 120 s | the reference facilitator's band is 54 s behind to 5 s ahead | ISOLATION.md section 5; x402.feature's header comment; C19's threshold left open |
+| F | windows from chain time are accepted while the skew is under 120 s | the reference facilitator's band is 54 s behind to 5 s ahead | ISOLATION.md section 5; x402.feature's header comment; C19 anchors the window to both clocks |
 | H | `findCredentials` lists orphan items | it does, with secrets; it throws on Linux when locked; macOS may omit an item | STEPS.md realisation of `no keychain item is left without a record` |
 
 No `Then` changed: every refutation moves how a step is realised or what the runner does, not what the table decides.

@@ -132,13 +132,13 @@ python3 -I features/check_features.py --coverage                      # rows, ha
   - the follower's polling.
 
   "The payment's deadline passes" is a clock move, not a sleep. Wall-clock jumps (H-194) are clock moves too.
-- Chain time is moved on anvil with `evm_setNextBlockTimestamp` and `evm_mine`. `validBefore` and the 120 s skew
-  pause are decided by block time (C19), so x402 expiry is a block timestamp the step sets.
+- Chain time is moved on anvil with `evm_setNextBlockTimestamp` and `evm_mine`. C19 anchors the window to both
+  chain time and banda's clock (the test clock here), and the 120 s skew pause compares the two; x402 expiry is a
+  block timestamp the step sets.
 - The reference facilitator (`@x402/evm` 2.32.0) checks the window against its own wall clock (`Date.now()`), not
-  the test clock. It refuses `validBefore < now + 6` and `validAfter > now`, so it accepts C19's window only while
-  chain time is between 54 s behind and 5 s ahead of the wall clock (`../spikes/gaps/README.md` §F). A scenario that
-  runs it keeps chain time at the wall clock until the header is handed. It moves block time past `validBefore`
-  only after the header is handed.
+  the test clock: it refuses `validBefore < now + 6` and `validAfter > now` (`../spikes/gaps/README.md` §F). A
+  scenario that runs it keeps the test clock at the real wall clock until the header is handed. It moves block time
+  past `validBefore` only after the header is handed.
 - Seeds are fixed. Property runs take their counts from `test/pbt.ts` (`pbtRuns`, `pbtFaultRuns`, scaled by
   `BANDA_PBT_RUNS` and `BANDA_PBT_FAULT_RUNS`). Every fast-check run prints its seed and path on failure, and a seed
   can be passed back to replay it. Generated scenarios (`test/fault/`) draw from the same seeded sources: interleavings,

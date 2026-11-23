@@ -114,10 +114,10 @@ A contract and a function are not a recipient: a router's swap, a bridge or a to
   binds: a rule on 0x12ab… stays on 0x12ab… whatever it is called. The agent sees the names in `wallet__recipients`,
   so it can say "paid Ana", but its calls name addresses and endpoints, never labels; a label never resolves to an
   address, so a renamed or look-alike name cannot redirect a payment.
-- **Unknown recipients ask.** The wallet's default for recipients nobody has set is Ask, which is requirement 3. A
-  default of Deny ("this agent only pays the recipients I set up") is an owner opt-in pending the owner's sign-off
-  (OD-13): under it an unknown recipient is refused in words with no card, and turning it on refuses the open asks
-  of unknown recipients in the same commit. Never Always.
+- **Unknown recipients ask (OD-13).** The wallet's default for recipients nobody has set is Ask, which is
+  requirement 3. A default of Deny ("this agent only pays the recipients I set up") is the owner's opt-in per wallet:
+  under it an unknown recipient is refused in words with no card, and turning it on refuses the open asks of unknown
+  recipients in the same commit. Never Always.
 - **Where a rule is set.** On the first payment's card, and in the wallet's Recipients list: each recipient with its
   name, its rule (and which agents have Always), what was paid to it and when, rename, change the rule, forget it.
 
@@ -141,8 +141,8 @@ A rule has three states and no number. Always pays its recipient whatever it ask
 endpoint set to Always could take the whole balance in one payment, and a page could steer the agent into paying
 it. That is the model as chosen: the balance is the cap, and the owner sizes it by what they put in. The Always
 button's words say so ("Always pay Weather API, up to what's in the wallet"), so the owner grants it knowing what
-it covers, as DESIGN.md "Trust" asks of every permission. Nothing counts or paces Always payments: a burst pause is
-an owner opt-in that is not built until asked for (OD-12); identical open asks are deduplicated, never counted.
+it covers, as DESIGN.md "Trust" asks of every permission. Nothing counts or paces Always payments, and there is no
+burst pause, not even as an opt-in (OD-12): identical open asks are deduplicated, never counted.
 
 ## Architecture
 
@@ -259,7 +259,11 @@ its own `payTo`. So:
 - `wallet__pay_x402(observation)` names that observation; the daemon signs only what was observed, for that
   endpoint's rule, with every term from the observation and none from the agent; the authorization is committed and
   synced before its header leaves (C21);
-- validity comes from chain time: `validAfter` = t − 5 s, `validBefore` = t + min(`maxTimeoutSeconds`, 60 s) (C19);
+- validity is anchored to both clocks, chain time c (the latest block) and the wall clock w: `validAfter` =
+  min(c, w) − 5 s, `validBefore` = max(c, w) + min(`maxTimeoutSeconds`, 60 s). The token checks the window against
+  block time and a facilitator against its own clock (the reference one refuses `validBefore` < now + 6 s and
+  `validAfter` > now), so it holds for both; signing pauses while c and w differ by more than 120 s, which keeps a
+  window under 185 s (C19);
 - the agent retries with the `PAYMENT-SIGNATURE` header (x402 v2; v1's `X-PAYMENT` is not read);
 - the authorization is Settled once `AuthorizationUsed` is on chain, and Expired only once the block at `validBefore` is
   finalized without it (C19); a facilitator's `settlement_pending` is shown as reported, never as paid or failed.
@@ -278,8 +282,9 @@ takes the wallet offline for agents and shows a warning in place of Receive (C17
 ### Chains, RPC and privacy
 
 **Base** first (low fees, USDC, where x402 settles); one network per wallet, fixed at creation (OD-9). The RPC
-endpoint learns the address and the owner's IP, so it is a named choice in Settings with its public default said
-plainly. The RPC is untrusted for what it reports (TA-4): a balance is a dated reading, and a foreign transaction or
+endpoint learns the address and the owner's IP, so each network's RPC is a field of the home's configuration
+(`config.json`, `wallets.rpc.<network>`) with a public default banda ships, said plainly in Settings → Wallets, where
+the owner changes it; an absent field takes the default. The RPC is untrusted for what it reports (TA-4): a balance is a dated reading, and a foreign transaction or
 a failed receipt counts only when proven (C7). An EOA needs a little ETH for gas; x402 payments are gasless for the
 payer. banda talks to the RPC with a small JSON-RPC client over `fetch`, not viem, which would ship a second curve
 library ([`wallets/stack.md`](wallets/stack.md)).
@@ -290,8 +295,10 @@ contracts, ETH from balance checkpoints and a bisection between them, and a nonc
 store shown as "sent outside banda". No keyless hosted API serves Base mainnet history (Etherscan wants a paid tier;
 Blockscout challenges scripts), so the list is self-indexed through the owner's RPC; on Base Sepolia it matched
 Blockscout 118 of 118 transfers and found native changes Blockscout missed. `mainnet.base.org` refuses `eth_getLogs`,
-so with that RPC Settings says the incoming list cannot be built, and banda probes any RPC the owner picks for its log
-range.
+so Base's default is a keyless public endpoint that serves it (`base-rpc.publicnode.com`: 10,000 blocks a call, state
+about two months back without a token; its terms for sustained use are still to check), and Base Sepolia's is
+`sepolia.base.org`. banda probes any RPC the owner sets for its log range; with one that serves no logs, Settings says
+the incoming list cannot be built.
 
 ### Keys and the keychain
 
@@ -304,8 +311,9 @@ range.
 - **What it protects against, stated plainly (TA-1).** On macOS the item trusts an executable, not a script, so any
   script run by the bundled Node reads every wallet's key without a prompt (the keychain spike); on Linux any process
   of the user on the session bus reads an unlocked collection. So a host coding agent that runs commands without a
-  per-command ask takes wallets offline, as host mode does, until a separately signed signer with its own keychain
-  access group ships (OD-11). Every package the daemon loads is inside this boundary, so the supply-chain controls
+  per-command ask takes wallets offline, as host mode does, until the signer helper ships (OD-11): a separately
+  signed executable with its own keychain access group, which the bundled Node cannot read through. It is designed
+  and spiked as its own step (Spikes, below). Every package the daemon loads is inside this boundary, so the supply-chain controls
   cover the daemon's whole tree, not the signing libraries alone ([`wallets/stack.md`](wallets/stack.md) section 5).
 - **Saving the key at creation (requirement 5).** The ready commit mints a one-time capability bound to the create
   request, consumed within 10 minutes on that request's own connection (the desktop app, a loopback browser of
@@ -330,8 +338,8 @@ range.
 - **Backups** hold the record and the recipients, not the key; losing the machine loses the funds unless the owner
   saved the key. A restored home starts with a restore marker: a payment the backup held before its burn point is
   Restored (closed, told to the chat, never resumed); one past it is tracked from its stored versions.
-- **Stored shapes** (the Wallet doc, recipients, permissions, payments and versions, the ledger) need a `MIGRATIONS`
-  step, its faults and a kept home (AGENTS.md "Changes").
+- **Stored shapes** (the Wallet doc, recipients, permissions, payments and versions, the ledger, `config.json`'s
+  `wallets.rpc`) need a `MIGRATIONS` step, its faults and a kept home (AGENTS.md "Changes").
 
 ## Slices
 
@@ -355,7 +363,10 @@ The use cases per slice, with their scenarios, are in [`wallets/use-cases.md`](w
 Each ran under [`wallets/spikes/`](wallets/spikes/); what is still open is listed in its README.
 
 - [x] Keychain from the daemon's bundled Node: `@napi-rs/keyring` in a signer child (keychain); a Developer
-  ID-signed bundle across an update, a locked login keychain and OD-11 still open
+  ID-signed bundle across an update and a locked login keychain still open
+- [ ] OD-11, the signer helper: design it, then spike a separately signed executable with its own keychain access
+  group on macOS (an item the bundled Node cannot read, the group kept across an update, notarization), before wallets
+  run beside a host coding agent; on Linux, what if anything narrows the session bus
 - [ ] Linux: Secret Service under a desktop session vs. systemd or SSH; a locked keyring mid-routine (run headless
   on arm64 only)
 - [x] Signing library: `@noble/curves` + `@noble/hashes` + `micro-eth-signer`, pinned exactly, byte-identical to
@@ -370,22 +381,10 @@ Each ran under [`wallets/spikes/`](wallets/spikes/); what is still open is liste
   that works offline, Base's public endpoints, geth and reth pool errors, the L1 fee, the facilitator's
   `settlement_pending` (gaps)
 - [ ] Which calls and typed-data shapes reach future deposits, tested as refusals
+- [ ] C19's anchored window against the reference facilitator with chain time 60 s behind and 10 s ahead of the wall
+  clock, where the chain-time window was refused
+- [ ] `base-rpc.publicnode.com` as Base's default: its terms for sustained use, and the list's depth past its two
+  months
 - [ ] `synchronous=FULL` for the wallet's commits on the shipped build (C21, spike I12)
 - [ ] macOS: a locked login keychain, a Deny on its prompt, a session with no GUI; Touch ID before a later reveal,
   and how Linux re-authenticates the owner at all (OD-2)
-
-## Open decisions
-
-The analysis settled the rest; these are the owner's to take ([`wallets/hazards.md`](wallets/hazards.md)):
-
-- **OD-13, the default for unknown recipients.** Ask, as requirement 3 says, with Deny as an opt-in per wallet. Needs
-  the owner's sign-off.
-- **OD-12, a burst pause on Always.** Off and not built, since the balance is the only cap. Needs the owner's
-  sign-off that it stays out.
-- **C19's clock skew.** banda pauses x402 signing when the wall clock and chain time differ by more than 120 s, but the
-  reference facilitator accepts the window only while chain time is between 54 s behind and 5 s ahead of its own
-  clock. Narrow the pause, or anchor the window to both clocks.
-- **Which mainnet RPC banda proposes for the transaction list**, since `mainnet.base.org` cannot serve it (a keyless
-  public endpoint worked; its terms for sustained use were not checked).
-- **OD-11, a separately signed signer helper.** Until it is designed and spiked, wallets go offline beside a host
-  coding agent that runs commands without asking.

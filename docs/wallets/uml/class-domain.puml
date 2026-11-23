@@ -161,8 +161,8 @@ package "pi-durable store  <<one commit line, C1>>" as STOREP #EEF3FA {
   class X402Authorization <<store>> {
     {field} nonce : keccak256("banda/x402" | wallet | observation id)
     from, to, value
-    validAfter : t - 5 s
-    {field} validBefore : t + min(maxTimeout, 60 s)
+    {field} validAfter : min(chain, wall) - 5 s
+    {field} validBefore : max(chain, wall) + min(maxTimeout, 60 s)
     signature
     state : x402 machine
   }

@@ -856,8 +856,8 @@ is in the desktop app); the explorer learning which address the owner watches (a
 
 Requirement 2 makes the balance the only cap, and requirement 3 says the agent follows the owner's Always after it is
 set. A check that drops Always to Ask after a number of payments, or refuses asks past a count, is a cap the owner
-did not choose (findings 27 and 32). OD-12 records it as an opt-in the owner could turn on from the Always button,
-off by default; until the owner asks for it, it is not built. Open asks are deduplicated, never counted (UC-07 E5).
+did not choose (findings 27 and 32). OD-12 keeps it off: it is not built, not even as an opt-in. Open asks are
+deduplicated, never counted (UC-07 E5).
 
 - **Hazards:** H-110
 

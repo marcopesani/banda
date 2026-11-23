@@ -52,11 +52,11 @@ else another chat names O
   note right of Store : row: observed · call [not same_chat] → observed (PaidByObservingChat)
 end
 
-Tool -> Chain : latest block timestamp t
+Tool -> Chain : latest block timestamp c
 Tool -> Store : authorization commit
 note right of Store
   nonce = keccak256("banda/x402" | wallet | O), committed before any signature (R-5, C14);
-  validAfter = t − 5 s; validBefore = t + min(maxTimeoutSeconds, 60 s) (C19);
+  validAfter = min(c, wall) − 5 s; validBefore = max(c, wall) + min(maxTimeoutSeconds, 60 s) (C19);
   reservation until validBefore passes or an event is seen (C11).
   row: authorizing · authorization_commit [rule != 'deny' and (rule == 'always' or approved) and fits] → authorized
 end note
