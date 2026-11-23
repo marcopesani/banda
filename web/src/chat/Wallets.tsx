@@ -55,7 +55,15 @@ export type Network = "Base" | "Base Sepolia";
 export type Token = "USDC" | "ETH";
 
 /** Why a wallet cannot pay: one reason from one list (UC-04 E2), the `signing` machine's states and C17's code. */
-export type OfflineReason = "creating" | "locked" | "key_missing" | "wrong_key" | "other_home" | "host_mode" | "code";
+export type OfflineReason =
+	| "creating"
+	| "locked"
+	| "key_missing"
+	| "wrong_key"
+	| "other_home"
+	| "host_mode"
+	| "coding_agent"
+	| "code";
 
 /** Whether the owner saved the key: confirmed by pasting it back, skipped, or not asked yet (the `wallet` machine). */
 export type Backup = "saved" | "skipped" | "unsaved";
@@ -122,6 +130,12 @@ export const OFFLINE: Record<OfflineReason, { icon: LucideIcon; title: string; b
 		icon: TerminalIcon,
 		title: "Commands on this computer can read wallet keys",
 		body: "Agents run commands on this computer as you, without a box. Wallets stay offline until banda runs with a box again.",
+	},
+	coding_agent: {
+		icon: TerminalIcon,
+		title: "A coding agent can read wallet keys",
+		body: "A coding agent on this computer runs commands without asking you first, and any command it runs can read a wallet's key. Wallets stay offline while it does: have it ask before each command to bring them back.",
+		action: "Coding agent settings",
 	},
 	code: {
 		icon: TriangleAlertIcon,
@@ -276,9 +290,9 @@ export function Segmented<T extends string>({
 export type RpcView = {
 	readonly network: Network;
 	readonly url: string;
-	/** banda's default, said as such. */
-	readonly public: boolean;
-	/** Whether it serves the log queries the incoming list is built from (mainnet.base.org does not). */
+	/** banda's default, a public endpoint, said as such; absent from the home's configuration until the owner changes it. */
+	readonly byDefault: boolean;
+	/** Whether it serves the log queries the incoming list is built from (banda's default does; mainnet.base.org does not). */
 	readonly logs: boolean;
 };
 
@@ -404,7 +418,7 @@ export function WalletsSettings({
 							detail={
 								<span className="flex flex-col">
 									<span className="font-code">{one.url}</span>
-									{one.public ? <span>banda's default, a public endpoint</span> : null}
+									{one.byDefault ? <span>banda's default, a public endpoint</span> : <span>Set by you</span>}
 									{one.logs ? null : (
 										<span className="flex items-center gap-1">
 											<TriangleAlertIcon className="size-3 shrink-0" />

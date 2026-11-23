@@ -48,10 +48,17 @@ const ANA_LOOKALIKE = "0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FC";
 const SHOP = "0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb";
 const WEATHER_PAYS = "0x8617E340B3D01FA5F11F306F4090FD50E238070D";
 const STRANGER = "0x27b1fdb04752bbc536007a920d24acb045561c26";
+const CODER = "0x52908400098527886E0F7030069857D2E4169EE7";
 
+/** banda's defaults, as the home's configuration holds them until the owner changes one. */
 const RPC: readonly RpcView[] = [
-	{ network: "Base", url: "https://mainnet.base.org", public: true, logs: false },
-	{ network: "Base Sepolia", url: "https://sepolia.base.org", public: true, logs: true },
+	{ network: "Base", url: "https://base-rpc.publicnode.com", byDefault: true, logs: true },
+	{ network: "Base Sepolia", url: "https://sepolia.base.org", byDefault: true, logs: true },
+];
+/** The owner set Base to an RPC that refuses log queries. */
+const RPC_NO_LOGS: readonly RpcView[] = [
+	{ network: "Base", url: "https://mainnet.base.org", byDefault: false, logs: false },
+	{ network: "Base Sepolia", url: "https://sepolia.base.org", byDefault: true, logs: true },
 ];
 
 const TRAVEL: WalletView = {
@@ -408,7 +415,7 @@ function WalletsSettingsSection() {
 					/>
 				</Screen>
 				<Screen
-					label="Each offline reason, one per wallet (signing: locked, key_missing, wrong_key, other_home; wallet: creating; C17: code); a balance the RPC didn't give"
+					label="Each offline reason, one per wallet (signing: locked, key_missing, wrong_key, other_home; a coding agent that doesn't ask, until the signer helper, OD-11; wallet: creating; C17: code); a balance the RPC didn't give"
 					tall
 				>
 					<SettingsWallets
@@ -419,6 +426,7 @@ function WalletsSettingsSection() {
 									{ ...CREDITS, name: "API credits", offline: "key_missing" },
 									{ ...TEST, name: "Groceries", network: "Base", offline: "wrong_key" },
 									{ ...TRAVEL, name: "Household", address: SHOP, offline: "other_home" },
+									{ ...CREDITS, name: "Side project", address: CODER, offline: "coding_agent" },
 									{ ...NEW_WALLET, name: "Gifts", address: ANA, offline: "creating" },
 									{ ...TRAVEL, name: "Old card", address: STRANGER, offline: "code" },
 									{ ...TRAVEL, name: "Savings", address: WEATHER_PAYS, usdc: null, eth: null },
@@ -441,6 +449,9 @@ function WalletsSettingsSection() {
 							/>
 						}
 					/>
+				</Screen>
+				<Screen label="Base set to an RPC that serves no logs (the owner's choice, in the home's configuration)" tall>
+					<SettingsWallets wallets={<WalletsSettings wallets={[TRAVEL]} rpc={RPC_NO_LOGS} />} />
 				</Screen>
 				<Screen label="No keychain this computer can reach (headless Linux)">
 					<SettingsWallets wallets={<WalletsSettings wallets={[]} keychain="none" rpc={RPC} />} />
@@ -610,11 +621,13 @@ function WalletNoticesSection() {
 						/>,
 					)}
 				</Screen>
-				{(["locked", "key_missing", "wrong_key", "other_home", "host_mode", "code"] as const).map((reason) => (
-					<Screen key={reason} label={`Offline: ${OFFLINE[reason].title} (${reason})`} tall>
-						{page({ ...TRAVEL, offline: reason }, <OfflineNotice reason={reason} />)}
-					</Screen>
-				))}
+				{(["locked", "key_missing", "wrong_key", "other_home", "host_mode", "coding_agent", "code"] as const).map(
+					(reason) => (
+						<Screen key={reason} label={`Offline: ${OFFLINE[reason].title} (${reason})`} tall>
+							{page({ ...TRAVEL, offline: reason }, <OfflineNotice reason={reason} />)}
+						</Screen>
+					),
+				)}
 				<Screen label="The network isn't answering: unknown, never zero" tall>
 					{page({ ...TRAVEL, usdc: null, eth: null, last: "182.40 USDC at 09:12" }, undefined)}
 				</Screen>
@@ -647,7 +660,7 @@ function WalletNoticesSection() {
 						<WalletNotice
 							icon={OFFLINE.creating.icon}
 							title="x402 payments paused"
-							body="This computer's clock is 3 minutes off the network's, so a payment could expire before it's used. Transfers still go."
+							body="This computer's clock is 3 minutes off the network's, and banda signs x402 payments only while the two agree within 2 minutes. Check this computer's date and time. Transfers still go."
 						/>,
 					)}
 				</Screen>
@@ -684,7 +697,7 @@ function WalletActivitySection() {
 				<Screen label="Reading">
 					<WalletPage wallet={TRAVEL} phone={phone} activity={<TransactionList rows={[]} loading />} />
 				</Screen>
-				<Screen label="An RPC that serves no logs: money in isn't listed" tall>
+				<Screen label="Base set to an RPC that serves no logs: money in isn't listed" tall>
 					<WalletPage
 						wallet={TRAVEL}
 						phone={phone}
