@@ -167,7 +167,7 @@ export function PaymentCard({
 					) : null}
 					<span className="flex flex-wrap items-center gap-2">
 						<Button>Pay</Button>
-						<Button variant="outline" className="h-auto min-h-9 py-1.5 whitespace-normal">
+						<Button variant="outline" className="h-auto min-h-9 max-w-full shrink py-1.5 text-left whitespace-normal">
 							{sharedWith === undefined
 								? `Always pay ${name}, up to what's in the wallet`
 								: `Always pay ${name} for ${agent} too`}
