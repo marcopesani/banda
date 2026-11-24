@@ -457,21 +457,21 @@ describe("Wait", () => {
 		s.changed.why = "the owner switched it off";
 	};
 
-	it.fails("an idempotent effect interrupted, then refused, says it may have run: approved once", async () => {
+	it("an idempotent effect interrupted, then refused, says it may have run: approved once", async () => {
 		expect(await results(await interrupted("publish", {}, switchedOff))).toEqual({
 			runs: 1,
 			results: ["publish was interrupted and may have partly run; not run again: the owner switched it off."],
 		});
 	});
 
-	it.fails("an idempotent effect interrupted, then refused, says it may have run: within a permission", async () => {
+	it("an idempotent effect interrupted, then refused, says it may have run: within a permission", async () => {
 		expect(await results(await interrupted("publish", { permission: { scope: "task" } }, switchedOff))).toEqual({
 			runs: 1,
 			results: ["publish was interrupted and may have partly run; not run again: the owner switched it off."],
 		});
 	});
 
-	it.fails("an idempotent effect interrupted, then listed under another connection tool, says it may have run", async () => {
+	it("an idempotent effect interrupted, then listed under another connection tool, says it may have run", async () => {
 		const changedTool = (s: ReturnType<typeof setup>) => {
 			s.changed.authority = { connection: "other", tool: "publish", version: "1", listing: 0 };
 		};
@@ -481,7 +481,7 @@ describe("Wait", () => {
 		});
 	});
 
-	it.fails("an unsafe effect interrupted, approved again, then refused at its start, says it may have run", async () => {
+	it("an unsafe effect interrupted, approved again, then refused at its start, says it may have run", async () => {
 		const run = await interrupted("deploy", {}, () => {});
 		const [again] = await until(async () => {
 			const waits = await openWaits(run.harness);
