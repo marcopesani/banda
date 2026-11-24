@@ -110,7 +110,7 @@ describe("the companion's picks", () => {
 			expect(() => validPicks({ face })).toThrow();
 	});
 
-	it.fails("a personality is the lead file's whole body, as any agent's: written, read back, replaced, the frontmatter kept", () => {
+	it("a personality is the lead file's whole body, as any agent's: written, read back, replaced, the frontmatter kept", () => {
 		const words = fc
 			.string({ minLength: 1, maxLength: 200, unit: "grapheme" })
 			.map(personalityWords)
@@ -119,7 +119,8 @@ describe("the companion's picks", () => {
 			fc.property(fc.string(), words, words, (body, first, second) => {
 				const text = `---\ndescription: d\n---\n${body}`;
 				const once = withPersonality(text, first);
-				expect(once).toBe(`---\ndescription: d\n---\n${first}\n`);
+				// a body that is the words already stays byte for byte, as the next test says
+				expect(once).toBe(body.trim() === first ? text : `---\ndescription: d\n---\n${first}\n`);
 				expect(personalityOf(once)).toBe(first);
 				const twice = withPersonality(once, second);
 				expect(personalityOf(twice)).toBe(second);
